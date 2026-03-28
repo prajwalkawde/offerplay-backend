@@ -1,0 +1,920 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum ContestType {
+  ONE_V_ONE
+  MEGA
+}
+
+enum ContestStatus {
+  DRAFT
+  REGISTRATION_OPEN
+  GAMEPLAY_ACTIVE
+  SCORING
+  COMPLETED
+  CANCELLED
+}
+
+enum PrizeType {
+  COINS
+  DIGITAL_GIFT
+  PHYSICAL_GIFT
+}
+
+enum ClaimStatus {
+  PENDING
+  PROCESSING
+  DISPATCHED
+  DELIVERED
+}
+
+enum TransactionType {
+  EARN_TASK
+  EARN_SURVEY
+  EARN_OFFERWALL
+  EARN_REFERRAL
+  EARN_BONUS
+  EARN_DAILY
+  EARN_STREAK
+  EARN_CONTEST_WIN
+  EARN_IPL_WIN
+  EARN_TICKET
+  QUEST_REWARD
+  ADJOE_BONUS
+  DAILY_QUEST_BONUS
+  REFERRAL_MILESTONE
+  SPEND_CONTEST_ENTRY
+  SPEND_IPL_ENTRY
+  SPEND_TICKET
+  TICKET_EXPIRED
+  EARN_COIN_CONTEST
+  WIN_PRIZE
+  REDEEM_UPI
+  REDEEM_PAYPAL
+  REDEEM_GIFT_CARD
+  REDEEM_PAYTM
+  REFUND
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+  CUSTOM_OFFER
+}
+
+model User {
+  id             String         @id @default(cuid())
+  name           String?
+  phone          String?        @unique
+  email          String?        @unique
+  googleId       String?        @unique
+  coinBalance    Int            @default(0)
+  ticketBalance  Int            @default(0)
+  referralCode   String         @unique
+  referredBy     String?
+  referralCount  Int            @default(0)
+  streakCount    Int            @default(0)
+  lastClaimDate  DateTime?
+  fcmToken           String?
+  oneSignalPlayerId  String?
+  language       String         @default("en")
+  country        String?        @default("IN")
+  status         UserStatus     @default(ACTIVE)
+  deviceId       String?
+  avatar            String?
+  dateOfBirth       DateTime?
+  city              String?
+  state             String?
+  favouriteTeam     String?
+  isPhoneVerified   Boolean       @default(false)
+  isEmailVerified   Boolean       @default(false)
+  isProfileComplete Boolean       @default(false)
+  lastLoginAt       DateTime?
+  lastActiveAt      DateTime?
+  appVersion        String?
+  deviceType        String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  transactions   Transaction[]
+  participants   Participant[]
+  claims         PrizeClaim[]
+  referrals      Referral[]     @relation("referrer")
+  referred       Referral[]     @relation("referred")
+  iplPredictions      IplPrediction[]
+  iplContestEntries   IplContestEntry[]
+  iplPrizeClaims      IplPrizeClaim[]
+  notifications       Notification[]
+  redemptionRequests  RedemptionRequest[]
+  userStreak          UserStreak?
+  ticketTransactions  TicketTransaction[]
+  milestoneClaims     ReferralMilestoneClaim[]
+  referralLinks       ReferralLink[]
+  questCompletions      QuestCompletion[]
+  adjoeSessions         AdjoeSession[]
+  dailyQuestStreak      DailyQuestStreak?
+  customOfferCompletions CustomOfferCompletion[]
+  activityProfile        UserActivityProfile?
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  userId      String
+  type        TransactionType
+  amount      Int
+  refId       String?
+  description String?
+  status      String          @default("completed")
+  createdAt   DateTime        @default(now())
+  user        User            @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Game {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  icon        String?
+  gameUrl     String?
+  gameHtml    String?
+  category    String    @default("general")
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  contests    Contest[]
+}
+
+model Contest {
+  id                String        @id @default(cuid())
+  gameId            String
+  name              String
+  type              ContestType
+  entryFee          Int
+  maxPlayers        Int
+  minPlayers        Int           @default(2)
+  currentPlayers    Int           @default(0)
+  regStartTime      DateTime
+  regEndTime        DateTime
+  gameStartTime     DateTime
+  gameEndTime       DateTime
+  prizeType         PrizeType     @default(COINS)
+  totalPrizePool    Int           @default(0)
+  prizeDistribution Json
+  customFields      Json?
+  status            ContestStatus @default(DRAFT)
+  createdAt         DateTime      @default(now())
+  game              Game          @relation(fields: [gameId], references: [id])
+  participants      Participant[]
+  claims            PrizeClaim[]
+}
+
+model Participant {
+  id            String    @id @default(cuid())
+  contestId     String
+  userId        String
+  score         Int       @default(0)
+  rank          Int?
+  coinsEscrowed Int       @default(0)
+  playToken     String?   @unique
+  joinedAt      DateTime  @default(now())
+  lastScoreAt   DateTime?
+  contest       Contest   @relation(fields: [contestId], references: [id])
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@unique([contestId, userId])
+}
+
+model PrizeClaim {
+  id           String      @id @default(cuid())
+  contestId    String
+  userId       String
+  claimData    Json?
+  status       ClaimStatus @default(PENDING)
+  trackingInfo String?
+  giftCode     String?
+  expiresAt    DateTime
+  claimedAt    DateTime    @default(now())
+  contest      Contest     @relation(fields: [contestId], references: [id])
+  user         User        @relation(fields: [userId], references: [id])
+}
+
+model Referral {
+  id           String               @id @default(cuid())
+  referrerId   String
+  referredId   String               @unique
+  coinsEarned  Int                  @default(0)
+  totalEarned  Int                  @default(0)
+  status       String               @default("active")
+  lastActiveAt DateTime?
+  createdAt    DateTime             @default(now())
+  referrer     User                 @relation("referrer", fields: [referrerId], references: [id])
+  referred     User                 @relation("referred", fields: [referredId], references: [id])
+  commissions  ReferralCommission[]
+}
+
+model ReferralCommission {
+  id           String    @id @default(cuid())
+  referralId   String
+  referrerId   String
+  referredId   String
+  type         String
+  amount       Int
+  percentage   Float     @default(0)
+  sourceAmount Int       @default(0)
+  description  String?
+  status       String    @default("pending")
+  creditedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  referral     Referral  @relation(fields: [referralId], references: [id])
+}
+
+model ReferralSettings {
+  id                      String   @id @default(cuid())
+  signupBonus             Int      @default(100)
+  referrerSignupBonus     Int      @default(50)
+  taskCommissionPct       Float    @default(10)
+  surveyCommissionPct     Float    @default(10)
+  offerwallCommissionPct  Float    @default(10)
+  contestWinCommissionPct Float    @default(5)
+  isLifetimeCommission    Boolean  @default(true)
+  maxReferrals            Int?
+  minWithdrawForBonus     Int      @default(0)
+  isActive                Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+  updatedBy               String?
+}
+
+model OfferwallLog {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  offerId      String   @unique
+  coinsAwarded Int
+  rawData      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([offerId])
+}
+
+model IplMatch {
+  id                    String          @id @default(cuid())
+  matchNumber           Int
+  team1                 String
+  team2                 String
+  matchDate             DateTime
+  matchStartTime        DateTime?
+  registrationCloseTime DateTime?
+  resultDeclareTime     DateTime?
+  venue                 String?
+  result                String?
+  winnerId              String?
+  team1Score            String?
+  team2Score            String?
+  manOfMatch            String?
+  status                String          @default("upcoming")
+  contestStatus         String          @default("draft")
+  cricApiId             String?         @unique
+  youtubeUrl            String?
+  entryFee              Int             @default(50)
+  maxPlayers            Int             @default(1000)
+  minPlayers            Int             @default(10)
+  regCloseTime          DateTime?
+  prizeDistribution     Json?
+  createdAt             DateTime        @default(now())
+  predictions           IplPrediction[]
+  questions             IplQuestion[]
+  contests              IplContest[]
+}
+
+model IplContest {
+  id                String             @id @default(cuid())
+  matchId           String
+  name              String
+  contestType       String             @default("COINS")
+  battleType        String             @default("MEGA")
+  maxPlayers        Int                @default(1000)
+  minPlayers        Int                @default(2)
+  currentPlayers    Int                @default(0)
+  entryFee          Int                @default(50)
+  isFree            Boolean            @default(false)
+  maxEntriesPerUser Int                @default(3)
+  prizeType         String             @default("COINS")
+  prizeCoins        Int?
+  prizeGiftName     String?
+  prizeGiftImage    String?
+  prizeGiftValue    Int?
+  rewardImageUrl    String?
+  rewardImageType   String?
+  questionCount     Int                @default(10)
+  youtubeUrl        String?
+  prizeTiers        Json               @default("[]")
+  sponsorId         String?
+  sponsorName       String?
+  sponsorLogo       String?
+  customFields      Json?
+  prizeDistribution Json               @default("{}")
+  winnersConfig     Json               @default("[]")
+  ticketCost           Int                @default(1)
+  entryType            String             @default("TICKET")
+  questionsAvailableAt DateTime?
+  questionsLockAt      DateTime?
+  prizeTiersConfig     Json               @default("[]")
+  regCloseTime      DateTime?
+  status            String             @default("draft")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @default(now()) @updatedAt
+  match             IplMatch           @relation(fields: [matchId], references: [id])
+  entries           IplContestEntry[]
+  prizeClaims       IplPrizeClaim[]
+}
+
+model IplContestEntry {
+  id            String     @id @default(cuid())
+  contestId     String
+  userId        String
+  matchId       String?
+  coinsDeducted Int        @default(0)
+  totalPoints   Int        @default(0)
+  rank          Int?
+  coinsWon      Int        @default(0)
+  status        String     @default("active")
+  joinedAt      DateTime   @default(now())
+  contest       IplContest @relation(fields: [contestId], references: [id])
+  user          User       @relation(fields: [userId], references: [id])
+
+  @@unique([contestId, userId])
+}
+
+model IplQuestion {
+  id              String          @id @default(cuid())
+  matchId         String
+  question        String
+  options         Json
+  correctAnswer   String?
+  points          Int             @default(100)
+  category        String          @default("prediction")
+  difficulty      String          @default("medium")
+  status          String          @default("active")
+  isAutoGenerated Boolean         @default(false)
+  generatedBy     String?         @default("admin")
+  approved        Boolean         @default(false)
+  match           IplMatch        @relation(fields: [matchId], references: [id])
+  predictions     IplPrediction[]
+}
+
+model IplPrediction {
+  id           String      @id @default(cuid())
+  userId       String
+  matchId      String
+  questionId   String
+  answer       String
+  isCorrect    Boolean?
+  pointsEarned Int         @default(0)
+  createdAt    DateTime    @default(now())
+  user         User        @relation(fields: [userId], references: [id])
+  match        IplMatch    @relation(fields: [matchId], references: [id])
+  question     IplQuestion @relation(fields: [questionId], references: [id])
+
+  @@unique([userId, questionId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  type      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model OfferQualityScore {
+  id                 String   @id @default(cuid())
+  provider           String
+  offerId            String
+  offerName          String?
+  qualityScore       Float    @default(0)
+  totalClicks        Int      @default(0)
+  totalCompletions   Int      @default(0)
+  completionRate     Float    @default(0)
+  avgRating          Float    @default(0)
+  ratingCount        Int      @default(0)
+  missingCoinReports Int      @default(0)
+  isBlacklisted      Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  blacklistReason    String?
+  lastSeenAt         DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([provider, offerId])
+}
+
+model OfferRating {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  String
+  offerId   String
+  rating    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, offerId])
+}
+
+model OfferProgress {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  offerId      String
+  offerName    String?
+  offerCoins   Int      @default(0)
+  tasksStarted Int      @default(0)
+  totalTasks   Int      @default(1)
+  isCompleted  Boolean  @default(false)
+  lastTaskAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, offerId])
+}
+
+model PostbackRetryQueue {
+  id          String    @id @default(cuid())
+  provider    String
+  params      Json
+  reason      String
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  nextRetry   DateTime
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model UserStreak {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  currentStreak        Int       @default(0)
+  longestStreak        Int       @default(0)
+  lastActive           String?
+  multiplier           Float     @default(1.0)
+  lastClaimDate        DateTime?
+  totalDaysClaimed     Int       @default(0)
+  totalCoinsFromStreak Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id])
+}
+
+model DailyStreakConfig {
+  id         String   @id @default(cuid())
+  day        Int      @unique
+  coins      Int
+  tickets    Int      @default(0)
+  bonusCoins Int      @default(0)
+  label      String
+  icon       String   @default("🪙")
+  isSpecial  Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+}
+
+model OfferClick {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  String
+  offerId   String
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+}
+
+model CoinConversionRate {
+  id             String   @id @default(cuid())
+  countryCode    String   @unique
+  countryName    String
+  currencyCode   String
+  currencySymbol String
+  coinsPerUnit   Float    @default(100)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model AppSettings {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  label       String   @default("")
+  category    String   @default("GENERAL")
+  description String?
+  isSecret    Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+}
+
+model PrizeInventory {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  imageUrl     String?
+  category     String   @default("gadget")
+  marketValue  Int
+  purchaseLink String?
+  provider     String   @default("amazon")
+  providerLogo String?
+  stock        Int      @default(1)
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ContestSponsor {
+  id         String   @id @default(cuid())
+  name       String
+  logoUrl    String?
+  websiteUrl String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model IplPrizeClaim {
+  id           String     @id @default(cuid())
+  userId       String
+  iplContestId String
+  rank         Int
+  prizeType    String     @default("gift")
+  prizeName    String?
+  prizeValue   Int        @default(0)
+  prizeImageUrl String?
+  inventoryId  String?
+  status       String     @default("pending")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  user         User       @relation(fields: [userId], references: [id])
+  contest      IplContest @relation(fields: [iplContestId], references: [id])
+}
+
+model RedemptionRequest {
+  id               String    @id @default(cuid())
+  userId           String
+  type             String
+  status           String    @default("pending")
+  coinsRedeemed    Int
+  amountInr        Float
+
+  upiId            String?
+  accountNumber    String?
+  ifscCode         String?
+  accountName      String?
+  bankName         String?
+
+  productId        String?
+  productName      String?
+  denominationId   String?
+  voucherCode      String?
+  voucherLink      String?
+
+  mobileNumber     String?
+  operator         String?
+
+  gameId           String?
+  gamePlayerId     String?
+
+  cashfreeOrderId  String?
+  cashfreeRefId    String?
+  xoxodayOrderId   String?
+  xoxodayVoucherId String?
+
+  failureReason      String?
+  processedAt        DateTime?
+  redeemUrl          String?
+  customFieldValues  Json     @default("{}")
+  redemptionCode     String?
+  adminNote          String?
+  processedByAdmin   String?
+  userRating         Int?
+  userFeedback       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model TicketTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      Int
+  type        String
+  refId       String?
+  description String?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ReferralMilestone {
+  id                String                   @id @default(cuid())
+  title             String
+  description       String?
+  requiredReferrals Int
+  rewardType        String                   @default("COINS")
+  rewardCoins       Int?
+  rewardTickets     Int?
+  inventoryItemId   String?
+  itemName          String?
+  itemImage         String?
+  itemValue         Int?
+  badgeEmoji        String                   @default("🎁")
+  isActive          Boolean                  @default(true)
+  sortOrder         Int                      @default(0)
+  createdAt         DateTime                 @default(now())
+  claims            ReferralMilestoneClaim[]
+}
+
+model ReferralMilestoneClaim {
+  id              String             @id @default(cuid())
+  userId          String
+  milestoneId     String
+  status          String             @default("pending")
+  claimedAt       DateTime           @default(now())
+  completedAt     DateTime?
+  deliveryAddress String?
+  deliveryEmail   String?
+  adminNote       String?
+  user            User               @relation(fields: [userId], references: [id])
+  milestone       ReferralMilestone  @relation(fields: [milestoneId], references: [id])
+
+  @@unique([userId, milestoneId])
+}
+
+model ReferralLink {
+  id          String   @id @default(cuid())
+  userId      String
+  shortCode   String   @unique
+  clicks      Int      @default(0)
+  installs    Int      @default(0)
+  conversions Int      @default(0)
+  utmSource   String?
+  utmMedium   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model Quest {
+  id               String   @id @default(cuid())
+  title            String
+  description      String
+  questType        String
+  category         String
+  icon             String   @default("🎯")
+  requirementType  String
+  requirementCount Int
+  rewardTickets    Int      @default(0)
+  rewardCoins      Int      @default(0)
+  rewardBonusXP    Int      @default(0)
+  resetType        String   @default("DAILY")
+  isActive         Boolean  @default(true)
+  isFeatured       Boolean  @default(false)
+  sortOrder        Int      @default(0)
+  difficulty       String   @default("EASY")
+  isPartOfDailySet Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  completions      QuestCompletion[]
+}
+
+model QuestCompletion {
+  id          String    @id @default(cuid())
+  userId      String
+  questId     String
+  progress    Int       @default(0)
+  isCompleted Boolean   @default(false)
+  isClaimed   Boolean   @default(false)
+  completedAt DateTime?
+  claimedAt   DateTime?
+  resetAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id])
+  quest       Quest     @relation(fields: [questId], references: [id])
+
+  @@unique([userId, questId])
+}
+
+model AdjoeSession {
+  id            String    @id @default(cuid())
+  userId        String
+  sessionId     String    @unique
+  gameId        String?
+  gameName      String?
+  minutesPlayed Int       @default(0)
+  ticketsEarned Int       @default(0)
+  coinsEarned   Int       @default(0)
+  status        String    @default("active")
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  user          User      @relation(fields: [userId], references: [id])
+}
+
+model DailyQuestStreak {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  currentStreak      Int       @default(0)
+  longestStreak      Int       @default(0)
+  lastCompletedDate  DateTime?
+  totalDaysCompleted Int       @default(0)
+  user               User      @relation(fields: [userId], references: [id])
+}
+
+model RedeemPackage {
+  id                 String   @id @default(cuid())
+  name               String
+  type               String
+  coinsRequired      Int
+  amountInr          Float
+  countryCode        String   @default("IN")
+  isActive           Boolean  @default(true)
+  minCoins           Int      @default(500)
+  icon               String?
+  imageUrl           String?
+  description        String?
+  provider           String   @default("cashfree")
+  paymentMode        String   @default("auto")
+  xoxodayProductId   String?
+  xoxodayDenomId     String?
+  redeemUrl          String?
+  planData           String?
+  planValidity       String?
+  planTalktime       String?
+  planSms            String?
+  planExtras         String?
+  operator           String?
+  gameName           String?
+  gameCredits        String?
+  isPopular          Boolean  @default(false)
+  isFeatured         Boolean  @default(false)
+  rewardType         String   @default("ALL")
+  currency           String   @default("INR")
+  currencySymbol     String   @default("₹")
+  sortOrder          Int      @default(0)
+  customFields       Json     @default("[]")
+  availableIn        Json     @default("[\"IN\"]")
+  isDefault          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// ─── Custom Offer Stage System ────────────────────────────────────────────────
+
+model CustomOffer {
+  id                   String    @id @default(cuid())
+  title                String
+  description          String
+  partnerName          String
+  partnerUrl           String?
+  logoUrl              String?
+  bannerUrl            String?
+  badgeText            String?
+  badgeColor           String?   @default("#FF6B35")
+  isActive             Boolean   @default(true)
+  isFeatured           Boolean   @default(false)
+  sortOrder            Int       @default(0)
+  maxCompletionsPerUser Int?
+  maxTotalCompletions  Int?
+  currentCompletions   Int       @default(0)
+  minAccountAgeDays    Int       @default(0)
+  availableFrom        DateTime?
+  availableTo          DateTime?
+  secretKey            String    @default("")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  stages               CustomOfferStage[]
+  completions          CustomOfferCompletion[]
+}
+
+model CustomOfferStage {
+  id                String   @id @default(cuid())
+  offerId           String
+  stageNumber       Int
+  title             String
+  description       String?
+  iconEmoji         String   @default("🎯")
+  unlocksAfterStage Int?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  offer             CustomOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  tasks             CustomOfferTask[]
+  completions       CustomOfferStageCompletion[]
+}
+
+model CustomOfferTask {
+  id             String   @id @default(cuid())
+  stageId        String
+  taskNumber     Int
+  title          String
+  description    String
+  taskType       String
+  requiredAmount Float?
+  currency       String?  @default("COINS")
+  rewardTickets  Int      @default(0)
+  rewardCoins    Int      @default(0)
+  verifyMethod   String   @default("POSTBACK")
+  actionLabel    String   @default("Complete Task")
+  actionUrl      String?
+  isActive       Boolean  @default(true)
+  taskOrder      Int      @default(0)
+  stage          CustomOfferStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  completions    CustomOfferTaskCompletion[]
+}
+
+model CustomOfferCompletion {
+  id               String    @id @default(cuid())
+  userId           String
+  offerId          String
+  status           String    @default("in_progress")
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+  user             User      @relation(fields: [userId], references: [id])
+  offer            CustomOffer @relation(fields: [offerId], references: [id])
+  stageCompletions CustomOfferStageCompletion[]
+  taskCompletions  CustomOfferTaskCompletion[]
+
+  @@unique([userId, offerId])
+}
+
+model CustomOfferStageCompletion {
+  id          String   @id @default(cuid())
+  userId      String
+  offerId     String
+  stageId     String
+  completedAt DateTime @default(now())
+  completion  CustomOfferCompletion @relation(fields: [userId, offerId], references: [userId, offerId])
+  stage       CustomOfferStage      @relation(fields: [stageId], references: [id])
+
+  @@unique([userId, stageId])
+}
+
+model CustomOfferTaskCompletion {
+  id              String    @id @default(cuid())
+  userId          String
+  offerId         String
+  stageId         String
+  taskId          String
+  submittedAmount Float?
+  submittedData   String?
+  ticketsEarned   Int       @default(0)
+  coinsEarned     Int       @default(0)
+  status          String    @default("pending")
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  postbackRef     String?
+  createdAt       DateTime  @default(now())
+  completion      CustomOfferCompletion @relation(fields: [userId, offerId], references: [userId, offerId])
+  task            CustomOfferTask       @relation(fields: [taskId], references: [id])
+
+  @@unique([userId, taskId])
+}
+
+model UserActivityProfile {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  gamingOfferCount     Int       @default(0)
+  financeOfferCount    Int       @default(0)
+  shoppingOfferCount   Int       @default(0)
+  surveyCount          Int       @default(0)
+  totalOffersStarted   Int       @default(0)
+  totalOffersCompleted Int       @default(0)
+  completionRate       Float     @default(0)
+  preferredHour        Int?
+  avgDifficultyCompleted Float   @default(1)
+  lastActiveAt         DateTime?
+  lastOfferCategory    String?
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id])
+}

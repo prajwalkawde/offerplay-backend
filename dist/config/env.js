@@ -1,0 +1,42 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.env = void 0;
+const dotenv_1 = __importDefault(require("dotenv"));
+dotenv_1.default.config();
+exports.env = {
+    PORT: parseInt(process.env.PORT || '3000', 10),
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    DATABASE_URL: process.env.DATABASE_URL || '',
+    REDIS_URL: process.env.REDIS_URL || 'redis://localhost:6379',
+    JWT_SECRET: process.env.JWT_SECRET || 'fallback-secret',
+    JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '30d',
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+    FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
+    FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || '',
+    PUBSCALE_APP_ID: process.env.PUBSCALE_APP_ID || '',
+    PUBSCALE_PUB_KEY: process.env.PUBSCALE_PUB_KEY || '',
+    PUBSCALE_SECRET: process.env.PUBSCALE_SECRET || '',
+    TOROX_API_KEY: process.env.TOROX_API_KEY || '',
+    TOROX_PUB_ID: process.env.TOROX_PUB_ID || '',
+    TOROX_SECRET: process.env.TOROX_SECRET || '',
+    AYET_ADSLOT_ID: process.env.AYET_ADSLOT_ID || '',
+    AYETSTUDIO_SECRET: process.env.AYETSTUDIO_SECRET || '',
+    CASHFREE_APP_ID: process.env.CASHFREE_APP_ID || '',
+    CASHFREE_SECRET_KEY: process.env.CASHFREE_SECRET_KEY || '',
+    CASHFREE_ENV: process.env.CASHFREE_ENV || 'TEST',
+    XOXODAY_API_KEY: process.env.XOXODAY_API_KEY || '',
+    XOXODAY_API_SECRET: process.env.XOXODAY_API_SECRET || '',
+    XOXODAY_BASE_URL: process.env.XOXODAY_BASE_URL || 'https://api.xoxoday.com/api/v1',
+    FCM_SERVER_KEY: process.env.FCM_SERVER_KEY || '',
+    CRICAPI_KEY: process.env.CRICAPI_KEY || '',
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+    RAPIDAPI_KEY: process.env.RAPIDAPI_KEY || '',
+    RAPIDAPI_HOST: process.env.RAPIDAPI_HOST || '',
+    CPX_APP_ID: process.env.CPX_APP_ID || '',
+    CPX_SECURE_HASH: process.env.CPX_SECURE_HASH || '',
+    ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID || '',
+    ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY || '',
+};
