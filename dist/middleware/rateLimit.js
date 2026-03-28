@@ -30,12 +30,26 @@ function rateLimit(options) {
         }
     };
 }
-exports.otpRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 3,
-    keyPrefix: 'otp',
-    message: 'Too many OTP requests. Try again after 1 hour.',
-});
+// Test phone numbers — bypass all rate limits
+const TEST_PHONES = ['8381071568'];
+function isTestPhone(req) {
+    const phone = req.body?.phone || req.query?.phone || '';
+    return TEST_PHONES.some(p => String(phone).includes(p));
+}
+const otpRateLimit = (req, res, next) => {
+    // Skip rate limit entirely for test phones
+    if (isTestPhone(req)) {
+        next();
+        return;
+    }
+    rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 min
+        max: 100, // generous for dev
+        keyPrefix: 'otp',
+        message: 'Too many OTP requests. Please wait a moment.',
+    })(req, res, next);
+};
+exports.otpRateLimit = otpRateLimit;
 exports.apiRateLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,

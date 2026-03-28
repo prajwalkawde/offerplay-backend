@@ -64,6 +64,13 @@ const postback_1 = __importDefault(require("./routes/postback"));
 const ipl_1 = __importDefault(require("./routes/ipl"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const app_1 = __importDefault(require("./routes/app"));
+const home_1 = __importDefault(require("./routes/home"));
+const referral_1 = __importDefault(require("./routes/referral"));
+const quests_1 = __importDefault(require("./routes/quests"));
+const customOffers_1 = __importDefault(require("./routes/customOffers"));
+const offerwall_1 = __importDefault(require("./routes/offerwall"));
+const adjoeController_1 = require("./controllers/adjoeController");
+const deepLinkController_1 = require("./controllers/deepLinkController");
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 // ─── Socket.io ────────────────────────────────────────────────────────────────
@@ -97,6 +104,13 @@ app.use('/api/postback', postback_1.default);
 app.use('/api/ipl', ipl_1.default);
 app.use('/api/admin', admin_1.default);
 app.use('/api/app', app_1.default);
+app.use('/api/home', home_1.default);
+app.use('/api/referral', referral_1.default);
+app.use('/api/quests', quests_1.default);
+app.use('/api/custom-offers', customOffers_1.default);
+app.use('/api/offerwall', offerwall_1.default);
+app.get('/api/adjoe/postback', adjoeController_1.handleAdjoePostback);
+app.get('/r/:code', deepLinkController_1.handleReferralRedirect);
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {
     (0, response_1.error)(res, 'Route not found', 404);

@@ -4399,3 +4399,13 @@
 {"level":"info","message":"Serving cached offer feed","timestamp":"2026-03-28 12:18:47","userId":"cmmx0yt53002r8amloigo09v5"}
 {"level":"info","message":"Checking IPL match results...","timestamp":"2026-03-28 13:00:00"}
 {"level":"info","message":"Checking IPL match results...","timestamp":"2026-03-28 14:00:00"}
+{"level":"info","message":"Database connected successfully","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"Firebase Admin initialized","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"BullMQ workers started","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"IPL quiz generation job scheduled (daily at 08:00)","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"IPL result verification job scheduled (hourly)","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"Daily bonus reminder jobs scheduled (09:00 and 19:00)","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"Question notification job scheduled (every minute)","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"IPL quiz jobs scheduled","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"Postback retry queue scheduler started (every 5 min)","timestamp":"2026-03-28 16:02:35"}
+{"level":"info","message":"OfferPlay backend running on port 3000 [development]","timestamp":"2026-03-28 16:02:35"}

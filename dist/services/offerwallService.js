@@ -10,6 +10,7 @@ const client_1 = require("@prisma/client");
 const crypto_1 = require("../utils/crypto");
 const env_1 = require("../config/env");
 const logger_1 = require("../utils/logger");
+const questController_1 = require("../controllers/questController");
 async function verifyPubscaleSignature(query, sig) {
     // Pubscale sends HMAC-SHA256 of sorted query params
     const sorted = Object.keys(query)
@@ -56,10 +57,28 @@ async function processPostback(payload) {
         }),
     ]);
     await (0, coinService_1.creditCoins)(payload.userId, payload.coins, client_1.TransactionType.EARN_OFFERWALL, payload.offerId, `${payload.provider} offer completed`);
+    // Credit quest progress for offer completion
+    await (0, questController_1.updateQuestProgress)(payload.userId, 'COMPLETE_OFFERS', 1);
+    // Bonus: 1 free ticket per completed offer
+    const bonusTickets = 1;
+    await database_1.prisma.user.update({
+        where: { id: payload.userId },
+        data: { ticketBalance: { increment: bonusTickets } },
+    });
+    await database_1.prisma.ticketTransaction.create({
+        data: {
+            userId: payload.userId,
+            amount: bonusTickets,
+            type: 'EARN_TICKET',
+            refId: payload.offerId,
+            description: `Offer bonus ticket: ${payload.provider}`,
+        },
+    }).catch(() => { });
     logger_1.logger.info('Postback processed', {
         userId: payload.userId,
         provider: payload.provider,
         coins: payload.coins,
+        bonusTickets,
     });
     return { duplicate: false };
 }

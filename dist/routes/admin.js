@@ -19,6 +19,27 @@ const loginSchema = zod_1.z.object({ email: zod_1.z.string().email(), password: 
 // Public admin login (both paths for compatibility)
 router.post('/auth/login', (0, validate_1.validate)(loginSchema), adminController_1.adminLogin);
 router.post('/login', (0, validate_1.validate)(loginSchema), adminController_1.adminLogin);
+// ─── Public: policy content for mobile app ────────────────────────────────────
+router.get('/settings/policy/:type', async (req, res) => {
+    try {
+        const typeMap = {
+            TERMS: 'POLICY_TERMS', PRIVACY: 'POLICY_PRIVACY', PAYMENT: 'POLICY_PAYMENT',
+        };
+        const key = typeMap[req.params.type];
+        if (!key)
+            return (0, response_1.error)(res, 'Not found', 404);
+        const setting = await database_1.prisma.appSettings.findUnique({ where: { key } });
+        return (0, response_1.success)(res, {
+            type: req.params.type,
+            title: setting?.label || 'Policy',
+            content: setting?.value || 'Coming soon...',
+            updatedAt: setting?.updatedAt,
+        });
+    }
+    catch {
+        return (0, response_1.error)(res, 'Failed', 500);
+    }
+});
 // All routes below require admin JWT
 router.use(adminAuth_1.adminAuthMiddleware);
 router.get('/dashboard', adminController_1.getDashboard);
@@ -48,6 +69,7 @@ router.put('/claims/:id', adminController_1.updateClaim);
 router.get('/ipl/matches', iplAdminController_1.getAdminIPLMatches);
 router.post('/ipl/matches', iplAdminController_1.createAdminIPLMatch);
 router.put('/ipl/matches/:id', iplAdminController_1.updateIPLMatch);
+router.delete('/ipl/matches/:id', iplAdminController_1.deleteAdminIPLMatch);
 router.post('/ipl/matches/:id/result', adminController_1.setMatchResult);
 router.post('/ipl/matches/process-results', iplAdminController_1.processIPLResults);
 // IPL — Questions
@@ -122,12 +144,15 @@ router.put('/coin-rates/:id', coinRateController_1.updateCoinRate);
 router.get('/settings', settingsController_1.getSettings);
 router.put('/settings/:key', settingsController_1.updateSetting);
 router.post('/settings/bulk', settingsController_1.updateMultipleSettings);
+router.put('/settings/bulk/update', settingsController_1.updateBulkPut);
 // ─── Redemptions ──────────────────────────────────────────────────────────────
 router.get('/redemptions', redeemController_1.getAdminRedemptions);
 router.get('/redeem-packages', redeemController_1.getAdminPackages);
 router.post('/redeem-packages', redeemController_1.upsertRedeemPackage);
 router.put('/redeem-packages/:id', redeemController_1.upsertRedeemPackage);
+router.delete('/redeem-packages/:id', redeemController_1.deleteRedeemPackage);
 router.post('/redemptions/:id/process', redeemController_1.manualProcessRedemption);
+router.put('/redemptions/:id/status', redeemController_1.updateRedemptionStatus);
 // ─── Test / Dev Helpers ───────────────────────────────────────────────────────
 router.post('/test/reset-daily-bonus/:userId', async (req, res) => {
     try {

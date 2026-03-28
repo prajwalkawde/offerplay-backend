@@ -14,7 +14,9 @@ function getRedisClient() {
         const isTls = env_1.env.REDIS_URL.startsWith('rediss://');
         redisClient = new ioredis_1.default(env_1.env.REDIS_URL, {
             retryStrategy(times) {
-                const delay = Math.min(times * 50, 2000);
+                if (times > 20)
+                    return null; // stop retrying after 20 attempts
+                const delay = Math.min(Math.pow(2, times) * 100, 30000); // exponential backoff, max 30s
                 return delay;
             },
             maxRetriesPerRequest: 3,

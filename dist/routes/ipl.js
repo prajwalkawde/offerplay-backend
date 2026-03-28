@@ -39,15 +39,48 @@ router.get('/matches/:matchId/contests', auth_1.optionalAuthMiddleware, async (r
         orderBy: [{ battleType: 'asc' }],
     });
     const result = contests
-        .map(c => ({
-        ...c,
-        currentPlayers: c._count.entries,
-        spotsLeft: Math.max(0, c.maxPlayers - c._count.entries),
-        isFull: c._count.entries >= c.maxPlayers,
-        hasJoined: userId ? c.entries.length > 0 : false,
-        _count: undefined,
-        entries: undefined,
-    }))
+        .map(c => {
+        const parsedTiersConfig = typeof c.prizeTiersConfig === 'string'
+            ? JSON.parse(c.prizeTiersConfig)
+            : c.prizeTiersConfig;
+        const rawTiers = Array.isArray(parsedTiersConfig) ? parsedTiersConfig : [];
+        const parsedWinnersConfig = typeof c.winnersConfig === 'string'
+            ? JSON.parse(c.winnersConfig)
+            : c.winnersConfig;
+        const rawWinners = Array.isArray(parsedWinnersConfig) ? parsedWinnersConfig : [];
+        const allTiers = rawTiers.length > 0 ? rawTiers : rawWinners.map((w) => ({
+            rankFrom: w.rankFrom, rankTo: w.rankTo, rank: w.rankFrom,
+            type: 'COINS', coins: w.coins, label: w.label,
+        }));
+        return {
+            id: c.id,
+            name: c.name,
+            battleType: c.battleType,
+            entryType: c.entryType || 'FREE',
+            entryFee: c.entryFee,
+            ticketCost: c.ticketCost,
+            isFree: c.isFree,
+            maxPlayers: c.maxPlayers,
+            currentPlayers: c._count.entries,
+            spotsLeft: Math.max(0, c.maxPlayers - c._count.entries),
+            isFull: c._count.entries >= c.maxPlayers,
+            prizeType: c.prizeType,
+            prizeCoins: c.prizeCoins,
+            prizeGiftName: c.prizeGiftName,
+            rewardImageUrl: c.rewardImageUrl,
+            prizeTiersConfig: allTiers,
+            rank1Prize: (0, iplAppController_1.getRank1Prize)({ prizeTiersConfig: allTiers }),
+            totalPrizePool: (0, iplAppController_1.calcTotalPrizePool)(allTiers),
+            youtubeUrl: c.youtubeUrl,
+            questionCount: c.questionCount,
+            questionsAvailableAt: c.questionsAvailableAt,
+            questionsLockAt: c.questionsLockAt,
+            regCloseTime: c.regCloseTime || null,
+            sponsorName: c.sponsorName,
+            sponsorLogo: c.sponsorLogo,
+            hasJoined: userId ? c.entries.length > 0 : false,
+        };
+    })
         .sort((a, b) => {
         if (a.battleType === 'MEGA' && b.battleType !== 'MEGA')
             return -1;

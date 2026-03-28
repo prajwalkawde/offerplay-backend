@@ -19,7 +19,7 @@ async function optionalAuthMiddleware(req, res, next) {
             const payload = jsonwebtoken_1.default.verify(token, env_1.env.JWT_SECRET);
             const user = await database_1.prisma.user.findUnique({
                 where: { id: payload.userId },
-                select: { id: true, name: true, email: true, phone: true, coinBalance: true, referralCode: true, status: true },
+                select: { id: true, name: true, email: true, phone: true, coinBalance: true, ticketBalance: true, referralCode: true, status: true, avatar: true, city: true, state: true, country: true, favouriteTeam: true, isPhoneVerified: true, isEmailVerified: true, isProfileComplete: true, dateOfBirth: true, createdAt: true, lastLoginAt: true, lastActiveAt: true },
             });
             if (user && user.status === 'ACTIVE') {
                 req.userId = user.id;
@@ -51,13 +51,12 @@ async function authMiddleware(req, res, next) {
         const user = await database_1.prisma.user.findUnique({
             where: { id: payload.userId },
             select: {
-                id: true,
-                name: true,
-                email: true,
-                phone: true,
-                coinBalance: true,
-                referralCode: true,
-                status: true,
+                id: true, name: true, email: true, phone: true,
+                coinBalance: true, ticketBalance: true, referralCode: true, status: true,
+                avatar: true, city: true, state: true, country: true,
+                favouriteTeam: true, isPhoneVerified: true, isEmailVerified: true,
+                isProfileComplete: true, dateOfBirth: true, createdAt: true,
+                lastLoginAt: true, lastActiveAt: true,
             },
         });
         if (!user) {

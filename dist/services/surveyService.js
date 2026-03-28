@@ -44,6 +44,7 @@ const redis_1 = require("../config/redis");
 const database_1 = require("../config/database");
 const logger_1 = require("../utils/logger");
 const env_1 = require("../config/env");
+const questController_1 = require("../controllers/questController");
 // ─── Get surveys for user ─────────────────────────────────────────────────────
 const getCPXSurveys = async (userId, userEmail, userIp) => {
     try {
@@ -202,6 +203,7 @@ const handleCPXPostback = async (params) => {
         });
         const { updateStreak } = await Promise.resolve().then(() => __importStar(require('./postbackService')));
         await updateStreak(userId);
+        await (0, questController_1.updateQuestProgress)(userId, 'COMPLETE_SURVEYS', 1);
         logger_1.logger.info('CPX coins credited', { userId, finalCoins, multiplier });
         return '1';
     }

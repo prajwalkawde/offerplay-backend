@@ -374,16 +374,33 @@ async function getTransactions(req, res) {
         const page = parseInt(String(req.query.page || '1'), 10);
         const limit = Math.min(parseInt(String(req.query.limit || '20'), 10), 50);
         const skip = (page - 1) * limit;
-        const [transactions, total] = await Promise.all([
+        // Fetch coin transactions and ticket transactions together
+        const [coinTxs, ticketTxs] = await Promise.all([
             database_1.prisma.transaction.findMany({
                 where: { userId },
                 orderBy: { createdAt: 'desc' },
-                skip,
-                take: limit,
                 select: { id: true, type: true, amount: true, description: true, createdAt: true, status: true },
             }),
-            database_1.prisma.transaction.count({ where: { userId } }),
+            database_1.prisma.ticketTransaction.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+                select: { id: true, type: true, amount: true, description: true, createdAt: true },
+            }),
         ]);
+        // Normalise ticket records to match coin tx shape, tag with currency
+        const ticketNormalised = ticketTxs.map(t => ({
+            ...t,
+            status: 'completed',
+            currency: 'ticket',
+        }));
+        const coinNormalised = coinTxs.map(t => ({
+            ...t,
+            currency: 'coin',
+        }));
+        // Merge and sort by date descending, then paginate
+        const all = [...coinNormalised, ...ticketNormalised].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const total = all.length;
+        const transactions = all.slice(skip, skip + limit);
         (0, response_1.success)(res, { transactions, total, page, limit, pages: Math.ceil(total / limit) });
     }
     catch (err) {

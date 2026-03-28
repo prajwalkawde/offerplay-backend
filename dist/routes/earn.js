@@ -10,6 +10,7 @@ const redeemController_1 = require("../controllers/redeemController");
 const database_1 = require("../config/database");
 const response_1 = require("../utils/response");
 const ticketService_1 = require("../services/ticketService");
+const questController_1 = require("../controllers/questController");
 const router = (0, express_1.Router)();
 // ─── New routes ───────────────────────────────────────────────────────────────
 router.get('/transactions', auth_1.authMiddleware, earnController_1.getTransactions);
@@ -89,6 +90,7 @@ router.post('/ad-reward', auth_1.authMiddleware, async (req, res) => {
                 },
             }),
         ]);
+        await (0, questController_1.updateQuestProgress)(userId, 'WATCH_ADS', 1);
         return (0, response_1.success)(res, { coins }, `+${coins} coins earned!`);
     }
     catch (err) {

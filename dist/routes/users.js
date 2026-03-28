@@ -13,6 +13,7 @@ router.get('/me/transactions', userController_1.getTransactions);
 router.get('/me/stats', userController_1.getStats);
 router.get('/me/referrals', userController_1.getUserReferrals);
 router.get('/referral/:code', userController_1.validateReferralCode);
+router.get('/wallet', userController_1.getWalletData);
 router.post('/me/onesignal-token', async (req, res) => {
     const { playerId } = req.body;
     if (!playerId)

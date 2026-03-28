@@ -50,6 +50,7 @@ const getStreakData = async (req, res) => {
             currentDay,
             nextClaimAt,
             todayReward: todayConfig?.coins ?? 10,
+            todayTickets: todayConfig?.tickets ?? 0,
             todayIcon: todayConfig?.icon ?? '🪙',
             isSpecialDay: todayConfig?.isSpecial ?? false,
             config,
@@ -92,8 +93,10 @@ const claimDailyStreak = async (req, res) => {
         const dayInCycle = ((newStreak - 1) % 7) + 1;
         const config = await database_1.prisma.dailyStreakConfig.findUnique({ where: { day: dayInCycle } });
         const coinsToAward = config?.coins ?? 10;
+        const ticketsToAward = config?.tickets ?? 0; // only what admin configured — no fallback
         const isSpecial = config?.isSpecial ?? false;
-        await database_1.prisma.$transaction([
+        // Build transaction ops — only include coin ops if coins > 0
+        const txOps = [
             database_1.prisma.userStreak.update({
                 where: { userId },
                 data: {
@@ -104,11 +107,12 @@ const claimDailyStreak = async (req, res) => {
                     totalCoinsFromStreak: { increment: coinsToAward },
                 },
             }),
-            database_1.prisma.user.update({
+        ];
+        if (coinsToAward > 0) {
+            txOps.push(database_1.prisma.user.update({
                 where: { id: userId },
                 data: { coinBalance: { increment: coinsToAward } },
-            }),
-            database_1.prisma.transaction.create({
+            }), database_1.prisma.transaction.create({
                 data: {
                     userId,
                     type: client_1.TransactionType.EARN_STREAK,
@@ -116,20 +120,29 @@ const claimDailyStreak = async (req, res) => {
                     description: `Day ${dayInCycle} streak bonus${isSpecial ? ' 👑 SPECIAL!' : ''}`,
                     status: 'completed',
                 },
-            }),
-        ]);
-        const ticketsToAward = Math.ceil(coinsToAward / 50);
-        let newTicketBalance = 0;
-        try {
-            newTicketBalance = await (0, ticketService_1.creditTickets)(userId, ticketsToAward, `Daily bonus day ${dayInCycle} tickets`, `daily_bonus_${userId}_${today.toISOString().slice(0, 10)}`);
+            }));
         }
-        catch { /* non-critical */ }
+        await database_1.prisma.$transaction(txOps);
+        // Credit tickets only if configured > 0
+        let newTicketBalance = 0;
+        if (ticketsToAward > 0) {
+            try {
+                newTicketBalance = await (0, ticketService_1.creditTickets)(userId, ticketsToAward, `Daily bonus day ${dayInCycle} tickets`, `daily_bonus_${userId}_${today.toISOString().slice(0, 10)}`);
+            }
+            catch { /* non-critical */ }
+        }
+        // Build reward summary string for notification
+        const rewardSummary = coinsToAward > 0 && ticketsToAward > 0
+            ? `+${coinsToAward} coins & +${ticketsToAward} tickets`
+            : ticketsToAward > 0
+                ? `+${ticketsToAward} tickets`
+                : `+${coinsToAward} coins`;
         try {
             await database_1.prisma.notification.create({
                 data: {
                     userId,
                     title: isSpecial ? '👑 SPECIAL Day 7 Bonus!' : `🔥 Day ${newStreak} Streak!`,
-                    body: `+${coinsToAward} coins added to your wallet!`,
+                    body: `${rewardSummary} added to your wallet!`,
                     type: 'DAILY_STREAK',
                 },
             });
@@ -143,8 +156,8 @@ const claimDailyStreak = async (req, res) => {
             dayInCycle,
             isSpecial,
             message: isSpecial
-                ? `🎉 Special Day 7 Bonus! +${coinsToAward} coins!`
-                : `+${coinsToAward} coins added! Day ${newStreak} streak! 🔥`,
+                ? `🎉 Special Day 7 Bonus! ${rewardSummary}!`
+                : `${rewardSummary} added! Day ${newStreak} streak! 🔥`,
         }, isSpecial ? '👑 SPECIAL bonus claimed!' : '🎉 Daily bonus claimed!');
     }
     catch (err) {
@@ -187,10 +200,10 @@ exports.getStreakConfig = getStreakConfig;
 const updateStreakConfig = async (req, res) => {
     try {
         const day = parseInt(req.params.day, 10);
-        const { coins, label, icon, isSpecial } = req.body;
+        const { coins, tickets, label, icon, isSpecial } = req.body;
         const updated = await database_1.prisma.dailyStreakConfig.update({
             where: { day },
-            data: { coins: Number(coins), label, icon, isSpecial: isSpecial === true },
+            data: { coins: Number(coins), tickets: Number(tickets ?? 0), label, icon, isSpecial: isSpecial === true },
         });
         (0, response_1.success)(res, updated, 'Day updated!');
     }

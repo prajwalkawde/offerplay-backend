@@ -48,6 +48,7 @@ exports.saveEditedQuestions = saveEditedQuestions;
 exports.generateResultReport = generateResultReport;
 exports.fetchTodayMatches = fetchTodayMatches;
 exports.generateIPLQuestions = generateIPLQuestions;
+exports.deleteAdminIPLMatch = deleteAdminIPLMatch;
 exports.getIPLAnalytics = getIPLAnalytics;
 const client_1 = require("@prisma/client");
 const database_1 = require("../config/database");
@@ -116,7 +117,13 @@ async function getMatchContests(req, res) {
 // ─── Create a new contest for a match ─────────────────────────────────────────
 async function createIPLContest(req, res) {
     const { matchId } = req.params;
-    const { name, contestType, battleType, maxPlayers, minPlayers, entryFee, isFree, prizeType, prizeCoins, prizeGiftName, prizeGiftImage, prizeGiftValue, rewardImageUrl, rewardImageType, questionCount, youtubeUrl, winnersConfig, prizeTiers, sponsorId, sponsorName, sponsorLogo, maxEntriesPerUser, customFields, prizeDistribution, regCloseTime, } = req.body;
+    console.log('=== CREATE CONTEST REQUEST ===');
+    console.log('prizeTiersConfig received:', JSON.stringify(req.body.prizeTiersConfig));
+    console.log('winnersConfig received:', JSON.stringify(req.body.winnersConfig));
+    console.log('questionsLockAt:', req.body.questionsLockAt);
+    console.log('questionsAvailableAt:', req.body.questionsAvailableAt);
+    console.log('==============================');
+    const { name, contestType, battleType, maxPlayers, minPlayers, entryFee, isFree, prizeType, prizeCoins, prizeGiftName, prizeGiftImage, prizeGiftValue, rewardImageUrl, rewardImageType, questionCount, youtubeUrl, entryType, ticketCost, winnersConfig, prizeTiersConfig, sponsorId, sponsorName, sponsorLogo, maxEntriesPerUser, customFields, prizeDistribution, regCloseTime, questionsAvailableAt, questionsLockAt, } = req.body;
     if (!contestType || !battleType || entryFee === undefined) {
         (0, response_1.error)(res, 'contestType, battleType, entryFee required', 400);
         return;
@@ -139,6 +146,8 @@ async function createIPLContest(req, res) {
             maxPlayers: resolvedMax,
             minPlayers: minPlayers ?? 2,
             entryFee,
+            entryType: entryType ?? 'TICKET',
+            ticketCost: ticketCost ?? 1,
             isFree: isFree ?? (entryFee === 0),
             prizeType: prizeType ?? 'COINS',
             prizeCoins: prizeCoins ?? null,
@@ -150,7 +159,7 @@ async function createIPLContest(req, res) {
             questionCount: questionCount ? parseInt(String(questionCount)) : 10,
             youtubeUrl: youtubeUrl ?? null,
             winnersConfig: (winnersConfig ?? []),
-            prizeTiers: (prizeTiers ?? []),
+            prizeTiersConfig: (prizeTiersConfig ?? []),
             sponsorId: sponsorId ?? null,
             sponsorName: sponsorName ?? null,
             sponsorLogo: sponsorLogo ?? null,
@@ -158,9 +167,13 @@ async function createIPLContest(req, res) {
             customFields: customFields ?? undefined,
             prizeDistribution: (prizeDistribution ?? { '1': 40, '2': 25, '3': 15, '4-10': 20 }),
             regCloseTime: regCloseTime ? new Date(regCloseTime) : null,
+            questionsAvailableAt: questionsAvailableAt ? new Date(questionsAvailableAt) : null,
+            questionsLockAt: questionsLockAt ? new Date(questionsLockAt) : null,
             status: 'draft',
         },
     });
+    console.log('Contest saved with tiers:', JSON.stringify(contest.prizeTiersConfig));
+    console.log('questionsLockAt saved:', contest.questionsLockAt);
     (0, response_1.success)(res, contest, 'Contest created successfully!', 201);
 }
 // ─── Update contest ────────────────────────────────────────────────────────────
@@ -725,6 +738,16 @@ async function generateIPLQuestions(req, res) {
     (0, response_1.success)(res, created, `${created.length} questions generated!`);
 }
 // ─── IPL analytics ────────────────────────────────────────────────────────────
+async function deleteAdminIPLMatch(req, res) {
+    const id = req.params.id;
+    // Cascade delete in order: entries → predictions (via questions) → contests → questions → match
+    await database_1.prisma.iplContestEntry.deleteMany({ where: { contest: { matchId: id } } });
+    await database_1.prisma.iplPrediction.deleteMany({ where: { question: { matchId: id } } });
+    await database_1.prisma.iplContest.deleteMany({ where: { matchId: id } });
+    await database_1.prisma.iplQuestion.deleteMany({ where: { matchId: id } });
+    await database_1.prisma.iplMatch.delete({ where: { id } });
+    (0, response_1.success)(res, { message: 'Match deleted successfully' });
+}
 async function getIPLAnalytics(_req, res) {
     const [matches, totalContestEntries, totalCoinsDistributed] = await Promise.all([
         database_1.prisma.iplMatch.findMany({

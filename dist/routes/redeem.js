@@ -10,6 +10,7 @@ router.get('/packages', redeemController_1.getRedeemPackages);
 router.get('/gift-cards', redeemController_1.getGiftCards);
 router.post('/request', redeemController_1.requestRedemption);
 router.get('/history', redeemController_1.getRedemptionHistory);
+router.post('/rate/:id', redeemController_1.rateRedemption);
 // Legacy compatibility
 router.get('/options', redeemController_1.listOptions);
 exports.default = router;

@@ -5,6 +5,7 @@ exports.updateProfile = updateProfile;
 exports.getTransactions = getTransactions;
 exports.getStats = getStats;
 exports.getUserReferrals = getUserReferrals;
+exports.getWalletData = getWalletData;
 exports.validateReferralCode = validateReferralCode;
 const database_1 = require("../config/database");
 const coinService_1 = require("../services/coinService");
@@ -56,6 +57,47 @@ async function getUserReferrals(req, res) {
     const limit = Math.min(parseInt((0, query_1.qs)(req.query.limit) ?? '20', 10), 50);
     const { referrals, total } = await (0, referralService_1.getReferrals)(req.userId, limit, page);
     (0, response_1.paginated)(res, referrals, total, page, limit);
+}
+async function getWalletData(req, res) {
+    const userId = req.userId;
+    const [user, txAgg] = await Promise.all([
+        database_1.prisma.user.findUnique({
+            where: { id: userId },
+            select: { coinBalance: true, ticketBalance: true },
+        }),
+        database_1.prisma.transaction.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+            select: { id: true, type: true, amount: true, description: true, createdAt: true },
+        }),
+    ]);
+    if (!user) {
+        (0, response_1.error)(res, 'User not found', 404);
+        return;
+    }
+    let totalEarned = 0;
+    let totalSpent = 0;
+    let totalRedeemed = 0;
+    for (const tx of txAgg) {
+        if (tx.amount > 0) {
+            totalEarned += tx.amount;
+        }
+        else if (String(tx.type).toUpperCase().includes('REDEEM')) {
+            totalRedeemed += Math.abs(tx.amount);
+        }
+        else {
+            totalSpent += Math.abs(tx.amount);
+        }
+    }
+    (0, response_1.success)(res, {
+        coinBalance: user.coinBalance,
+        ticketBalance: user.ticketBalance,
+        totalEarned,
+        totalSpent,
+        totalRedeemed,
+        transactions: txAgg,
+    });
 }
 async function validateReferralCode(req, res) {
     const code = String(req.params.code).toUpperCase();
