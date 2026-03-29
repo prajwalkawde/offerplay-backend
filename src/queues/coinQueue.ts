@@ -19,7 +19,7 @@ const connection = getRedisConnection();
 
 export const coinQueue = new Queue('coin-operations', {
   connection,
-  prefix: '{xyvmkurmut}',
+  prefix: 'xyvmkurmut',
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
@@ -44,7 +44,7 @@ export function startCoinWorker(): Worker {
       await creditCoins(userId, amount, type, refId, description);
       logger.debug('Coin job processed', { jobId: job.id, userId, amount });
     },
-    { connection, prefix: '{xyvmkurmut}' }
+    { connection, prefix: 'xyvmkurmut' }
   );
 
   worker.on('failed', (job, err) => {
