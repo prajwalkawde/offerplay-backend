@@ -46,8 +46,26 @@ const io = new SocketServer(httpServer, {
 setupLeaderboardSocket(io);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'https://admin.offerplay.in',
+  'https://phpstack-1554518-6313385.cloudwaysapps.com',
+  'https://offerplay.in',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.ALLOWED_ORIGINS,
+].filter(Boolean) as string[];
+
 app.use(helmet());
-app.use(cors({ origin: '*', credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
 app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
