@@ -12,7 +12,6 @@ const redisConfig = {
   },
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
-  lazyConnect: false,
 };
 
 let redisClient: Redis;
@@ -20,10 +19,14 @@ let redisClient: Redis;
 export function getRedisClient(): Redis {
   if (!redisClient) {
     redisClient = new Redis(redisConfig);
-    redisClient.on('connect', () => logger.info('Redis connected'));
-    redisClient.on('ready', () => logger.info('Redis ready'));
-    redisClient.on('error', (err) => logger.error('Redis error:', err));
-    redisClient.on('reconnecting', () => logger.warn('Redis reconnecting...'));
+    redisClient.on('connect', () =>
+      logger.info('Redis connected'));
+    redisClient.on('ready', () =>
+      logger.info('Redis ready'));
+    redisClient.on('error', (err) =>
+      logger.error('Redis error:', err));
+    redisClient.on('reconnecting', () =>
+      logger.warn('Redis reconnecting...'));
   }
   return redisClient;
 }

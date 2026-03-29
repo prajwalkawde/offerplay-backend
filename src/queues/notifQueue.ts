@@ -2,9 +2,19 @@ import { Queue, Worker, Job } from 'bullmq';
 import { prisma } from '../config/database';
 import { sendPushNotification, createNotification } from '../services/notificationService';
 import { logger } from '../utils/logger';
-import { redisConfig } from '../config/redis';
 
-const connection = redisConfig;
+function getRedisConnection() {
+  return {
+    host: process.env.REDIS_HOST || '127.0.0.1',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    username: process.env.REDIS_USERNAME || undefined,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  };
+}
+
+const connection = getRedisConnection();
 
 export const notifQueue = new Queue('notifications', {
   connection,
