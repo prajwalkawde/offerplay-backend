@@ -58,36 +58,41 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
   const { phone } = req.body as { phone: string };
 
   try {
-    const redis = getRedisClient();
+    // Check if test phone first (DB lookup, no Redis needed)
+    const testOtp = await getTestPhoneOtp(phone).catch(() => null);
+    const isTest = !!testOtp || isTestPhone(phone);
 
-    // Rate limit: max 5 OTPs per phone per 10 minutes (skip for test phones)
-    const isTest = !!(await getTestPhoneOtp(phone).catch(() => null)) || isTestPhone(phone);
-    if (!isTest) {
-      const attempts = await redis.incr(`otp_attempts:${phone}`);
-      if (attempts === 1) await redis.expire(`otp_attempts:${phone}`, 600);
-      if (attempts > 5) {
-        error(res, 'Too many OTP requests. Please try again in 10 minutes.', 429);
-        return;
+    // For test phones: respond immediately — no Redis required
+    if (isTest) {
+      const otp = testOtp ?? '123456';
+      logger.info(`[OTP-TEST] ${phone} → ${otp}`);
+      // Try to cache in Redis but don't fail if Redis is down
+      try {
+        const redis = getRedisClient();
+        await redis.setex(`otp:${phone}`, 300, otp);
+      } catch {
+        logger.warn(`[OTP-TEST] Redis unavailable — test OTP will verify via DB`);
       }
+      success(res, { otp }, 'OTP sent successfully');
+      return;
     }
 
-    // Check DB for test OTP; fall back to random in prod
-    const testOtp = await getTestPhoneOtp(phone);
-    const otp = testOtp
-      ?? (process.env.NODE_ENV !== 'production'
-        ? '123456'
-        : String(Math.floor(100000 + Math.random() * 900000)));
+    // Real phone — Redis required for rate limiting and OTP storage
+    const redis = getRedisClient();
+    const attempts = await redis.incr(`otp_attempts:${phone}`);
+    if (attempts === 1) await redis.expire(`otp_attempts:${phone}`, 600);
+    if (attempts > 5) {
+      error(res, 'Too many OTP requests. Please try again in 10 minutes.', 429);
+      return;
+    }
 
-    // Store OTP in Redis with 5 min TTL
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
     await redis.setex(`otp:${phone}`, 300, otp);
 
-    // TODO: Send OTP via SMS provider (MSG91 / Twilio) in production
+    // TODO: Send OTP via SMS provider (MSG91 / Twilio)
     logger.info(`[OTP] ${phone} → ${otp}`);
 
-    success(res,
-      process.env.NODE_ENV !== 'production' ? { otp } : null,
-      'OTP sent successfully'
-    );
+    success(res, null, 'OTP sent successfully');
   } catch (err) {
     logger.error('Send OTP failed', { err });
     error(res, 'Failed to send OTP. Please try again.', 500);
@@ -106,17 +111,27 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
   };
 
   try {
-    const redis = getRedisClient();
-    const storedOtp = await redis.get(`otp:${phone}`);
+    // For test phones: verify against DB test OTP (Redis optional)
+    const testOtp = await getTestPhoneOtp(phone).catch(() => null);
+    const isTest = !!testOtp || isTestPhone(phone);
 
-    if (!storedOtp || storedOtp !== otp) {
-      error(res, 'Invalid or expired OTP. Please try again.', 400);
-      return;
+    if (isTest) {
+      const expectedOtp = testOtp ?? '123456';
+      if (otp !== expectedOtp) {
+        error(res, 'Invalid OTP. Please try again.', 400);
+        return;
+      }
+    } else {
+      // Real phone — verify via Redis
+      const redis = getRedisClient();
+      const storedOtp = await redis.get(`otp:${phone}`);
+      if (!storedOtp || storedOtp !== otp) {
+        error(res, 'Invalid or expired OTP. Please try again.', 400);
+        return;
+      }
+      await redis.del(`otp:${phone}`);
+      await redis.del(`otp_attempts:${phone}`);
     }
-
-    // Consume OTP
-    await redis.del(`otp:${phone}`);
-    await redis.del(`otp_attempts:${phone}`);
 
     const existing = await prisma.user.findUnique({ where: { phone } });
     const isNew = !existing;
