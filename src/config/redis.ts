@@ -1,25 +1,25 @@
 import Redis from 'ioredis';
-import { env } from './env';
 import { logger } from '../utils/logger';
+
+const redisConfig = {
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: parseInt(process.env.REDIS_PORT || '6379'),
+  username: process.env.REDIS_USERNAME || undefined,
+  password: process.env.REDIS_PASSWORD || undefined,
+  retryStrategy(times: number) {
+    if (times > 20) return null;
+    return Math.min(Math.pow(2, times) * 100, 30000);
+  },
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  lazyConnect: false,
+};
 
 let redisClient: Redis;
 
 export function getRedisClient(): Redis {
   if (!redisClient) {
-    redisClient = new Redis({
-      host: env.REDIS_HOST,
-      port: env.REDIS_PORT,
-      username: env.REDIS_USERNAME,
-      password: env.REDIS_PASSWORD,
-      retryStrategy(times) {
-        if (times > 20) return null; // stop retrying after 20 attempts
-        const delay = Math.min(Math.pow(2, times) * 100, 30000); // exponential backoff, max 30s
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
-    });
-
+    redisClient = new Redis(redisConfig);
     redisClient.on('connect', () => logger.info('Redis connected'));
     redisClient.on('ready', () => logger.info('Redis ready'));
     redisClient.on('error', (err) => logger.error('Redis error:', err));
@@ -30,6 +30,8 @@ export function getRedisClient(): Redis {
 
 export const redis = new Proxy({} as Redis, {
   get(_target, prop) {
-    return (getRedisClient() as unknown as Record<string | symbol, unknown>)[prop];
+    return (getRedisClient() as any)[prop];
   },
 });
+
+export { redisConfig };

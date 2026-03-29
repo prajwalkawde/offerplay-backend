@@ -1,21 +1,11 @@
 import { Queue, Worker, Job } from 'bullmq';
 import cron from 'node-cron';
-import { getRedisClient } from '../config/redis';
+import { redisConfig } from '../config/redis';
 import { creditCoins } from '../services/coinService';
 import { TransactionType } from '@prisma/client';
 import { logger } from '../utils/logger';
-import { env } from '../config/env';
 
-function buildConnection() {
-  return {
-    host: env.REDIS_HOST,
-    port: env.REDIS_PORT,
-    username: env.REDIS_USERNAME,
-    password: env.REDIS_PASSWORD,
-  };
-}
-
-const connection = buildConnection();
+const connection = redisConfig;
 
 export const coinQueue = new Queue('coin-operations', {
   connection,
