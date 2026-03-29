@@ -180,7 +180,9 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
 
 // ─── Complete Profile ────────────────────────────────────────────────────────
 export async function completeProfile(req: Request, res: Response): Promise<void> {
-  const userId = (req as any).user?.id;
+  const userId = req.userId;
+  if (!userId) { error(res, 'Unauthorized', 401); return; }
+
   const { name, email, dateOfBirth, city, state, country, favouriteTeam, referralCode } = req.body as {
     name: string;
     email?: string;
@@ -218,7 +220,12 @@ export async function completeProfile(req: Request, res: Response): Promise<void
 
     success(res, { user }, 'Profile updated successfully');
   } catch (err: any) {
-    logger.error('Complete profile failed', { err });
+    logger.error('Complete profile failed', {
+      userId,
+      errCode: err?.code,
+      errMsg: err?.message,
+      errMeta: err?.meta,
+    });
     if (err.code === 'P2002') {
       error(res, 'This email is already in use.', 409);
     } else {
@@ -229,7 +236,7 @@ export async function completeProfile(req: Request, res: Response): Promise<void
 
 // ─── Update FCM Token ────────────────────────────────────────────────────────
 export async function updateFCMToken(req: Request, res: Response): Promise<void> {
-  const userId = (req as any).user?.id;
+  const userId = req.userId!;
   const { fcmToken } = req.body as { fcmToken: string };
 
   try {
@@ -328,7 +335,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
 
 // ─── Update Profile ──────────────────────────────────────────────────────────
 export async function updateProfile(req: Request, res: Response): Promise<void> {
-  const userId = (req as any).user?.id;
+  const userId = req.userId!;
   const { name, email, city, state, favouriteTeam } = req.body as {
     name?: string;
     email?: string | null;
