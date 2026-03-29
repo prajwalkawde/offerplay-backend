@@ -4,6 +4,7 @@ import { env } from '../config/env';
 import { getRedisClient } from '../config/redis';
 import { prisma } from '../config/database';
 import { error } from '../utils/response';
+import { logger } from '../utils/logger';
 
 export interface JwtPayload {
   userId: string;
@@ -75,12 +76,17 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   try {
     const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
 
-    // Check Redis blacklist
-    const redis = getRedisClient();
-    const blacklisted = await redis.get(`blacklist:${token}`);
-    if (blacklisted) {
-      error(res, 'Token revoked', 401);
-      return;
+    // Check Redis blacklist (non-fatal if Redis unavailable)
+    try {
+      const redis = getRedisClient();
+      const blacklisted = await redis.get(`blacklist:${token}`);
+      if (blacklisted) {
+        error(res, 'Token revoked', 401);
+        return;
+      }
+    } catch {
+      // Redis unavailable — skip blacklist check, allow request
+      logger.warn('Redis unavailable in authMiddleware — skipping blacklist check');
     }
 
     const user = await prisma.user.findUnique({
