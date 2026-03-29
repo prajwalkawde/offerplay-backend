@@ -5,22 +5,11 @@ import { logger } from '../utils/logger';
 import { env } from '../config/env';
 
 function buildConnection() {
-  const isTls = env.REDIS_URL.startsWith('rediss://');
-  if (isTls) {
-    const url = new URL(env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port || '6379', 10),
-      password: url.password || undefined,
-      username: url.username || undefined,
-      tls: { rejectUnauthorized: false },
-    };
-  }
-  const url = new URL(env.REDIS_URL);
   return {
-    host: url.hostname,
-    port: parseInt(url.port || '6379', 10),
-    password: url.password || undefined,
+    host: env.REDIS_HOST,
+    port: env.REDIS_PORT,
+    username: env.REDIS_USERNAME,
+    password: env.REDIS_PASSWORD,
   };
 }
 

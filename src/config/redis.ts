@@ -6,9 +6,11 @@ let redisClient: Redis;
 
 export function getRedisClient(): Redis {
   if (!redisClient) {
-    const isTls = env.REDIS_URL.startsWith('rediss://');
-
-    redisClient = new Redis(env.REDIS_URL, {
+    redisClient = new Redis({
+      host: env.REDIS_HOST,
+      port: env.REDIS_PORT,
+      username: env.REDIS_USERNAME,
+      password: env.REDIS_PASSWORD,
       retryStrategy(times) {
         if (times > 20) return null; // stop retrying after 20 attempts
         const delay = Math.min(Math.pow(2, times) * 100, 30000); // exponential backoff, max 30s
@@ -16,12 +18,6 @@ export function getRedisClient(): Redis {
       },
       maxRetriesPerRequest: 3,
       enableReadyCheck: true,
-      // Required for Upstash (rediss://) and other TLS Redis providers
-      ...(isTls && {
-        tls: {
-          rejectUnauthorized: false,
-        },
-      }),
     });
 
     redisClient.on('connect', () => logger.info('Redis connected'));
