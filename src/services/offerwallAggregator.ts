@@ -168,6 +168,7 @@ async function translateOffers(offers: any[], language: string): Promise<any[]> 
 // ─── PubScale Provider ────────────────────────────────────────────────────────
 async function fetchPubScaleOffers(userId: string, gaid: string): Promise<any[]> {
   try {
+    if (!env.PUBSCALE_APP_ID || !env.PUBSCALE_PUB_KEY) return [];
     const cacheKey = rk('pubscale:raw:feed');
     const cached = await redis.get(cacheKey);
 
