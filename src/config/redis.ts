@@ -10,8 +10,9 @@ const redisConfig = {
     if (times > 20) return null;
     return Math.min(Math.pow(2, times) * 100, 30000);
   },
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  connectTimeout: 5000,
 };
 
 let redisClient: Redis;
