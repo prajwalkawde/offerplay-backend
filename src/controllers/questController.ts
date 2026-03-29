@@ -7,7 +7,7 @@ import { TransactionType } from '@prisma/client';
 // GET /api/quests
 export const getQuests = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     const now = new Date();
 
     const quests = await prisma.quest.findMany({
@@ -89,7 +89,7 @@ export const getQuests = async (req: Request, res: Response) => {
 // POST /api/quests/:id/claim
 export const claimQuestReward = async (req: Request, res: Response) => {
   try {
-    const userId  = (req as any).user.id;
+    const userId  = req.userId!;
     const questId = req.params.id as string;
 
     const quest = await prisma.quest.findUnique({ where: { id: questId } });

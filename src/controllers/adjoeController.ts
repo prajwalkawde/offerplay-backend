@@ -109,7 +109,7 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
 // GET /api/adjoe/stats  — authenticated user
 export const getAdjoeStats = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     const today  = new Date(); today.setHours(0, 0, 0, 0);
 
     const [todaySessions, allSessions] = await Promise.all([

@@ -15,7 +15,7 @@ function generateJwt(userId: string): string {
 }
 
 // ─── Test phone helpers (DB-driven) ──────────────────────────────────────────
-const FALLBACK_TEST_PHONES = ['8381071568'];
+const FALLBACK_TEST_PHONES: string[] = [];
 
 async function getTestPhoneOtp(phone: string): Promise<string | null> {
   const cleanPhone = phone.replace(/\D/g, '');

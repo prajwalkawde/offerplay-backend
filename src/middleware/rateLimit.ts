@@ -42,7 +42,7 @@ export function rateLimit(options: RateLimitOptions) {
 }
 
 // Test phone numbers — bypass all rate limits
-const TEST_PHONES = ['8381071568'];
+const TEST_PHONES: string[] = [];
 
 function isTestPhone(req: Request): boolean {
   const phone: string = req.body?.phone || req.query?.phone || '';

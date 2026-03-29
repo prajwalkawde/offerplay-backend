@@ -10,7 +10,7 @@ import { TransactionType } from '@prisma/client';
 
 export const getCustomOffers = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     const now = new Date();
 
     const offers = await prisma.customOffer.findMany({
@@ -124,7 +124,7 @@ export const getCustomOffers = async (req: Request, res: Response) => {
 
 export const startCustomOffer = async (req: Request, res: Response) => {
   try {
-    const userId  = (req as any).user.id;
+    const userId  = req.userId!;
     const offerId = req.params.offerId as string;
 
     const offer = await prisma.customOffer.findUnique({ where: { id: offerId } });
@@ -157,7 +157,7 @@ export const startCustomOffer = async (req: Request, res: Response) => {
 
 export const completeTask = async (req: Request, res: Response) => {
   try {
-    const userId  = (req as any).user.id;
+    const userId  = req.userId!;
     const offerId = req.params.offerId as string;
     const taskId  = req.params.taskId  as string;
     const { submittedAmount, submittedData } = req.body;
@@ -304,7 +304,7 @@ export const handlePostback = async (req: Request, res: Response) => {
 
 export const getOfferStatus = async (req: Request, res: Response) => {
   try {
-    const userId  = (req as any).user.id;
+    const userId  = req.userId!;
     const offerId = req.params.offerId as string;
 
     const completion = await prisma.customOfferCompletion.findUnique({
@@ -326,7 +326,7 @@ export const getOfferStatus = async (req: Request, res: Response) => {
 
 export const getSmartOffers = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     const { questDifficulty = 'Easy' } = req.query;
 
     const profile = await prisma.userActivityProfile.findUnique({ where: { userId } });

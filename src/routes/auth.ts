@@ -56,7 +56,7 @@ router.get('/me',                 authMiddleware,                               
 // ─── Delete account (Google Play requirement) ─────────────────────────────────
 router.delete('/account', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     await prisma.user.update({
       where: { id: userId },
       data: {

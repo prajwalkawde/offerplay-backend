@@ -9,7 +9,7 @@ const router = Router();
 // Returns active custom/partner offers enriched for display, excluding maxed-out ones
 router.get('/featured', auth, async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.id;
+    const userId = req.userId!;
     const limit  = Math.min(parseInt(req.query.limit as string) || 10, 20);
 
     const customOffers = await prisma.customOffer.findMany({
