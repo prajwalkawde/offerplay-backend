@@ -25,9 +25,10 @@ const verifyPhoneSchema = z.object({
 });
 
 const googleSchema = z.object({
-  idToken:  z.string().min(1),
-  fcmToken: z.string().optional(),
-  deviceId: z.string().optional(),
+  idToken:      z.string().min(1),
+  fcmToken:     z.string().optional(),
+  deviceId:     z.string().optional(),
+  referralCode: z.string().optional(),
 });
 
 const completeProfileSchema = z.object({
