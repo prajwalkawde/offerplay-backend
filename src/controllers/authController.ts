@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/database';
-import { getRedisClient } from '../config/redis';
+import { getRedisClient, rk } from '../config/redis';
 import { creditCoins } from '../services/coinService';
 import { processReferral } from '../services/referralService';
 import { generateReferralCode } from '../utils/crypto';
@@ -69,7 +69,7 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       // Try to cache in Redis but don't fail if Redis is down
       try {
         const redis = getRedisClient();
-        await redis.setex(`otp:${phone}`, 300, otp);
+        await redis.setex(rk(`otp:${phone}`), 300, otp);
       } catch {
         logger.warn(`[OTP-TEST] Redis unavailable — test OTP will verify via DB`);
       }
@@ -79,15 +79,15 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
 
     // Real phone — Redis required for rate limiting and OTP storage
     const redis = getRedisClient();
-    const attempts = await redis.incr(`otp_attempts:${phone}`);
-    if (attempts === 1) await redis.expire(`otp_attempts:${phone}`, 600);
+    const attempts = await redis.incr(rk(`otp_attempts:${phone}`));
+    if (attempts === 1) await redis.expire(rk(`otp_attempts:${phone}`), 600);
     if (attempts > 5) {
       error(res, 'Too many OTP requests. Please try again in 10 minutes.', 429);
       return;
     }
 
     const otp = String(Math.floor(100000 + Math.random() * 900000));
-    await redis.setex(`otp:${phone}`, 300, otp);
+    await redis.setex(rk(`otp:${phone}`), 300, otp);
 
     // TODO: Send OTP via SMS provider (MSG91 / Twilio)
     logger.info(`[OTP] ${phone} → ${otp}`);
@@ -124,13 +124,13 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
     } else {
       // Real phone — verify via Redis
       const redis = getRedisClient();
-      const storedOtp = await redis.get(`otp:${phone}`);
+      const storedOtp = await redis.get(rk(`otp:${phone}`));
       if (!storedOtp || storedOtp !== otp) {
         error(res, 'Invalid or expired OTP. Please try again.', 400);
         return;
       }
-      await redis.del(`otp:${phone}`);
-      await redis.del(`otp_attempts:${phone}`);
+      await redis.del(rk(`otp:${phone}`));
+      await redis.del(rk(`otp_attempts:${phone}`));
     }
 
     const existing = await prisma.user.findUnique({ where: { phone } });
@@ -323,7 +323,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
   const token = req.headers.authorization?.substring(7);
   if (token) {
     const redis = getRedisClient();
-    await redis.setex(`blacklist:${token}`, 30 * 24 * 60 * 60, '1');
+    await redis.setex(rk(`blacklist:${token}`), 30 * 24 * 60 * 60, '1');
   }
   success(res, null, 'Logged out successfully');
 }

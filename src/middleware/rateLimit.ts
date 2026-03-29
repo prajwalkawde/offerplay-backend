@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRedisClient } from '../config/redis';
+import { getRedisClient, rk } from '../config/redis';
 import { error } from '../utils/response';
 
 interface RateLimitOptions {
@@ -15,7 +15,7 @@ export function rateLimit(options: RateLimitOptions) {
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const identifier = req.ip || req.socket.remoteAddress || 'unknown';
-    const key = `${keyPrefix}:${identifier}`;
+    const key = rk(`${keyPrefix}:${identifier}`);
 
     try {
       const redis = getRedisClient();

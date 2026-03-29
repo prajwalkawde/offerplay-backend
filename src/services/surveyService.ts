@@ -1,7 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { TransactionType } from '@prisma/client';
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 import { env } from '../config/env';
@@ -16,7 +16,7 @@ export const getCPXSurveys = async (
   try {
     if (!env.CPX_APP_ID) return getMockSurveys();
 
-    const cacheKey = `cpx_surveys:${userId}`;
+    const cacheKey = rk(`cpx_surveys:${userId}`);
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
 

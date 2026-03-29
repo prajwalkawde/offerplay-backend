@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/database';
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 
@@ -62,7 +62,7 @@ export async function updateCoinRate(req: Request, res: Response): Promise<void>
     const rate = await prisma.coinConversionRate.update({ where: { id }, data });
 
     // Invalidate app coin-rate cache for all countries
-    const keys = await redis.keys('coin_rate:*');
+    const keys = await redis.keys(rk('coin_rate:*'));
     if (keys.length > 0) await redis.del(...keys);
 
     success(res, rate, 'Rate updated successfully!');

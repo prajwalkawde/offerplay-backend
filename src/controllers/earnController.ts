@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/database';
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { success, error } from '../utils/response';
 import { creditCoins } from '../services/coinService';
 import { logger } from '../utils/logger';
@@ -15,7 +15,7 @@ import dayjs from 'dayjs';
 export async function claimDailyBonus(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;
   const today = dayjs().format('YYYY-MM-DD');
-  const key = `daily:${userId}:${today}`;
+  const key = rk(`daily:${userId}:${today}`);
 
   const claimed = await redis.get(key);
   if (claimed) {
@@ -98,7 +98,7 @@ export async function clickOffer(req: Request, res: Response): Promise<void> {
         await prisma.offerClick.create({ data: { userId, provider, offerId, ip: req.ip } });
 
         // Invalidate user's cached feed
-        const keys = await redis.keys(`offer_feed:${userId}:*`);
+        const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
         if (keys.length > 0) await redis.del(...keys);
       } catch {
         // Non-critical — don't fail the click
@@ -204,7 +204,7 @@ export async function rateOffer(req: Request, res: Response): Promise<void> {
     }
 
     // Invalidate cache
-    const keys = await redis.keys(`offer_feed:${userId}:*`);
+    const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
     if (keys.length > 0) await redis.del(...keys);
 
     success(res, { avgRating: Math.round(avgRating * 100) / 100 });
@@ -251,7 +251,7 @@ export async function reportDeadUrl(req: Request, res: Response): Promise<void> 
     await autoBlacklist(provider, offerId,
       `Dead redirect: ${(finalUrl || '').substring(0, 200)}`);
 
-    const keys = await redis.keys(`offer_feed:${userId}:*`);
+    const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
     if (keys.length > 0) await redis.del(...keys);
 
     success(res, null, 'Thank you for reporting! The offer has been flagged.');
@@ -274,7 +274,7 @@ export async function enhanceOffer(req: Request, res: Response): Promise<void> {
 
     if (!offerId || !offerName) { error(res, 'offerId and offerName required', 400); return; }
 
-    const cacheKey = `enhanced_offer:${provider || 'unknown'}:${offerId}`;
+    const cacheKey = rk(`enhanced_offer:${provider || 'unknown'}:${offerId}`);
     const cached = await redis.get(cacheKey);
     if (cached) { success(res, JSON.parse(cached)); return; }
 

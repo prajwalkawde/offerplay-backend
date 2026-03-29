@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
-import { getRedisClient } from '../config/redis';
+import { getRedisClient, rk } from '../config/redis';
 import { prisma } from '../config/database';
 import { error } from '../utils/response';
 import { logger } from '../utils/logger';
@@ -79,7 +79,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     // Check Redis blacklist (non-fatal if Redis unavailable)
     try {
       const redis = getRedisClient();
-      const blacklisted = await redis.get(`blacklist:${token}`);
+      const blacklisted = await redis.get(rk(`blacklist:${token}`));
       if (blacklisted) {
         error(res, 'Token revoked', 401);
         return;

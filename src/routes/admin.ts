@@ -155,12 +155,12 @@ router.get('/ipl/contests/:contestId/participants', getContestParticipants);
 router.post('/ipl/verify-results/:id', triggerResultVerification);
 
 // ─── Cache Management ─────────────────────────────────────────────────────────
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { prisma } from '../config/database';
 router.delete('/cache/clear', async (req, res) => {
   const [feedKeys, pubscaleKeys] = await Promise.all([
-    redis.keys('offer_feed:*'),
-    redis.keys('pubscale:*'),
+    redis.keys(rk('offer_feed:*')),
+    redis.keys(rk('pubscale:*')),
   ]);
   const allKeys = [...feedKeys, ...pubscaleKeys];
   if (allKeys.length > 0) await redis.del(...allKeys);
@@ -228,7 +228,7 @@ router.post('/test/reset-daily-bonus/:userId', async (req, res) => {
 
     // Also clear Redis key for old claimDailyBonus endpoint
     const today = new Date().toISOString().slice(0, 10);
-    await redis.del(`daily:${userId}:${today}`);
+    await redis.del(rk(`daily:${userId}:${today}`));
 
     return apiSuccess(res, null, 'Daily bonus reset!');
   } catch (err) {
@@ -246,7 +246,7 @@ router.post('/test/reset-all-daily-bonus', async (req, res) => {
 
     // Clear all Redis daily bonus keys for today
     const today = new Date().toISOString().slice(0, 10);
-    const keys = await redis.keys(`daily:*:${today}`);
+    const keys = await redis.keys(rk(`daily:*:${today}`));
     if (keys.length > 0) await redis.del(...keys);
 
     return apiSuccess(res, { usersReset: true }, 'All daily bonuses reset!');

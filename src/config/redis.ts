@@ -39,3 +39,9 @@ export const redis = new Proxy({} as Redis, {
 });
 
 export { redisConfig };
+
+// Prefix all Redis keys with the ACL username to satisfy Cloudways ACL restrictions
+const _prefix = process.env.REDIS_USERNAME || '';
+export function rk(key: string): string {
+  return _prefix ? `${_prefix}:${key}` : key;
+}

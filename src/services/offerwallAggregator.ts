@@ -1,6 +1,6 @@
 import axios from 'axios';
 import Anthropic from '@anthropic-ai/sdk';
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 import { env } from '../config/env';
@@ -43,7 +43,7 @@ export async function getMergedFeed(
   language = 'en',
   ip = ''
 ): Promise<any[]> {
-  const cacheKey = `offer_feed:${userId}:${gaid}:${language}`;
+  const cacheKey = rk(`offer_feed:${userId}:${gaid}:${language}`);
   const cached = await redis.get(cacheKey);
   if (cached) {
     logger.info('Serving cached offer feed', { userId });
@@ -168,7 +168,7 @@ async function translateOffers(offers: any[], language: string): Promise<any[]> 
 // ─── PubScale Provider ────────────────────────────────────────────────────────
 async function fetchPubScaleOffers(userId: string, gaid: string): Promise<any[]> {
   try {
-    const cacheKey = 'pubscale:raw:feed';
+    const cacheKey = rk('pubscale:raw:feed');
     const cached = await redis.get(cacheKey);
 
     let data: any;
