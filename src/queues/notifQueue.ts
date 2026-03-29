@@ -18,6 +18,7 @@ const connection = getRedisConnection();
 
 export const notifQueue = new Queue('notifications', {
   connection,
+  prefix: '{xyvmkurmut}',
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 1000 },
@@ -53,7 +54,7 @@ export function startNotifWorker(): Worker {
 
       logger.debug('Notification sent', { jobId: job.id, userId });
     },
-    { connection }
+    { connection, prefix: '{xyvmkurmut}' }
   );
 
   worker.on('failed', (job, err) => {
