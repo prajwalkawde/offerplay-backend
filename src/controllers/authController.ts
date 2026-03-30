@@ -178,6 +178,71 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ─── Firebase Phone Auth Verify ──────────────────────────────────────────────
+export async function phoneFirebaseVerify(req: Request, res: Response): Promise<void> {
+  const { idToken, fcmToken, deviceId, referralCode, appVersion } = req.body as {
+    idToken: string;
+    fcmToken?: string;
+    deviceId?: string;
+    referralCode?: string;
+    appVersion?: string;
+  };
+
+  try {
+    const { verifyFirebaseToken } = await import('../config/firebase');
+    const decoded = await verifyFirebaseToken(idToken);
+
+    const phone = decoded.phone_number;
+    if (!phone) {
+      error(res, 'Invalid Firebase token: no phone number', 400);
+      return;
+    }
+
+    const existing = await prisma.user.findUnique({ where: { phone } });
+    const isNew = !existing;
+
+    const user = await prisma.user.upsert({
+      where: { phone },
+      create: {
+        phone,
+        referralCode: generateReferralCode(),
+        fcmToken:    fcmToken  ?? null,
+        deviceId:    deviceId  ?? null,
+        appVersion:  appVersion ?? null,
+        deviceType:  'mobile',
+        isPhoneVerified: true,
+        lastLoginAt:  new Date(),
+        lastActiveAt: new Date(),
+      },
+      update: {
+        fcmToken:     fcmToken    ?? undefined,
+        deviceId:     deviceId    ?? undefined,
+        appVersion:   appVersion  ?? undefined,
+        deviceType:   'mobile',
+        isPhoneVerified: true,
+        lastLoginAt:  new Date(),
+        lastActiveAt: new Date(),
+      },
+    });
+
+    if (isNew) {
+      await creditCoins(user.id, 100, TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
+      if (referralCode) await processReferral(user.id, referralCode);
+    }
+
+    const token = generateJwt(user.id);
+    success(
+      res,
+      { user, token, isNew, isProfileComplete: user.isProfileComplete },
+      isNew ? 'Account created! Welcome to OfferPlay 🎉' : 'Welcome back!',
+      isNew ? 201 : 200
+    );
+  } catch (err) {
+    logger.error('Firebase phone verify failed', { err });
+    error(res, 'Phone verification failed. Please try again.', 401);
+  }
+}
+
 // ─── Complete Profile ────────────────────────────────────────────────────────
 export async function completeProfile(req: Request, res: Response): Promise<void> {
   const userId = req.userId;
