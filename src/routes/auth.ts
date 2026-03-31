@@ -5,7 +5,7 @@ import { validate } from '../middleware/validate';
 import { authMiddleware } from '../middleware/auth';
 import { otpRateLimit } from '../middleware/rateLimit';
 import {
-  sendOtp, verifyPhone, googleAuth, phoneFirebaseVerify, logout, getMe,
+  sendOtp, verifyPhone, googleAuth, googleLogin, phoneFirebaseVerify, logout, getMe,
   completeProfile, updateFCMToken, updateProfile,
 } from '../controllers/authController';
 import { prisma } from '../config/database';
@@ -48,6 +48,7 @@ router.post('/phone/send-otp',        otpRateLimit, validate(phoneSchema),      
 router.post('/phone/verify',          validate(verifyPhoneSchema),               verifyPhone);
 router.post('/phone/firebase-verify', validate(z.object({ idToken: z.string().min(1), fcmToken: z.string().optional(), deviceId: z.string().optional(), referralCode: z.string().optional(), appVersion: z.string().optional() })), phoneFirebaseVerify);
 router.post('/google',            validate(googleSchema),                       googleAuth);
+router.post('/google-login',      validate(googleSchema),                       googleLogin);
 router.post('/complete-profile',  authMiddleware, validate(completeProfileSchema), completeProfile);
 router.post('/update-fcm',        authMiddleware, validate(fcmSchema),          updateFCMToken);
 router.put('/update-profile',     authMiddleware, updateProfile);

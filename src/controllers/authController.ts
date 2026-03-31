@@ -391,6 +391,76 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ─── Google Login (native sign-in, 50-coin bonus) ────────────────────────────
+export async function googleLogin(req: Request, res: Response): Promise<void> {
+  const { idToken, fcmToken, deviceId, referralCode } = req.body as {
+    idToken: string;
+    fcmToken?: string;
+    deviceId?: string;
+    referralCode?: string;
+  };
+
+  try {
+    const { verifyFirebaseToken } = await import('../config/firebase');
+    const decoded = await verifyFirebaseToken(idToken);
+
+    const googleId = decoded.uid;
+    const email    = decoded.email || null;
+    const name     = decoded.name  || null;
+
+    // Find by googleId OR email (account linking)
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ googleId }, ...(email ? [{ email }] : [])] },
+    });
+    const isNew = !existing;
+
+    const user = existing
+      ? await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            googleId:        existing.googleId ?? googleId,
+            email:           email    ?? undefined,
+            name:            existing.name || name || undefined,
+            isEmailVerified: email ? true : undefined,
+            fcmToken:        fcmToken ?? undefined,
+            deviceId:        deviceId ?? undefined,
+            lastLoginAt:     new Date(),
+            lastActiveAt:    new Date(),
+          },
+        })
+      : await prisma.user.create({
+          data: {
+            googleId,
+            email,
+            name,
+            referralCode:      generateReferralCode(),
+            isEmailVerified:   !!email,
+            isProfileComplete: !!(name && email),
+            fcmToken:          fcmToken ?? null,
+            deviceId:          deviceId ?? null,
+            lastLoginAt:       new Date(),
+            lastActiveAt:      new Date(),
+          },
+        });
+
+    if (isNew) {
+      await creditCoins(user.id, 50, TransactionType.EARN_BONUS, undefined, 'Google signup bonus');
+      if (referralCode) await processReferral(user.id, referralCode).catch(() => {});
+    }
+
+    const token = generateJwt(user.id);
+    success(
+      res,
+      { user, token, isNew, isProfileComplete: user.isProfileComplete },
+      isNew ? 'Account created! Welcome to OfferPlay 🎉' : 'Welcome back!',
+      isNew ? 201 : 200
+    );
+  } catch (err) {
+    logger.error('Google login failed', { err });
+    error(res, 'Google authentication failed. Please try again.', 401);
+  }
+}
+
 // ─── Logout ──────────────────────────────────────────────────────────────────
 export async function logout(req: Request, res: Response): Promise<void> {
   const token = req.headers.authorization?.substring(7);
