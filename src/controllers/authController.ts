@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import twilio from 'twilio';
 import { prisma } from '../config/database';
 import { getRedisClient, rk } from '../config/redis';
 import { creditCoins } from '../services/coinService';
@@ -9,6 +10,8 @@ import { success, error } from '../utils/response';
 import { env } from '../config/env';
 import { TransactionType } from '@prisma/client';
 import { logger } from '../utils/logger';
+
+const twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
 
 function generateJwt(userId: string): string {
   return jwt.sign({ userId }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as jwt.SignOptions);
@@ -77,7 +80,7 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Real phone — Redis required for rate limiting and OTP storage
+    // Real phone — rate limit via Redis, send OTP via Twilio Verify
     const redis = getRedisClient();
     const attempts = await redis.incr(rk(`otp_attempts:${phone}`));
     if (attempts === 1) await redis.expire(rk(`otp_attempts:${phone}`), 600);
@@ -86,12 +89,11 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-    await redis.setex(rk(`otp:${phone}`), 300, otp);
+    await twilioClient.verify.v2
+      .services(env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications.create({ to: phone, channel: 'sms' });
 
-    // TODO: Send OTP via SMS provider (MSG91 / Twilio)
-    logger.info(`[OTP] ${phone} → ${otp}`);
-
+    logger.info(`[OTP] Twilio Verify sent to ${phone}`);
     success(res, null, 'OTP sent successfully');
   } catch (err) {
     logger.error('Send OTP failed', { err });
@@ -122,15 +124,21 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
         return;
       }
     } else {
-      // Real phone — verify via Redis
-      const redis = getRedisClient();
-      const storedOtp = await redis.get(rk(`otp:${phone}`));
-      if (!storedOtp || storedOtp !== otp) {
+      // Real phone — verify via Twilio Verify
+      const check = await twilioClient.verify.v2
+        .services(env.TWILIO_VERIFY_SERVICE_SID)
+        .verificationChecks.create({ to: phone, code: otp });
+
+      if (check.status !== 'approved') {
         error(res, 'Invalid or expired OTP. Please try again.', 400);
         return;
       }
-      await redis.del(rk(`otp:${phone}`));
-      await redis.del(rk(`otp_attempts:${phone}`));
+
+      // Clear rate limit on success
+      try {
+        const redis = getRedisClient();
+        await redis.del(rk(`otp_attempts:${phone}`));
+      } catch { /* Redis optional here */ }
     }
 
     const existing = await prisma.user.findUnique({ where: { phone } });

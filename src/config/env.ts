@@ -37,4 +37,7 @@ export const env = {
   CPX_SECURE_HASH: process.env.CPX_SECURE_HASH || '',
   ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID || '',
   ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY || '',
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || '',
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || '',
+  TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID || '',
 };
