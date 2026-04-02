@@ -273,9 +273,15 @@ export function startIPLWorkers() {
     }
   }, { connection: conn, prefix: QUEUE_PREFIX });
 
-  // Error handlers
+  // Error handlers — must handle 'error' event or Node.js throws uncaught exception
   for (const w of [qGenWorker, unlockWorker, monitorWorker, resultWorker, scoreWorker]) {
     w.on('failed', (job, err) => logger.error(`IPL worker failed`, { queue: job?.queueName, err: err.message }));
+    w.on('error', (err) => logger.warn(`IPL worker error (Redis may be unavailable)`, { err: err.message }));
+  }
+
+  // Queue-level error handlers
+  for (const q of [iplQuestionGenQueue, iplContestUnlockQueue, iplMatchMonitorQueue, iplResultVerifyQueue, iplScoreCalcQueue, iplNotifQueue]) {
+    q.on('error', (err) => logger.warn(`IPL queue error`, { err: err.message }));
   }
 
   logger.info('IPL BullMQ workers started');
