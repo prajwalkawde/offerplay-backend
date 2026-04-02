@@ -90,6 +90,7 @@ router.get('/ipl/match/:id/participants', adminController_1.getMatchParticipants
 router.get('/ipl/matches/:id/participants', adminController_1.getMatchParticipants);
 // IPL — Cricbuzz sync
 router.get('/ipl/fetch-today', iplAdminController_1.fetchTodayMatches);
+router.post('/ipl/fetch-schedule', iplAdminController_1.fetchIPLSchedule);
 // IPL — Multi-contest per match
 router.get('/ipl/matches/:matchId/contests', iplAdminController_1.getMatchContests);
 router.post('/ipl/matches/:matchId/contests', iplAdminController_1.createIPLContest);
@@ -105,8 +106,8 @@ const redis_1 = require("../config/redis");
 const database_1 = require("../config/database");
 router.delete('/cache/clear', async (req, res) => {
     const [feedKeys, pubscaleKeys] = await Promise.all([
-        redis_1.redis.keys('offer_feed:*'),
-        redis_1.redis.keys('pubscale:*'),
+        redis_1.redis.keys((0, redis_1.rk)('offer_feed:*')),
+        redis_1.redis.keys((0, redis_1.rk)('pubscale:*')),
     ]);
     const allKeys = [...feedKeys, ...pubscaleKeys];
     if (allKeys.length > 0)
@@ -165,7 +166,7 @@ router.post('/test/reset-daily-bonus/:userId', async (req, res) => {
         });
         // Also clear Redis key for old claimDailyBonus endpoint
         const today = new Date().toISOString().slice(0, 10);
-        await redis_1.redis.del(`daily:${userId}:${today}`);
+        await redis_1.redis.del((0, redis_1.rk)(`daily:${userId}:${today}`));
         return (0, response_1.success)(res, null, 'Daily bonus reset!');
     }
     catch (err) {
@@ -180,7 +181,7 @@ router.post('/test/reset-all-daily-bonus', async (req, res) => {
         });
         // Clear all Redis daily bonus keys for today
         const today = new Date().toISOString().slice(0, 10);
-        const keys = await redis_1.redis.keys(`daily:*:${today}`);
+        const keys = await redis_1.redis.keys((0, redis_1.rk)(`daily:*:${today}`));
         if (keys.length > 0)
             await redis_1.redis.del(...keys);
         return (0, response_1.success)(res, { usersReset: true }, 'All daily bonuses reset!');

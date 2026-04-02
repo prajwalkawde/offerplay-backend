@@ -96,6 +96,12 @@ router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res
         sponsorName: c.sponsorName,
         sponsorLogo: c.sponsorLogo,
         hasJoined: userId ? c.entries.length > 0 : false,
+        displayStatus: (() => {
+          const rc = (c as any).regCloseTime as Date | null;
+          if (c.status === 'completed') return 'COMPLETED';
+          if (rc && new Date() > new Date(rc)) return 'LOCKED';
+          return 'OPEN';
+        })(),
       };
     })
     .sort((a, b) => {

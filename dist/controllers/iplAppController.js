@@ -112,6 +112,14 @@ function calcTotalPrizePool(prizeTiersConfig) {
         return sum + (t.coins || 0) * (to - from + 1);
     }, 0);
 }
+// ─── Helper: compute displayStatus for a contest ──────────────────────────────
+function getContestDisplayStatus(contestStatus, regCloseTime, matchStatus) {
+    if (contestStatus === 'completed' || matchStatus === 'completed')
+        return 'COMPLETED';
+    if (regCloseTime && new Date() > new Date(regCloseTime))
+        return 'LOCKED';
+    return 'OPEN';
+}
 // ─── GET /api/ipl/matches ─────────────────────────────────────────────────────
 // Returns upcoming matches (next 7 days) with published contests + user state
 async function getMatchesForApp(req, res) {
@@ -196,6 +204,7 @@ async function getMatchesForApp(req, res) {
                     sponsorLogo: c.sponsorLogo,
                     maxEntriesPerUser: c.maxEntriesPerUser,
                     hasJoined: c.entries.length > 0,
+                    displayStatus: getContestDisplayStatus(c.status, c.regCloseTime, match.status),
                 };
             })
                 // MEGA first, then by entry fee descending
@@ -566,11 +575,13 @@ async function getMyContests(req, res) {
                 predictionCount,
                 contestState,
                 questionCount: contest.questionCount ?? 0,
+                regCloseTime: contest.regCloseTime,
+                displayStatus: getContestDisplayStatus(contest.status, contest.regCloseTime, contest.match.status),
             };
         });
-        const active = result.filter(e => e.status === 'published' && !e.predictionsLocked);
-        const pending = result.filter(e => e.status === 'published' && !e.questionsAvailable);
-        const completed = result.filter(e => e.status === 'completed');
+        const active = result.filter(e => e.displayStatus === 'OPEN');
+        const pending = result.filter(e => e.displayStatus === 'LOCKED');
+        const completed = result.filter(e => e.displayStatus === 'COMPLETED' || e.status === 'completed');
         (0, response_1.success)(res, {
             all: result,
             active,

@@ -25,6 +25,7 @@ import {
   fetchTodayMatches, updateIPLMatch, processIPLResults,
   saveEditedQuestions, generateResultReport,
   generateIPLQuestions, getIPLAnalytics, deleteAdminIPLMatch,
+  fetchIPLSchedule,
 } from '../controllers/iplAdminController';
 import {
   listOfferwallOffers, blacklistOffer, whitelistOffer, getQualityReport,
@@ -141,6 +142,7 @@ router.get('/ipl/matches/:id/participants', getMatchParticipants);
 
 // IPL — Cricbuzz sync
 router.get('/ipl/fetch-today', fetchTodayMatches);
+router.post('/ipl/fetch-schedule', fetchIPLSchedule);
 
 // IPL — Multi-contest per match
 router.get('/ipl/matches/:matchId/contests', getMatchContests);

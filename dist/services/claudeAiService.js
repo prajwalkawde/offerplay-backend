@@ -73,16 +73,16 @@ Note: For prediction questions leave correctAnswer empty string. For trivia/stat
 }
 function getDefaultQuestions(matchData) {
     return [
-        {
-            question: `🏏 Who will win ${matchData.team1} vs ${matchData.team2}?`,
-            options: [matchData.team1, matchData.team2, 'No result', 'Super Over'],
-            correctAnswer: '',
-            points: 100,
-            difficulty: 'easy',
-            category: 'prediction',
-            explanation: 'Updated after match',
-            isPreMatch: true,
-        },
+        { question: `🏏 Who will win ${matchData.team1} vs ${matchData.team2}?`, options: [matchData.team1, matchData.team2, 'No Result', 'Super Over'], correctAnswer: '', points: 100, difficulty: 'easy', category: 'prediction', explanation: 'Updated after match ends', isPreMatch: true },
+        { question: `🎯 Who will win the toss?`, options: [matchData.team1, matchData.team2], correctAnswer: '', points: 50, difficulty: 'easy', category: 'prediction', explanation: 'Updated after toss', isPreMatch: true },
+        { question: `💥 Will there be a century in this match?`, options: ['Yes', 'No'], correctAnswer: '', points: 100, difficulty: 'medium', category: 'prediction', explanation: 'Updated after match', isPreMatch: true },
+        { question: `🏆 How many sixes will be hit in total?`, options: ['0-10', '11-20', '21-30', '31+'], correctAnswer: '', points: 120, difficulty: 'medium', category: 'prediction', explanation: 'Updated after match', isPreMatch: true },
+        { question: `⚡ Which team will score more in the powerplay?`, options: [matchData.team1, matchData.team2, 'Equal'], correctAnswer: '', points: 100, difficulty: 'medium', category: 'prediction', explanation: 'Updated after powerplay', isPreMatch: true },
+        { question: `📊 What will be the total runs scored in the match?`, options: ['Under 300', '300-350', '351-400', 'Over 400'], correctAnswer: '', points: 120, difficulty: 'hard', category: 'prediction', explanation: 'Updated after match', isPreMatch: true },
+        { question: `🎲 Will ${matchData.team1} win by more than 20 runs or 2+ wickets?`, options: ['Yes, convincingly', 'No, close finish'], correctAnswer: '', points: 150, difficulty: 'hard', category: 'prediction', explanation: 'Updated after match', isPreMatch: true },
+        { question: `🏏 Will the match have a 50+ partnership?`, options: ['Yes', 'No'], correctAnswer: 'Yes', points: 100, difficulty: 'easy', category: 'trivia', explanation: 'Most T20 matches have a 50+ partnership', isPreMatch: false },
+        { question: `👑 Who will be Man of the Match?`, options: [`${matchData.team1} player`, `${matchData.team2} player`, 'All-rounder'], correctAnswer: '', points: 150, difficulty: 'hard', category: 'prediction', explanation: 'Updated after match', isPreMatch: true },
+        { question: `🎯 Will there be a five-wicket haul in this match?`, options: ['Yes', 'No'], correctAnswer: 'No', points: 150, difficulty: 'hard', category: 'prediction', explanation: 'Five-wicket hauls are rare in T20', isPreMatch: false },
     ];
 }
 async function verifyAnswersWithAI(questions, matchResult) {
