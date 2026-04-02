@@ -158,7 +158,7 @@ router.post('/ipl/verify-results/:id', triggerResultVerification);
 
 // Automation endpoints
 router.get('/automation/logs', async (req, res) => {
-  const page = parseInt(String(req.query.page) || '1');
+  const page = Math.max(1, parseInt(String(req.query.page)) || 1);
   const limit = 50;
   const logs = await prisma.automationLog.findMany({
     orderBy: { createdAt: 'desc' },
