@@ -182,15 +182,22 @@ Return ONLY a valid JSON array, no markdown, no other text:
 
 // ─── Helper: single Claude call for a batch of questions ─────────────────────
 async function callClaudeBatch(prompt: string): Promise<GeneratedQuestion[]> {
+  logger.info(`Claude batch call — API key set: ${!!process.env.ANTHROPIC_API_KEY}, key prefix: ${process.env.ANTHROPIC_API_KEY?.slice(0, 15)}...`);
   const response = await claude.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 6000,
     messages: [{ role: 'user', content: prompt }],
   });
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
+  logger.info(`Claude batch response length: ${text.length} chars, stop_reason: ${response.stop_reason}`);
   const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) throw new Error('No JSON array in Claude response');
-  return JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
+  if (!jsonMatch) {
+    logger.error(`No JSON array found in Claude response. First 200 chars: ${text.slice(0, 200)}`);
+    throw new Error('No JSON array in Claude response');
+  }
+  const parsed = JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
+  logger.info(`Claude batch parsed ${parsed.length} questions`);
+  return parsed;
 }
 
 export async function generateQuestionsWithContext(matchData: IplMatchData & {
