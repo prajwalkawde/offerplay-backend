@@ -81,8 +81,26 @@ const io = new socket_io_1.Server(httpServer, {
 exports.io = io;
 (0, leaderboard_1.setupLeaderboardSocket)(io);
 // ─── Middleware ───────────────────────────────────────────────────────────────
+const allowedOrigins = [
+    'https://admin.offerplay.in',
+    'https://phpstack-1554518-6313385.cloudwaysapps.com',
+    'https://offerplay.in',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    process.env.ALLOWED_ORIGINS,
+].filter(Boolean);
 app.use((0, helmet_1.default)());
-app.use((0, cors_1.default)({ origin: '*', credentials: true }));
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+}));
 app.use((0, compression_1.default)());
 app.use(express_1.default.json({ limit: '1mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
@@ -136,6 +154,15 @@ async function bootstrap() {
     }
     catch (err) {
         logger_1.logger.warn('BullMQ workers failed to start (Redis may be unavailable)', { err });
+    }
+    // Start IPL workers
+    try {
+        const { startIPLWorkers } = await Promise.resolve().then(() => __importStar(require('./queues/iplQueues')));
+        startIPLWorkers();
+        logger_1.logger.info('IPL BullMQ workers started');
+    }
+    catch (err) {
+        logger_1.logger.warn('IPL workers failed to start', { err });
     }
     httpServer.listen(env_1.env.PORT, () => {
         logger_1.logger.info(`OfferPlay backend running on port ${env_1.env.PORT} [${env_1.env.NODE_ENV}]`);

@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const zod_1 = require("zod");
@@ -101,6 +134,55 @@ router.post('/ipl/contests/:contestId/process', iplAdminController_1.processIPLC
 router.get('/ipl/contests/:contestId/participants', iplAdminController_1.getContestParticipants);
 // Legacy AI triggers
 router.post('/ipl/verify-results/:id', adminController_1.triggerResultVerification);
+// Automation endpoints
+router.get('/automation/logs', async (req, res) => {
+    const page = parseInt(String(req.query.page) || '1');
+    const limit = 50;
+    const logs = await database_1.prisma.automationLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: (page - 1) * limit,
+    });
+    const total = await database_1.prisma.automationLog.count();
+    return (0, response_1.success)(res, { logs, total, page });
+});
+router.get('/automation/flagged', async (_req, res) => {
+    const flagged = await database_1.prisma.automationLog.findMany({
+        where: { status: 'FAILED' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+    });
+    return (0, response_1.success)(res, flagged);
+});
+router.post('/automation/trigger', async (req, res) => {
+    const { action, matchId } = req.body;
+    try {
+        if (action === 'sync_schedule') {
+            const { fetchTodayMatchesCricAPI } = await Promise.resolve().then(() => __importStar(require('../services/cricketService')));
+            await fetchTodayMatchesCricAPI();
+        }
+        else if (action === 'generate_questions' && matchId) {
+            const { iplQuestionGenQueue } = await Promise.resolve().then(() => __importStar(require('../queues/iplQueues')));
+            await iplQuestionGenQueue.add('generateQuestions', { matchId });
+        }
+        else if (action === 'unlock_contests' && matchId) {
+            const { iplContestUnlockQueue } = await Promise.resolve().then(() => __importStar(require('../queues/iplQueues')));
+            await iplContestUnlockQueue.add('unlockContest', { matchId });
+        }
+        return (0, response_1.success)(res, null, `${action} triggered`);
+    }
+    catch (err) {
+        return (0, response_1.error)(res, err.message, 500);
+    }
+});
+router.post('/ipl/matches/:id/schedule-jobs', async (req, res) => {
+    const match = await database_1.prisma.iplMatch.findUnique({ where: { id: req.params.id } });
+    if (!match)
+        return (0, response_1.error)(res, 'Match not found', 404);
+    const { scheduleMatchJobs } = await Promise.resolve().then(() => __importStar(require('../queues/iplQueues')));
+    await scheduleMatchJobs(match.id, match.matchDate);
+    return (0, response_1.success)(res, null, 'Jobs scheduled');
+});
 // ─── Cache Management ─────────────────────────────────────────────────────────
 const redis_1 = require("../config/redis");
 const database_1 = require("../config/database");

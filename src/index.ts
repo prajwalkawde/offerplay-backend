@@ -127,6 +127,15 @@ async function bootstrap(): Promise<void> {
     logger.warn('BullMQ workers failed to start (Redis may be unavailable)', { err });
   }
 
+  // Start IPL workers
+  try {
+    const { startIPLWorkers } = await import('./queues/iplQueues');
+    startIPLWorkers();
+    logger.info('IPL BullMQ workers started');
+  } catch (err) {
+    logger.warn('IPL workers failed to start', { err });
+  }
+
   httpServer.listen(env.PORT, () => {
     logger.info(`OfferPlay backend running on port ${env.PORT} [${env.NODE_ENV}]`);
   });

@@ -156,6 +156,55 @@ router.get('/ipl/contests/:contestId/participants', getContestParticipants);
 // Legacy AI triggers
 router.post('/ipl/verify-results/:id', triggerResultVerification);
 
+// Automation endpoints
+router.get('/automation/logs', async (req, res) => {
+  const page = parseInt(String(req.query.page) || '1');
+  const limit = 50;
+  const logs = await prisma.automationLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: (page - 1) * limit,
+  });
+  const total = await prisma.automationLog.count();
+  return apiSuccess(res, { logs, total, page });
+});
+
+router.get('/automation/flagged', async (_req, res) => {
+  const flagged = await prisma.automationLog.findMany({
+    where: { status: 'FAILED' },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+  return apiSuccess(res, flagged);
+});
+
+router.post('/automation/trigger', async (req, res) => {
+  const { action, matchId } = req.body;
+  try {
+    if (action === 'sync_schedule') {
+      const { fetchTodayMatchesCricAPI } = await import('../services/cricketService');
+      await fetchTodayMatchesCricAPI();
+    } else if (action === 'generate_questions' && matchId) {
+      const { iplQuestionGenQueue } = await import('../queues/iplQueues');
+      await iplQuestionGenQueue.add('generateQuestions', { matchId });
+    } else if (action === 'unlock_contests' && matchId) {
+      const { iplContestUnlockQueue } = await import('../queues/iplQueues');
+      await iplContestUnlockQueue.add('unlockContest', { matchId });
+    }
+    return apiSuccess(res, null, `${action} triggered`);
+  } catch (err: any) {
+    return apiError(res, err.message, 500);
+  }
+});
+
+router.post('/ipl/matches/:id/schedule-jobs', async (req, res) => {
+  const match = await prisma.iplMatch.findUnique({ where: { id: req.params.id as string } });
+  if (!match) return apiError(res, 'Match not found', 404);
+  const { scheduleMatchJobs } = await import('../queues/iplQueues');
+  await scheduleMatchJobs(match.id, match.matchDate);
+  return apiSuccess(res, null, 'Jobs scheduled');
+});
+
 // ─── Cache Management ─────────────────────────────────────────────────────────
 import { redis, rk } from '../config/redis';
 import { prisma } from '../config/database';
