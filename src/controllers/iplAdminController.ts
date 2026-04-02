@@ -969,13 +969,34 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
       { matchNumber: 20, team1: 'KKR',  team2: 'CSK',  matchDate: new Date('2026-04-07T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
     ];
 
+    // Only sync matches from today onwards (IST midnight)
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(Date.now() + istOffsetMs);
+    nowIst.setHours(0, 0, 0, 0);
+    const todayUtc = new Date(nowIst.getTime() - istOffsetMs);
+
+    const upcomingMatches = ipl2026Matches.filter(m => m.matchDate >= todayUtc);
+
     let created = 0;
     let updated = 0;
+    let skipped = 0;
 
     for (const m of ipl2026Matches) {
       const cricApiId = `ipl2026-match-${m.matchNumber}`;
+
+      // Skip past matches — don't create them, but update if they already exist
+      if (m.matchDate < todayUtc) {
+        const existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
+        if (!existing) { skipped++; continue; }
+      }
+
       const existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
       if (existing) {
+        // Never overwrite a completed/live match status
+        if (existing.status === 'completed' || existing.status === 'live') {
+          updated++;
+          continue;
+        }
         await prisma.iplMatch.update({
           where: { cricApiId },
           data: {
@@ -1004,7 +1025,7 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
       }
     }
 
-    success(res, { created, updated, total: ipl2026Matches.length }, `${created} created, ${updated} updated`);
+    success(res, { created, updated, skipped, upcoming: upcomingMatches.length }, `${created} created, ${updated} updated, ${skipped} past matches skipped`);
   } catch (err) {
     logger.error('fetchIPLSchedule error:', err);
     error(res, 'Failed to fetch schedule', 500);
