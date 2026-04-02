@@ -180,6 +180,19 @@ Return ONLY a valid JSON array, no markdown, no other text:
   }
 }
 
+// ─── Helper: single Claude call for a batch of questions ─────────────────────
+async function callClaudeBatch(prompt: string): Promise<GeneratedQuestion[]> {
+  const response = await claude.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 6000,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = response.content[0].type === 'text' ? response.content[0].text : '';
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error('No JSON array in Claude response');
+  return JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
+}
+
 export async function generateQuestionsWithContext(matchData: IplMatchData & {
   team1Players?: string[];
   team2Players?: string[];
@@ -189,82 +202,109 @@ export async function generateQuestionsWithContext(matchData: IplMatchData & {
   tossResult?: string;
   questionCount?: number;
 }): Promise<GeneratedQuestion[]> {
-  const count = matchData.questionCount || 30;
-  try {
-    const prompt = `You are India's most popular cricket prediction game designer (like Dream11/My11Circle). Create ${count} HIGHLY ENGAGING prediction questions for Indian cricket fans.
+  const t1 = matchData.team1;
+  const t2 = matchData.team2;
+  const xi1 = matchData.team1Players?.join(', ') || 'Not announced';
+  const xi2 = matchData.team2Players?.join(', ') || 'Not announced';
+  const context = `MATCH: ${t1} vs ${t2} | DATE: ${matchData.date} | VENUE: ${matchData.venue}
+${t1} XI: ${xi1}
+${t2} XI: ${xi2}
+${t1} Form: ${matchData.team1Form || 'No data'}
+${t2} Form: ${matchData.team2Form || 'No data'}
+H2H: ${matchData.h2h || 'No data'} | Toss: ${matchData.tossResult || 'Not done'}`;
 
-MATCH: ${matchData.team1} vs ${matchData.team2}
-DATE: ${matchData.date} | VENUE: ${matchData.venue}
-${matchData.team1} XI: ${matchData.team1Players?.join(', ') || 'Not announced'}
-${matchData.team2} XI: ${matchData.team2Players?.join(', ') || 'Not announced'}
-${matchData.team1} Form: ${matchData.team1Form || 'Recent form data unavailable'}
-${matchData.team2} Form: ${matchData.team2Form || 'Recent form data unavailable'}
-Head to Head: ${matchData.h2h || 'Historical data unavailable'}
-Toss: ${matchData.tossResult || 'Not done yet'}
+  const rules = `RULES:
+- Each question has exactly 4 specific options (never just Yes/No)
+- All correctAnswer must be "" (empty string)
+- Add drama + emojis to questions
+- Use real player names from the XI above
+- questionContext = 1 short hype line
+- Return ONLY a valid JSON array, no markdown`;
 
-CREATE EXACTLY ${count} QUESTIONS in this distribution:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🏆 MATCH OUTCOME (5 questions) — 100pts each
-  - Winner, margin of victory, method (runs/wickets), total overs bowled, DLS chance
+  const batch1Prompt = `You are India's top cricket prediction game designer. Create exactly 15 ENGAGING questions for Indian fans.
 
-🏏 BATTING HEROES (6 questions) — 150pts each
-  - Top scorer team1, top scorer team2, highest partnership, first to 50, century prediction, most boundaries
+${context}
 
-⚡ BOWLING ATTACK (5 questions) — 150pts each
-  - Most wickets team1, most wickets team2, best economy, first wicket method (bowled/caught/LBW), dot ball king
+CREATE THESE 15 QUESTIONS:
+🏆 MATCH OUTCOME (5 questions, 100 pts each)
+  Q1: Who will win? Options: "${t1} by 20+ runs", "${t1} by <20 runs/wickets", "${t2} by 20+ runs", "${t2} by <20 runs/wickets"
+  Q2: Winning margin? Options: "1-10 runs / 1-3 wickets", "11-25 runs / 4-6 wickets", "26-50 runs / 7-8 wickets", "51+ runs / 9-10 wickets"
+  Q3: Match result method? Options: "Won by runs", "Won by wickets", "Super Over", "No Result / DLS"
+  Q4: Total runs both teams combined? Options: "Under 300", "300-340", "341-380", "381+"
+  Q5: Will there be a DLS situation? Options: "Yes, DLS applied", "No, full match", "Match abandoned", "Reduced overs both"
 
-🎯 POWERPLAY BATTLE (4 questions) — 200pts each
-  - PP score team1, PP score team2, PP wickets, which team scores more in PP
+🏏 BATTING HEROES (6 questions, 150 pts each)
+  Q6: Top scorer of the match? Options: 4 player names from both XIs
+  Q7: Will ${t1}'s top batter score 50+? Options: "Yes, scores 50-74", "Yes, scores 75+", "No, out under 50", "Does not bat"
+  Q8: Will ${t2}'s top batter score 50+? Options: same pattern
+  Q9: Highest partnership in the match? Options: "Under 50 runs", "50-80 runs", "81-120 runs", "121+ runs"
+  Q10: Total boundaries (4s+6s) in match? Options: "Under 30", "30-45", "46-60", "61+"
+  Q11: First team to reach 100 runs? Options: "${t1} in PP (1-6 overs)", "${t1} in overs 7-12", "${t2} in PP (1-6 overs)", "${t2} in overs 7-12"
 
-💥 DEATH OVERS DRAMA (4 questions) — 200pts each
-  - Overs 17-20 runs team1, death wickets, most sixes in death, last over runs
+⚡ BOWLING ATTACK (4 questions, 150 pts each)
+  Q12: Most wickets in the match? Options: 4 bowler names from both XIs
+  Q13: Total wickets to fall in match? Options: "Under 12", "12-15", "16-18", "19-20"
+  Q14: Best bowling economy (<7 runs/over)? Options: 4 bowler names from both XIs
+  Q15: First wicket method? Options: "Caught", "Bowled", "LBW", "Run Out / Stumped"
 
-🌟 PLAYER SPOTLIGHT (4 questions) — 250pts each
-  - Use REAL player names from Playing XI
-  - Specific milestones: "Will [Player] score 40+?", "Will [Player] take 2+ wickets?"
-  - These should feel personal and exciting
+${rules}`;
 
-🔥 VIRAL MOMENTS (2 questions) — 300pts each
-  - Fun/unique: Most sixes in match, super over prediction, biggest six distance, crowd moment
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const batch2Prompt = `You are India's top cricket prediction game designer. Create exactly 15 ENGAGING questions for Indian fans.
 
-QUALITY RULES (this is what makes questions addictive):
-1. ✅ Use real player names wherever possible
-2. ✅ Each question must have 4 specific options (not vague like "Yes/No")
-3. ✅ Add drama to question text — "🔥 Can [Player] silence the critics today?"
-4. ✅ Options must be believable ranges — for runs use "0-30", "31-50", "51-75", "75+"
-5. ✅ All correctAnswer = "" (filled after match ends)
-6. ✅ Mix emojis naturally in questions
-7. ✅ questionContext = short hype line like "He's been in devastating form last 3 matches"
+${context}
 
-Return ONLY a valid JSON array, zero markdown, zero explanation:
-[
-  {
-    "question": "🏆 Who will win the ${matchData.team1} vs ${matchData.team2} thriller?",
-    "questionContext": "Both teams desperately need a win for playoff qualification",
-    "options": ["${matchData.team1} by 20+ runs", "${matchData.team1} by <20 runs / wickets", "${matchData.team2} by 20+ runs", "${matchData.team2} by <20 runs / wickets"],
-    "correctAnswer": "",
-    "points": 100,
-    "difficulty": "easy",
-    "category": "prediction",
-    "explanation": "Updated after match ends",
-    "isPreMatch": true
+CREATE THESE 15 QUESTIONS:
+🎯 POWERPLAY BATTLE (4 questions, 200 pts each)
+  Q1: ${t1} powerplay score (overs 1-6)? Options: "Under 40", "40-55", "56-70", "71+"
+  Q2: ${t2} powerplay score (overs 1-6)? Options: "Under 40", "40-55", "56-70", "71+"
+  Q3: Wickets in powerplay (both innings combined)? Options: "0-1 wickets", "2-3 wickets", "4-5 wickets", "6+ wickets"
+  Q4: Which team dominates powerplay? Options: "${t1} by 10+ runs", "${t1} by <10 runs", "${t2} by 10+ runs", "${t2} by <10 runs"
+
+💥 DEATH OVERS DRAMA (4 questions, 200 pts each)
+  Q5: Runs scored in last 4 overs by match winner? Options: "Under 40", "40-55", "56-70", "71+"
+  Q6: Total sixes in the match? Options: "Under 10", "10-15", "16-22", "23+"
+  Q7: Will there be a last-ball finish? Options: "Yes, last over decider", "No, won comfortably", "Second last over finish", "Super Over needed"
+  Q8: Biggest six of the match (estimated meters)? Options: "Under 90m", "90-100m", "101-110m", "110m+"
+
+🌟 PLAYER SPOTLIGHT (5 questions, 250 pts each)
+  Q9-Q13: Use REAL player names from XIs. Create dramatic questions like:
+  "🔥 Can [Player Name] silence the critics with a big knock today?"
+  "⚡ Will [Bowler Name] be the match-winner with 3+ wickets?"
+  "🏏 [Player Name] needs X runs for a milestone — will he get there?"
+  Make these personal, dramatic, and exciting using actual players listed above.
+
+🔥 VIRAL MOMENTS (2 questions, 300 pts each)
+  Q14: Man of the Match will be? Options: 4 player names (mix of batters + bowlers)
+  Q15: Most entertaining moment? Options: "A century", "A hat-trick", "A Super Over", "A last-ball six"
+
+${rules}`;
+
+  const allQuestions: GeneratedQuestion[] = [];
+
+  // Run both batches — if one fails, use what we have from the other
+  const [result1, result2] = await Promise.allSettled([
+    callClaudeBatch(batch1Prompt),
+    callClaudeBatch(batch2Prompt),
+  ]);
+
+  if (result1.status === 'fulfilled') {
+    allQuestions.push(...result1.value);
+  } else {
+    logger.error('Batch 1 failed:', result1.reason);
   }
-]`;
 
-    const response = await claude.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 10000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error('No JSON array in response');
-
-    return JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
-  } catch (err) {
-    logger.error('generateQuestionsWithContext error:', err);
-    return generateIPLQuestions(matchData); // fallback to existing function
+  if (result2.status === 'fulfilled') {
+    allQuestions.push(...result2.value);
+  } else {
+    logger.error('Batch 2 failed:', result2.reason);
   }
+
+  if (allQuestions.length >= 10) {
+    logger.info(`Generated ${allQuestions.length} questions via 2-batch Claude call`);
+    return allQuestions;
+  }
+
+  // Full fallback
+  logger.error('Both Claude batches failed, using fallback questions');
+  return getDefaultQuestions(matchData);
 }
