@@ -221,11 +221,12 @@ ${t2} Form: ${matchData.team2Form || 'No data'}
 H2H: ${matchData.h2h || 'No data'} | Toss: ${matchData.tossResult || 'Not done'}`;
 
   const rules = `RULES:
+- ALL questions and options must be in ENGLISH ONLY — no Hindi, no Hinglish
 - Each question has exactly 4 specific options (never just Yes/No)
 - All correctAnswer must be "" (empty string)
 - Add drama + emojis to questions
 - Use real player names from the XI above
-- questionContext = 1 short hype line
+- questionContext = 1 short hype line in English
 - Return ONLY a valid JSON array, no markdown`;
 
   const batch1Prompt = `You are India's top cricket prediction game designer. Create exactly 15 ENGAGING questions for Indian fans.
