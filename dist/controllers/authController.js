@@ -1,18 +1,54 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendOtp = sendOtp;
 exports.verifyPhone = verifyPhone;
+exports.phoneFirebaseVerify = phoneFirebaseVerify;
 exports.completeProfile = completeProfile;
 exports.updateFCMToken = updateFCMToken;
 exports.googleAuth = googleAuth;
+exports.googleLogin = googleLogin;
 exports.logout = logout;
 exports.getMe = getMe;
 exports.updateProfile = updateProfile;
 exports.devLogin = devLogin;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const twilio_1 = __importDefault(require("twilio"));
 const database_1 = require("../config/database");
 const redis_1 = require("../config/redis");
 const coinService_1 = require("../services/coinService");
@@ -22,11 +58,12 @@ const response_1 = require("../utils/response");
 const env_1 = require("../config/env");
 const client_1 = require("@prisma/client");
 const logger_1 = require("../utils/logger");
+const twilioClient = (0, twilio_1.default)(env_1.env.TWILIO_ACCOUNT_SID, env_1.env.TWILIO_AUTH_TOKEN);
 function generateJwt(userId) {
     return jsonwebtoken_1.default.sign({ userId }, env_1.env.JWT_SECRET, { expiresIn: env_1.env.JWT_EXPIRES_IN });
 }
 // ─── Test phone helpers (DB-driven) ──────────────────────────────────────────
-const FALLBACK_TEST_PHONES = ['8381071568'];
+const FALLBACK_TEST_PHONES = [];
 async function getTestPhoneOtp(phone) {
     const cleanPhone = phone.replace(/\D/g, '');
     try {
@@ -66,29 +103,38 @@ function isTestPhone(phone) {
 async function sendOtp(req, res) {
     const { phone } = req.body;
     try {
-        const redis = (0, redis_1.getRedisClient)();
-        // Rate limit: max 5 OTPs per phone per 10 minutes (skip for test phones)
-        const isTest = !!(await getTestPhoneOtp(phone).catch(() => null)) || isTestPhone(phone);
-        if (!isTest) {
-            const attempts = await redis.incr(`otp_attempts:${phone}`);
-            if (attempts === 1)
-                await redis.expire(`otp_attempts:${phone}`, 600);
-            if (attempts > 5) {
-                (0, response_1.error)(res, 'Too many OTP requests. Please try again in 10 minutes.', 429);
-                return;
+        // Check if test phone first (DB lookup, no Redis needed)
+        const testOtp = await getTestPhoneOtp(phone).catch(() => null);
+        const isTest = !!testOtp || isTestPhone(phone);
+        // For test phones: respond immediately — no Redis required
+        if (isTest) {
+            const otp = testOtp ?? '123456';
+            logger_1.logger.info(`[OTP-TEST] ${phone} → ${otp}`);
+            // Try to cache in Redis but don't fail if Redis is down
+            try {
+                const redis = (0, redis_1.getRedisClient)();
+                await redis.setex((0, redis_1.rk)(`otp:${phone}`), 300, otp);
             }
+            catch {
+                logger_1.logger.warn(`[OTP-TEST] Redis unavailable — test OTP will verify via DB`);
+            }
+            (0, response_1.success)(res, { otp }, 'OTP sent successfully');
+            return;
         }
-        // Check DB for test OTP; fall back to random in prod
-        const testOtp = await getTestPhoneOtp(phone);
-        const otp = testOtp
-            ?? (process.env.NODE_ENV !== 'production'
-                ? '123456'
-                : String(Math.floor(100000 + Math.random() * 900000)));
-        // Store OTP in Redis with 5 min TTL
-        await redis.setex(`otp:${phone}`, 300, otp);
-        // TODO: Send OTP via SMS provider (MSG91 / Twilio) in production
-        logger_1.logger.info(`[OTP] ${phone} → ${otp}`);
-        (0, response_1.success)(res, process.env.NODE_ENV !== 'production' ? { otp } : null, 'OTP sent successfully');
+        // Real phone — rate limit via Redis, send OTP via Twilio Verify
+        const redis = (0, redis_1.getRedisClient)();
+        const attempts = await redis.incr((0, redis_1.rk)(`otp_attempts:${phone}`));
+        if (attempts === 1)
+            await redis.expire((0, redis_1.rk)(`otp_attempts:${phone}`), 600);
+        if (attempts > 5) {
+            (0, response_1.error)(res, 'Too many OTP requests. Please try again in 10 minutes.', 429);
+            return;
+        }
+        await twilioClient.verify.v2
+            .services(env_1.env.TWILIO_VERIFY_SERVICE_SID)
+            .verifications.create({ to: phone, channel: 'sms' });
+        logger_1.logger.info(`[OTP] Twilio Verify sent to ${phone}`);
+        (0, response_1.success)(res, null, 'OTP sent successfully');
     }
     catch (err) {
         logger_1.logger.error('Send OTP failed', { err });
@@ -99,15 +145,32 @@ async function sendOtp(req, res) {
 async function verifyPhone(req, res) {
     const { phone, otp, referralCode, fcmToken, deviceId, appVersion } = req.body;
     try {
-        const redis = (0, redis_1.getRedisClient)();
-        const storedOtp = await redis.get(`otp:${phone}`);
-        if (!storedOtp || storedOtp !== otp) {
-            (0, response_1.error)(res, 'Invalid or expired OTP. Please try again.', 400);
-            return;
+        // For test phones: verify against DB test OTP (Redis optional)
+        const testOtp = await getTestPhoneOtp(phone).catch(() => null);
+        const isTest = !!testOtp || isTestPhone(phone);
+        if (isTest) {
+            const expectedOtp = testOtp ?? '123456';
+            if (otp !== expectedOtp) {
+                (0, response_1.error)(res, 'Invalid OTP. Please try again.', 400);
+                return;
+            }
         }
-        // Consume OTP
-        await redis.del(`otp:${phone}`);
-        await redis.del(`otp_attempts:${phone}`);
+        else {
+            // Real phone — verify via Twilio Verify
+            const check = await twilioClient.verify.v2
+                .services(env_1.env.TWILIO_VERIFY_SERVICE_SID)
+                .verificationChecks.create({ to: phone, code: otp });
+            if (check.status !== 'approved') {
+                (0, response_1.error)(res, 'Invalid or expired OTP. Please try again.', 400);
+                return;
+            }
+            // Clear rate limit on success
+            try {
+                const redis = (0, redis_1.getRedisClient)();
+                await redis.del((0, redis_1.rk)(`otp_attempts:${phone}`));
+            }
+            catch { /* Redis optional here */ }
+        }
         const existing = await database_1.prisma.user.findUnique({ where: { phone } });
         const isNew = !existing;
         const user = await database_1.prisma.user.upsert({
@@ -146,9 +209,62 @@ async function verifyPhone(req, res) {
         (0, response_1.error)(res, 'Verification failed. Please try again.', 500);
     }
 }
+// ─── Firebase Phone Auth Verify ──────────────────────────────────────────────
+async function phoneFirebaseVerify(req, res) {
+    const { idToken, fcmToken, deviceId, referralCode, appVersion } = req.body;
+    try {
+        const { verifyFirebaseToken } = await Promise.resolve().then(() => __importStar(require('../config/firebase')));
+        const decoded = await verifyFirebaseToken(idToken);
+        const phone = decoded.phone_number;
+        if (!phone) {
+            (0, response_1.error)(res, 'Invalid Firebase token: no phone number', 400);
+            return;
+        }
+        const existing = await database_1.prisma.user.findUnique({ where: { phone } });
+        const isNew = !existing;
+        const user = await database_1.prisma.user.upsert({
+            where: { phone },
+            create: {
+                phone,
+                referralCode: (0, crypto_1.generateReferralCode)(),
+                fcmToken: fcmToken ?? null,
+                deviceId: deviceId ?? null,
+                appVersion: appVersion ?? null,
+                deviceType: 'mobile',
+                isPhoneVerified: true,
+                lastLoginAt: new Date(),
+                lastActiveAt: new Date(),
+            },
+            update: {
+                fcmToken: fcmToken ?? undefined,
+                deviceId: deviceId ?? undefined,
+                appVersion: appVersion ?? undefined,
+                deviceType: 'mobile',
+                isPhoneVerified: true,
+                lastLoginAt: new Date(),
+                lastActiveAt: new Date(),
+            },
+        });
+        if (isNew) {
+            await (0, coinService_1.creditCoins)(user.id, 100, client_1.TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
+            if (referralCode)
+                await (0, referralService_1.processReferral)(user.id, referralCode);
+        }
+        const token = generateJwt(user.id);
+        (0, response_1.success)(res, { user, token, isNew, isProfileComplete: user.isProfileComplete }, isNew ? 'Account created! Welcome to OfferPlay 🎉' : 'Welcome back!', isNew ? 201 : 200);
+    }
+    catch (err) {
+        logger_1.logger.error('Firebase phone verify failed', { err });
+        (0, response_1.error)(res, 'Phone verification failed. Please try again.', 401);
+    }
+}
 // ─── Complete Profile ────────────────────────────────────────────────────────
 async function completeProfile(req, res) {
-    const userId = req.user?.id;
+    const userId = req.userId;
+    if (!userId) {
+        (0, response_1.error)(res, 'Unauthorized', 401);
+        return;
+    }
     const { name, email, dateOfBirth, city, state, country, favouriteTeam, referralCode } = req.body;
     try {
         const existing = await database_1.prisma.user.findUnique({ where: { id: userId } });
@@ -177,7 +293,12 @@ async function completeProfile(req, res) {
         (0, response_1.success)(res, { user }, 'Profile updated successfully');
     }
     catch (err) {
-        logger_1.logger.error('Complete profile failed', { err });
+        logger_1.logger.error('Complete profile failed', {
+            userId,
+            errCode: err?.code,
+            errMsg: err?.message,
+            errMeta: err?.meta,
+        });
         if (err.code === 'P2002') {
             (0, response_1.error)(res, 'This email is already in use.', 409);
         }
@@ -188,7 +309,7 @@ async function completeProfile(req, res) {
 }
 // ─── Update FCM Token ────────────────────────────────────────────────────────
 async function updateFCMToken(req, res) {
-    const userId = req.user?.id;
+    const userId = req.userId;
     const { fcmToken } = req.body;
     try {
         await database_1.prisma.user.update({ where: { id: userId }, data: { fcmToken } });
@@ -201,14 +322,120 @@ async function updateFCMToken(req, res) {
 }
 // ─── Google Auth ─────────────────────────────────────────────────────────────
 async function googleAuth(req, res) {
-    (0, response_1.error)(res, 'Google auth coming soon', 501);
+    const { idToken, fcmToken, deviceId, referralCode } = req.body;
+    try {
+        const { verifyFirebaseToken } = await Promise.resolve().then(() => __importStar(require('../config/firebase')));
+        const decoded = await verifyFirebaseToken(idToken);
+        const googleId = decoded.uid;
+        const email = decoded.email || null;
+        const name = decoded.name || null;
+        // Find by googleId OR email (account linking)
+        const existing = await database_1.prisma.user.findFirst({
+            where: { OR: [{ googleId }, ...(email ? [{ email }] : [])] },
+        });
+        const isNew = !existing;
+        const user = existing
+            ? await database_1.prisma.user.update({
+                where: { id: existing.id },
+                data: {
+                    googleId: existing.googleId ?? googleId,
+                    email: email ?? undefined,
+                    name: existing.name || name || undefined,
+                    isEmailVerified: email ? true : undefined,
+                    fcmToken: fcmToken ?? undefined,
+                    deviceId: deviceId ?? undefined,
+                    lastLoginAt: new Date(),
+                    lastActiveAt: new Date(),
+                },
+            })
+            : await database_1.prisma.user.create({
+                data: {
+                    googleId,
+                    email,
+                    name,
+                    referralCode: (0, crypto_1.generateReferralCode)(),
+                    isEmailVerified: !!email,
+                    isProfileComplete: false,
+                    fcmToken: fcmToken ?? null,
+                    deviceId: deviceId ?? null,
+                    lastLoginAt: new Date(),
+                    lastActiveAt: new Date(),
+                },
+            });
+        if (isNew) {
+            await (0, coinService_1.creditCoins)(user.id, 100, client_1.TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
+            if (referralCode)
+                await (0, referralService_1.processReferral)(user.id, referralCode).catch(() => { });
+        }
+        const token = generateJwt(user.id);
+        (0, response_1.success)(res, { user, token, isNew, isProfileComplete: user.isProfileComplete }, isNew ? 'Account created! Welcome to OfferPlay 🎉' : 'Welcome back!', isNew ? 201 : 200);
+    }
+    catch (err) {
+        logger_1.logger.error('Google auth failed', { err });
+        (0, response_1.error)(res, 'Google authentication failed. Please try again.', 401);
+    }
+}
+// ─── Google Login (native sign-in, 50-coin bonus) ────────────────────────────
+async function googleLogin(req, res) {
+    const { idToken, fcmToken, deviceId, referralCode } = req.body;
+    try {
+        const { verifyFirebaseToken } = await Promise.resolve().then(() => __importStar(require('../config/firebase')));
+        const decoded = await verifyFirebaseToken(idToken);
+        const googleId = decoded.uid;
+        const email = decoded.email || null;
+        const name = decoded.name || null;
+        // Find by googleId OR email (account linking)
+        const existing = await database_1.prisma.user.findFirst({
+            where: { OR: [{ googleId }, ...(email ? [{ email }] : [])] },
+        });
+        const isNew = !existing;
+        const user = existing
+            ? await database_1.prisma.user.update({
+                where: { id: existing.id },
+                data: {
+                    googleId: existing.googleId ?? googleId,
+                    email: email ?? undefined,
+                    name: existing.name || name || undefined,
+                    isEmailVerified: email ? true : undefined,
+                    fcmToken: fcmToken ?? undefined,
+                    deviceId: deviceId ?? undefined,
+                    lastLoginAt: new Date(),
+                    lastActiveAt: new Date(),
+                },
+            })
+            : await database_1.prisma.user.create({
+                data: {
+                    googleId,
+                    email,
+                    name,
+                    referralCode: (0, crypto_1.generateReferralCode)(),
+                    isEmailVerified: !!email,
+                    isProfileComplete: false,
+                    fcmToken: fcmToken ?? null,
+                    deviceId: deviceId ?? null,
+                    lastLoginAt: new Date(),
+                    lastActiveAt: new Date(),
+                },
+            });
+        if (isNew) {
+            await (0, coinService_1.creditCoins)(user.id, 50, client_1.TransactionType.EARN_BONUS, undefined, 'Google signup bonus');
+            if (referralCode)
+                await (0, referralService_1.processReferral)(user.id, referralCode).catch(() => { });
+        }
+        const token = generateJwt(user.id);
+        (0, response_1.success)(res, { user, token, isNew, isProfileComplete: user.isProfileComplete }, isNew ? 'Account created! Welcome to OfferPlay 🎉' : 'Welcome back!', isNew ? 201 : 200);
+    }
+    catch (err) {
+        logger_1.logger.error('Google login failed', { err });
+        (0, response_1.error)(res, 'Google authentication failed. Please try again.', 401);
+    }
 }
 // ─── Logout ──────────────────────────────────────────────────────────────────
 async function logout(req, res) {
     const token = req.headers.authorization?.substring(7);
     if (token) {
         const redis = (0, redis_1.getRedisClient)();
-        await redis.setex(`blacklist:${token}`, 30 * 24 * 60 * 60, '1');
+        await redis.setex((0, redis_1.rk)(`blacklist:${token}`), 30 * 24 * 60 * 60, '1');
     }
     (0, response_1.success)(res, null, 'Logged out successfully');
 }
@@ -218,7 +445,7 @@ async function getMe(req, res) {
 }
 // ─── Update Profile ──────────────────────────────────────────────────────────
 async function updateProfile(req, res) {
-    const userId = req.user?.id;
+    const userId = req.userId;
     const { name, email, city, state, favouriteTeam } = req.body;
     if (!name || name.trim().length < 2) {
         (0, response_1.error)(res, 'Valid name required', 400);
