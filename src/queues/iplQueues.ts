@@ -217,13 +217,69 @@ export function startIPLWorkers() {
     }
   }, { connection: conn, prefix: QUEUE_PREFIX });
 
+  // Match monitor worker — runs every 5 min during match, detects match end, queues result verification
+  const monitorWorker = new Worker('ipl-match-monitor', async (job: Job) => {
+    const { matchId } = job.data;
+    try {
+      const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
+      if (!match) return;
+      if (match.resultVerified) {
+        logger.info(`Match ${matchId} already verified, skipping monitor`);
+        return;
+      }
+
+      // Set to live if not already
+      if (match.status === 'upcoming') {
+        await prisma.iplMatch.update({ where: { id: matchId }, data: { status: 'live' } });
+      }
+
+      // Find real CricAPI match ID if we only have a placeholder
+      let cricApiMatchId = match.cricApiId;
+      if (!cricApiMatchId || cricApiMatchId.startsWith('ipl2026-match-')) {
+        const { fetchTodayMatchesCricAPI } = await import('../services/cricketService');
+        const todayMatches = await fetchTodayMatchesCricAPI();
+        const found = todayMatches.find((m: any) => {
+          const name = (m.name || '').toLowerCase();
+          return (
+            name.includes(match.team1.toLowerCase()) ||
+            name.includes(match.team2.toLowerCase())
+          );
+        });
+        if (found?.id) {
+          cricApiMatchId = found.id;
+          await prisma.iplMatch.update({ where: { id: matchId }, data: { cricApiId: cricApiMatchId } });
+          logger.info(`Linked CricAPI ID ${cricApiMatchId} to match ${matchId}`);
+        }
+      }
+
+      if (!cricApiMatchId || cricApiMatchId.startsWith('ipl2026-match-')) {
+        await logJob('MATCH_MONITOR', 'PENDING', 'Waiting for CricAPI match ID', matchId);
+        return;
+      }
+
+      const { isMatchEnded } = await import('../services/cricketService');
+      const ended = await isMatchEnded(cricApiMatchId);
+
+      if (ended) {
+        logger.info(`Match ${matchId} ended — queuing result verification`);
+        await iplResultVerifyQueue.add('verifyResults', { matchId }, { jobId: `result-${matchId}` });
+        await logJob('MATCH_MONITOR', 'SUCCESS', 'Match ended, verification queued', matchId);
+      } else {
+        logger.info(`Match ${matchId} still in progress`);
+      }
+    } catch (err: any) {
+      await logJob('MATCH_MONITOR', 'FAILED', err.message, matchId);
+      throw err;
+    }
+  }, { connection: conn, prefix: QUEUE_PREFIX });
+
   // Error handlers
-  for (const w of [qGenWorker, unlockWorker, resultWorker, scoreWorker]) {
+  for (const w of [qGenWorker, unlockWorker, monitorWorker, resultWorker, scoreWorker]) {
     w.on('failed', (job, err) => logger.error(`IPL worker failed`, { queue: job?.queueName, err: err.message }));
   }
 
   logger.info('IPL BullMQ workers started');
-  return [qGenWorker, unlockWorker, resultWorker, scoreWorker];
+  return [qGenWorker, unlockWorker, monitorWorker, resultWorker, scoreWorker];
 }
 
 // ─── Schedule helpers ─────────────────────────────────────────────────────────
