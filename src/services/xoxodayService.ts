@@ -22,10 +22,10 @@ const getXoxodayToken = async (): Promise<string> => {
     return '';
   }
 
-  // Try multiple auth endpoints Xoxoday uses
+  // Xoxoday Storefront/Rewards API auth endpoint (trailing slash required)
   const authEndpoints = [
     {
-      url: 'https://accounts.xoxoday.com/auth/api/oauth/token',
+      url: 'https://accounts.xoxoday.com/auth/api/oauth/token/',
       data: {
         client_id: clientId,
         client_secret: secretId,
@@ -34,22 +34,13 @@ const getXoxodayToken = async (): Promise<string> => {
       contentType: 'application/json',
     },
     {
-      url: 'https://api.xoxoday.com/accts/v1/oauth/token',
+      url: 'https://accounts.xoxoday.com/auth/api/oauth/token/',
       data: new URLSearchParams({
         client_id: clientId,
         client_secret: secretId,
         grant_type: 'client_credentials',
       }).toString(),
       contentType: 'application/x-www-form-urlencoded',
-    },
-    {
-      url: 'https://api.xoxoday.com/api/v1/oauth/token',
-      data: {
-        client_id: clientId,
-        client_secret: secretId,
-        grant_type: 'client_credentials',
-      },
-      contentType: 'application/json',
     },
   ];
 
@@ -107,11 +98,11 @@ export const getXoxodayProducts = async (
       return getMockProducts();
     }
 
-    // Try different product endpoints
+    // Xoxoday Gift Cards API voucher catalog endpoint
     const productEndpoints = [
-      `https://api.xoxoday.com/v1/vouchers?countries=${countryCode}&limit=100`,
-      `https://api.xoxoday.com/api/v1/vouchers?country=${countryCode}`,
-      `https://api.xoxoday.com/v3/catalog?country=${countryCode}`,
+      `https://api.xoxoday.com/api/v1/vouchers?country=${countryCode}&limit=100`,
+      `https://api.xoxoday.com/api/v1/catalog?country=${countryCode}&limit=100`,
+      `https://api.xoxoday.com/v1/vouchers?country=${countryCode}&limit=100`,
     ];
 
     for (const url of productEndpoints) {

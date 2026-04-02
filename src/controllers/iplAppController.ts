@@ -91,8 +91,12 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
     const userId = req.userId;
     const logoUrls = await getTeamLogoUrls();
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Use IST midnight (UTC+5:30) as the day boundary — target market is India
+    const nowUtc = new Date();
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
+    nowIst.setHours(0, 0, 0, 0);
+    const today = new Date(nowIst.getTime() - istOffsetMs); // back to UTC
     const nextWeek = new Date(today);
     nextWeek.setDate(nextWeek.getDate() + 7);
 
@@ -100,6 +104,16 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
       where: {
         matchDate: { gte: today, lte: nextWeek },
         status: { not: 'cancelled' },
+        // Only show matches that have at least one contest still open for registration
+        contests: {
+          some: {
+            status: 'published',
+            OR: [
+              { regCloseTime: null },
+              { regCloseTime: { gt: new Date() } },
+            ],
+          },
+        },
       },
       include: {
         questions: { select: { id: true } },
@@ -210,6 +224,11 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
     if (!contest) { error(res, 'Contest not found', 404); return; }
     if (contest.status !== 'published') {
       error(res, 'Contest not available', 400); return;
+    }
+
+    // Block joining after registration deadline (all times compared in UTC)
+    if (contest.regCloseTime && new Date() > new Date(contest.regCloseTime)) {
+      error(res, 'Registration is closed for this contest', 400); return;
     }
 
     // Already joined?
