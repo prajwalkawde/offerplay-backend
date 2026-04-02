@@ -9,7 +9,7 @@ export const env = {
   REDIS_PORT: parseInt(process.env.REDIS_PORT || '6379', 10),
   REDIS_USERNAME: process.env.REDIS_USERNAME || undefined,
   REDIS_PASSWORD: process.env.REDIS_PASSWORD || undefined,
-  JWT_SECRET: process.env.JWT_SECRET || 'fallback-secret',
+  JWT_SECRET: process.env.JWT_SECRET || '',
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '30d',
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
   FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
