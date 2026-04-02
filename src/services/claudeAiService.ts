@@ -200,6 +200,16 @@ async function callClaudeBatch(prompt: string): Promise<GeneratedQuestion[]> {
   return parsed;
 }
 
+const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
+  en:       'Write ALL questions and options in ENGLISH only.',
+  hi:       'Write ALL questions and options in Hindi (हिंदी) only. Use Devanagari script.',
+  hinglish: 'Write ALL questions and options in Hinglish (Roman script Hindi-English mix, like "Kaun jeetega aaj?" style). Fun, casual Hinglish only.',
+  ta:       'Write ALL questions and options in Tamil (தமிழ்) only. Use Tamil script.',
+  te:       'Write ALL questions and options in Telugu (తెలుగు) only. Use Telugu script.',
+  bn:       'Write ALL questions and options in Bengali (বাংলা) only. Use Bengali script.',
+  mr:       'Write ALL questions and options in Marathi (मराठी) only. Use Devanagari script.',
+};
+
 export async function generateQuestionsWithContext(matchData: IplMatchData & {
   team1Players?: string[];
   team2Players?: string[];
@@ -208,9 +218,13 @@ export async function generateQuestionsWithContext(matchData: IplMatchData & {
   h2h?: string;
   tossResult?: string;
   questionCount?: number;
+  language?: string;
 }): Promise<GeneratedQuestion[]> {
   const t1 = matchData.team1;
   const t2 = matchData.team2;
+  const lang = matchData.language || 'en';
+  const langInstruction = LANGUAGE_INSTRUCTIONS[lang] || LANGUAGE_INSTRUCTIONS.en;
+
   const xi1 = matchData.team1Players?.join(', ') || 'Not announced';
   const xi2 = matchData.team2Players?.join(', ') || 'Not announced';
   const context = `MATCH: ${t1} vs ${t2} | DATE: ${matchData.date} | VENUE: ${matchData.venue}
@@ -221,12 +235,12 @@ ${t2} Form: ${matchData.team2Form || 'No data'}
 H2H: ${matchData.h2h || 'No data'} | Toss: ${matchData.tossResult || 'Not done'}`;
 
   const rules = `RULES:
-- ALL questions and options must be in ENGLISH ONLY — no Hindi, no Hinglish
+- LANGUAGE: ${langInstruction}
 - Each question has exactly 4 specific options (never just Yes/No)
 - All correctAnswer must be "" (empty string)
 - Add drama + emojis to questions
 - Use real player names from the XI above
-- questionContext = 1 short hype line in English
+- questionContext = 1 short hype line in the same language
 - Return ONLY a valid JSON array, no markdown`;
 
   const batch1Prompt = `You are India's top cricket prediction game designer. Create exactly 15 ENGAGING questions for Indian fans.
@@ -289,7 +303,6 @@ ${rules}`;
 
   const allQuestions: GeneratedQuestion[] = [];
 
-  // Run both batches — if one fails, use what we have from the other
   const [result1, result2] = await Promise.allSettled([
     callClaudeBatch(batch1Prompt),
     callClaudeBatch(batch2Prompt),
@@ -298,21 +311,20 @@ ${rules}`;
   if (result1.status === 'fulfilled') {
     allQuestions.push(...result1.value);
   } else {
-    logger.error('Batch 1 failed:', result1.reason);
+    logger.error(`Batch 1 failed [${lang}]:`, result1.reason);
   }
 
   if (result2.status === 'fulfilled') {
     allQuestions.push(...result2.value);
   } else {
-    logger.error('Batch 2 failed:', result2.reason);
+    logger.error(`Batch 2 failed [${lang}]:`, result2.reason);
   }
 
   if (allQuestions.length >= 10) {
-    logger.info(`Generated ${allQuestions.length} questions via 2-batch Claude call`);
+    logger.info(`Generated ${allQuestions.length} questions [${lang}] via 2-batch Claude call`);
     return allQuestions;
   }
 
-  // Full fallback
-  logger.error('Both Claude batches failed, using fallback questions');
+  logger.error(`Both Claude batches failed [${lang}], using fallback questions`);
   return getDefaultQuestions(matchData);
 }

@@ -389,6 +389,7 @@ model IplQuestion {
   claudeConfidence Float?
   isVerified       Boolean         @default(false)
   verifiedAt       DateTime?
+  language         String          @default("en")
   match            IplMatch        @relation(fields: [matchId], references: [id])
   predictions      IplPrediction[]
 }

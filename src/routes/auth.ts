@@ -6,7 +6,7 @@ import { authMiddleware } from '../middleware/auth';
 import { otpRateLimit } from '../middleware/rateLimit';
 import {
   sendOtp, verifyPhone, googleAuth, googleLogin, phoneFirebaseVerify, logout, getMe,
-  completeProfile, updateFCMToken, updateProfile,
+  completeProfile, updateFCMToken, updateProfile, updateLanguage,
 } from '../controllers/authController';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
@@ -52,6 +52,7 @@ router.post('/google-login',      validate(googleSchema),                       
 router.post('/complete-profile',  authMiddleware, validate(completeProfileSchema), completeProfile);
 router.post('/update-fcm',        authMiddleware, validate(fcmSchema),          updateFCMToken);
 router.put('/update-profile',     authMiddleware, updateProfile);
+router.patch('/language',         authMiddleware, updateLanguage);
 router.post('/logout',            authMiddleware,                               logout);
 router.get('/me',                 authMiddleware,                               getMe);
 

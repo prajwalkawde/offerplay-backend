@@ -526,6 +526,21 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
   }
 }
 
+// ─── PATCH /api/auth/language ─────────────────────────────────────────────────
+export async function updateLanguage(req: Request, res: Response): Promise<void> {
+  const userId = req.userId!;
+  const { language } = req.body as { language?: string };
+
+  const SUPPORTED = ['en', 'hi', 'hinglish', 'ta', 'te', 'bn', 'mr'];
+  if (!language || !SUPPORTED.includes(language)) {
+    error(res, 'Invalid language code', 400);
+    return;
+  }
+
+  await prisma.user.update({ where: { id: userId }, data: { language } });
+  success(res, { language }, 'Language updated');
+}
+
 // ─── Dev-only login (generates real JWT for test phone) ──────────────────────
 export async function devLogin(req: Request, res: Response): Promise<void> {
   if (process.env.NODE_ENV === 'production') {

@@ -290,27 +290,22 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
   const { contestId } = req.params as { contestId: string };
 
   try {
+    // Get user's language preference
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { language: true } });
+    const userLang = user?.language || 'en';
+
     const entry = await prisma.iplContestEntry.findUnique({
       where: { contestId_userId: { contestId, userId } },
       include: {
         contest: {
-          include: {
-            match: {
-              include: {
-                questions: {
-                  where: { status: 'active' },
-                  orderBy: { id: 'asc' },
-                },
-              },
-            },
-          },
+          include: { match: { select: { id: true } } },
         },
       },
     });
 
     if (!entry) { error(res, 'Join the contest first!', 400); return; }
 
-    const contest = entry.contest;
+    const contest = entry.contest as any;
     const now = new Date();
 
     if (contest.questionsAvailableAt && contest.questionsAvailableAt > now) {
@@ -326,7 +321,24 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
     const predictionsLocked =
       !!contest.questionsLockAt && contest.questionsLockAt <= now;
 
-    const questions = contest.match?.questions ?? [];
+    const matchId = contest.match?.id;
+    if (!matchId) {
+      success(res, { questionsAvailable: true, questionsLocked: predictionsLocked, questions: [], message: 'No questions available' });
+      return;
+    }
+
+    // Fetch questions in user's language, fallback to English
+    let questions = await prisma.iplQuestion.findMany({
+      where: { matchId, status: 'active', language: userLang },
+      orderBy: { questionNumber: 'asc' },
+    });
+
+    if (questions.length === 0 && userLang !== 'en') {
+      questions = await prisma.iplQuestion.findMany({
+        where: { matchId, status: 'active', language: 'en' },
+        orderBy: { questionNumber: 'asc' },
+      });
+    }
 
     if (questions.length === 0) {
       success(res, {
@@ -338,11 +350,7 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       return;
     }
 
-    const matchId = contest.match?.id;
-    const predictions = matchId
-      ? await prisma.iplPrediction.findMany({ where: { userId, matchId } })
-      : [];
-
+    const predictions = await prisma.iplPrediction.findMany({ where: { userId, matchId } });
     const predMap: Record<string, string> = {};
     predictions.forEach((p: { questionId: string; answer: string }) => {
       predMap[p.questionId] = p.answer;
@@ -352,7 +360,8 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       questionsAvailable: true,
       questionsLocked: predictionsLocked,
       questionsLockAt: contest.questionsLockAt,
-      questions: questions.map((q: { id: string; question: string; options: unknown; points: number; difficulty: string; category: string; correctAnswer: string | null }) => ({
+      language: userLang,
+      questions: questions.map(q => ({
         id: q.id,
         question: q.question,
         options: q.options,
