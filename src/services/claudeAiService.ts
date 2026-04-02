@@ -76,7 +76,7 @@ Note: For prediction questions leave correctAnswer empty string. For trivia/stat
 
     const response = await claude.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 3000,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -187,52 +187,74 @@ export async function generateQuestionsWithContext(matchData: IplMatchData & {
   team2Form?: string;
   h2h?: string;
   tossResult?: string;
+  questionCount?: number;
 }): Promise<GeneratedQuestion[]> {
+  const count = matchData.questionCount || 30;
   try {
-    const prompt = `You are India's top IPL cricket analyst creating prediction questions for a mobile game.
+    const prompt = `You are India's most popular cricket prediction game designer (like Dream11/My11Circle). Create ${count} HIGHLY ENGAGING prediction questions for Indian cricket fans.
 
-MATCH DETAILS:
-Teams: ${matchData.team1} vs ${matchData.team2}
-Date: ${matchData.date}
-Venue: ${matchData.venue}
-${matchData.team1} Playing XI: ${matchData.team1Players?.join(', ') || 'Not announced yet'}
-${matchData.team2} Playing XI: ${matchData.team2Players?.join(', ') || 'Not announced yet'}
-Recent Form ${matchData.team1}: ${matchData.team1Form || 'No data'}
-Recent Form ${matchData.team2}: ${matchData.team2Form || 'No data'}
-Head to Head: ${matchData.h2h || 'No data'}
+MATCH: ${matchData.team1} vs ${matchData.team2}
+DATE: ${matchData.date} | VENUE: ${matchData.venue}
+${matchData.team1} XI: ${matchData.team1Players?.join(', ') || 'Not announced'}
+${matchData.team2} XI: ${matchData.team2Players?.join(', ') || 'Not announced'}
+${matchData.team1} Form: ${matchData.team1Form || 'Recent form data unavailable'}
+${matchData.team2} Form: ${matchData.team2Form || 'Recent form data unavailable'}
+Head to Head: ${matchData.h2h || 'Historical data unavailable'}
 Toss: ${matchData.tossResult || 'Not done yet'}
 
-Create exactly 10 prediction questions. STRICTLY follow this mix:
-- Q1-2: EASY (100 pts) - Match winner, Toss
-- Q3-4: MEDIUM (150 pts) - Top scorer, powerplay
-- Q5-6: MEDIUM (200 pts) - Score range, wickets
-- Q7-8: HARD (250 pts) - Player milestones
-- Q9-10: HARD (300 pts) - Special/fun viral question
+CREATE EXACTLY ${count} QUESTIONS in this distribution:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏆 MATCH OUTCOME (5 questions) — 100pts each
+  - Winner, margin of victory, method (runs/wickets), total overs bowled, DLS chance
 
-RULES:
-1. Use REAL PLAYER NAMES from Playing XI if available
-2. Add context/story to each question (why it matters)
-3. Make options specific (not just Yes/No)
-4. correctAnswer must be empty string (set after match)
+🏏 BATTING HEROES (6 questions) — 150pts each
+  - Top scorer team1, top scorer team2, highest partnership, first to 50, century prediction, most boundaries
 
-Return ONLY valid JSON array:
+⚡ BOWLING ATTACK (5 questions) — 150pts each
+  - Most wickets team1, most wickets team2, best economy, first wicket method (bowled/caught/LBW), dot ball king
+
+🎯 POWERPLAY BATTLE (4 questions) — 200pts each
+  - PP score team1, PP score team2, PP wickets, which team scores more in PP
+
+💥 DEATH OVERS DRAMA (4 questions) — 200pts each
+  - Overs 17-20 runs team1, death wickets, most sixes in death, last over runs
+
+🌟 PLAYER SPOTLIGHT (4 questions) — 250pts each
+  - Use REAL player names from Playing XI
+  - Specific milestones: "Will [Player] score 40+?", "Will [Player] take 2+ wickets?"
+  - These should feel personal and exciting
+
+🔥 VIRAL MOMENTS (2 questions) — 300pts each
+  - Fun/unique: Most sixes in match, super over prediction, biggest six distance, crowd moment
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUALITY RULES (this is what makes questions addictive):
+1. ✅ Use real player names wherever possible
+2. ✅ Each question must have 4 specific options (not vague like "Yes/No")
+3. ✅ Add drama to question text — "🔥 Can [Player] silence the critics today?"
+4. ✅ Options must be believable ranges — for runs use "0-30", "31-50", "51-75", "75+"
+5. ✅ All correctAnswer = "" (filled after match ends)
+6. ✅ Mix emojis naturally in questions
+7. ✅ questionContext = short hype line like "He's been in devastating form last 3 matches"
+
+Return ONLY a valid JSON array, zero markdown, zero explanation:
 [
   {
-    "question": "question text with context story",
-    "questionContext": "why this question matters",
-    "options": ["opt1", "opt2", "opt3", "opt4"],
+    "question": "🏆 Who will win the ${matchData.team1} vs ${matchData.team2} thriller?",
+    "questionContext": "Both teams desperately need a win for playoff qualification",
+    "options": ["${matchData.team1} by 20+ runs", "${matchData.team1} by <20 runs / wickets", "${matchData.team2} by 20+ runs", "${matchData.team2} by <20 runs / wickets"],
     "correctAnswer": "",
     "points": 100,
     "difficulty": "easy",
     "category": "prediction",
-    "explanation": "will be updated after match",
+    "explanation": "Updated after match ends",
     "isPreMatch": true
   }
 ]`;
 
     const response = await claude.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4000,
+      max_tokens: 10000,
       messages: [{ role: 'user', content: prompt }],
     });
 
