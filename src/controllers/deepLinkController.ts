@@ -15,16 +15,15 @@ export const handleReferralRedirect = async (req: Request, res: Response): Promi
       data:  { clicks: { increment: 1 } },
     }).catch(() => {});
 
-    const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.offerplay.app';
+    const playStoreUrl = `https://play.google.com/store/apps/details?id=com.offerpay.playgames&referrer=ref_${code}`;
     const appStoreUrl  = 'https://apps.apple.com/app/offerplay/id000000000';
-    const landingUrl   = `https://offerplay.in/join?ref=${code}&from=share`;
 
     if (isAndroid) {
       res.redirect(
         `intent://offerplay/join?ref=${code}#Intent;` +
         `scheme=offerplay;` +
-        `package=com.offerplay.app;` +
-        `S.browser_fallback_url=${encodeURIComponent(playStoreUrl + `&referrer=ref_${code}`)};end`,
+        `package=com.offerpay.playgames;` +
+        `S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`,
       );
       return;
     }
@@ -32,9 +31,10 @@ export const handleReferralRedirect = async (req: Request, res: Response): Promi
       res.redirect(`${appStoreUrl}?referrer=ref_${code}`);
       return;
     }
-    res.redirect(landingUrl);
+    // Desktop/unknown — show Play Store
+    res.redirect(playStoreUrl);
   } catch {
-    res.redirect('https://offerplay.in');
+    res.redirect('https://play.google.com/store/apps/details?id=com.offerpay.playgames');
   }
 };
 
@@ -77,7 +77,7 @@ export const getUserReferralLink = async (req: Request, res: Response): Promise<
     }
 
     const shareUrl    = `https://offerplay.in/r/${code}`;
-    const playStoreUrl = `https://play.google.com/store/apps/details?id=com.offerplay.app&referrer=ref_${code}`;
+    const playStoreUrl = `https://play.google.com/store/apps/details?id=com.offerpay.playgames&referrer=ref_${code}`;
 
     res.json({
       success: true,

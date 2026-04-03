@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OfferPlay – Play, Earn & Win Real Rewards</title>
+  <meta name="description" content="Complete offers, play games, predict IPL matches and earn real coins. Redeem for cash, gift cards and more. Download OfferPlay now!" />
+  <meta property="og:title" content="OfferPlay – Play, Earn & Win Real Rewards" />
+  <meta property="og:description" content="Complete offers, play games, predict IPL matches and earn real coins." />
+  <meta property="og:image" content="https://offerplay.in/og-image.png" />
+  <meta property="og:url" content="https://offerplay.in" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #7B2FBE;
+      --cyan: #00D4FF;
+      --gold: #FFD700;
+      --bg: #0d0520;
+      --card: #1a0a2e;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: #fff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      position: sticky;
+      top: 0;
+      background: rgba(13, 5, 32, 0.9);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+      border-bottom: 1px solid #ffffff10;
+    }
+    .logo {
+      font-size: 22px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--purple), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-btn {
+      background: linear-gradient(135deg, var(--purple), #5b1fa0);
+      color: #fff;
+      border: none;
+      padding: 10px 22px;
+      border-radius: 24px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      text-align: center;
+      padding: 80px 24px 60px;
+      position: relative;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(123,47,190,0.3) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(123,47,190,0.2);
+      border: 1px solid rgba(123,47,190,0.5);
+      color: var(--cyan);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+      letter-spacing: 0.5px;
+    }
+    .hero h1 {
+      font-size: clamp(32px, 6vw, 60px);
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--purple), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: clamp(15px, 2vw, 18px);
+      color: #ffffff90;
+      max-width: 520px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+    .cta-group {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--purple), #5b1fa0);
+      color: #fff;
+      padding: 14px 28px;
+      border-radius: 30px;
+      font-weight: 700;
+      font-size: 16px;
+      text-decoration: none;
+      box-shadow: 0 8px 30px rgba(123,47,190,0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 36px rgba(123,47,190,0.5); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: #fff;
+      padding: 14px 28px;
+      border-radius: 30px;
+      font-weight: 700;
+      font-size: 16px;
+      text-decoration: none;
+      border: 1px solid #ffffff30;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--cyan); background: rgba(0,212,255,0.05); }
+
+    /* ── STATS ── */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      padding: 40px 24px;
+      flex-wrap: wrap;
+      border-top: 1px solid #ffffff08;
+      border-bottom: 1px solid #ffffff08;
+    }
+    .stat { text-align: center; }
+    .stat-value {
+      font-size: 32px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--gold), #ffa500);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .stat-label { font-size: 13px; color: #ffffff60; margin-top: 4px; }
+
+    /* ── FEATURES ── */
+    .section { padding: 70px 24px; max-width: 1100px; margin: 0 auto; }
+    .section-title { text-align: center; font-size: clamp(24px, 4vw, 36px); font-weight: 800; margin-bottom: 12px; }
+    .section-sub { text-align: center; color: #ffffff60; font-size: 15px; margin-bottom: 48px; }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--card);
+      border: 1px solid #ffffff10;
+      border-radius: 20px;
+      padding: 28px 24px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover { border-color: var(--purple); transform: translateY(-4px); }
+    .feature-icon { font-size: 36px; margin-bottom: 14px; }
+    .feature-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .feature-desc { font-size: 14px; color: #ffffff70; line-height: 1.6; }
+
+    /* ── HOW IT WORKS ── */
+    .steps { display: flex; gap: 0; position: relative; justify-content: center; flex-wrap: wrap; }
+    .step {
+      flex: 1;
+      min-width: 200px;
+      max-width: 260px;
+      text-align: center;
+      padding: 24px 16px;
+      position: relative;
+    }
+    .step-num {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), var(--cyan));
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 18px;
+      margin: 0 auto 16px;
+    }
+    .step-title { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+    .step-desc { font-size: 13px; color: #ffffff60; line-height: 1.5; }
+
+    /* ── IPL BANNER ── */
+    .ipl-banner {
+      background: linear-gradient(135deg, #1a0a2e, #2d1060);
+      border: 1px solid rgba(123,47,190,0.4);
+      border-radius: 24px;
+      padding: 48px 32px;
+      text-align: center;
+      margin: 0 24px 70px;
+      max-width: 1052px;
+      margin-left: auto;
+      margin-right: auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .ipl-banner::before {
+      content: '🏏';
+      position: absolute;
+      font-size: 180px;
+      opacity: 0.05;
+      top: -20px;
+      right: -20px;
+    }
+    .ipl-banner h2 { font-size: clamp(22px, 4vw, 34px); font-weight: 800; margin-bottom: 12px; }
+    .ipl-banner h2 span { color: var(--gold); }
+    .ipl-banner p { color: #ffffff80; font-size: 15px; margin-bottom: 28px; }
+
+    /* ── DOWNLOAD ── */
+    .download-section {
+      background: linear-gradient(135deg, var(--purple), #5b1fa0);
+      padding: 70px 24px;
+      text-align: center;
+    }
+    .download-section h2 { font-size: clamp(26px, 4vw, 40px); font-weight: 800; margin-bottom: 12px; }
+    .download-section p { color: #ffffff90; font-size: 16px; margin-bottom: 36px; }
+    .store-badges { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+    .store-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 14px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      transition: background 0.2s;
+    }
+    .store-badge:hover { background: rgba(0,0,0,0.5); }
+    .store-badge-icon { font-size: 28px; }
+
+    /* ── FOOTER ── */
+    footer {
+      background: var(--bg);
+      border-top: 1px solid #ffffff10;
+      padding: 32px 24px;
+      text-align: center;
+      color: #ffffff40;
+      font-size: 13px;
+    }
+    footer a { color: #ffffff60; text-decoration: none; margin: 0 12px; }
+    footer a:hover { color: var(--cyan); }
+
+    @media (max-width: 600px) {
+      nav { padding: 14px 16px; }
+      .stats { gap: 24px; }
+      .ipl-banner { padding: 36px 20px; margin: 0 16px 48px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="logo">🎮 OfferPlay</div>
+    <a href="https://play.google.com/store/apps/details?id=com.offerpay.playgames" class="nav-btn" target="_blank">Download App</a>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="badge">🚀 India's #1 Reward App</div>
+    <h1>Play Games, Earn Coins,<br /><span>Win Real Rewards</span></h1>
+    <p>Complete offers, predict IPL matches, play games and earn coins. Redeem for cash, UPI transfers, gift cards and more.</p>
+    <div class="cta-group">
+      <a href="https://play.google.com/store/apps/details?id=com.offerpay.playgames" class="btn-primary" target="_blank">
+        🤖 Download for Android
+      </a>
+      <a href="#how-it-works" class="btn-secondary">
+        ▶ How it Works
+      </a>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">50K+</div>
+      <div class="stat-label">Active Users</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">₹10L+</div>
+      <div class="stat-label">Rewards Distributed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">1000+</div>
+      <div class="stat-label">Daily Offers</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">4.8★</div>
+      <div class="stat-label">User Rating</div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section class="section">
+    <h2 class="section-title">Everything You Need to Earn</h2>
+    <p class="section-sub">Multiple ways to earn coins every single day</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <div class="feature-title">Complete Offers</div>
+        <div class="feature-desc">Install apps, sign up for services, complete surveys and earn big coins instantly.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🏏</div>
+        <div class="feature-title">IPL Predictions</div>
+        <div class="feature-desc">Predict IPL match outcomes, answer questions and win coins in exciting contests.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎮</div>
+        <div class="feature-title">Play Games</div>
+        <div class="feature-desc">Play fun mini-games and earn coins while enjoying your free time.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📝</div>
+        <div class="feature-title">Surveys</div>
+        <div class="feature-desc">Share your opinion on brands and topics and get rewarded for every completed survey.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎁</div>
+        <div class="feature-title">Daily Bonus</div>
+        <div class="feature-desc">Log in every day to collect your daily bonus coins. The streak gets better each day!</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">👥</div>
+        <div class="feature-title">Refer & Earn</div>
+        <div class="feature-desc">Invite friends and earn coins for every friend who joins and completes their first task.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- IPL BANNER -->
+  <div class="ipl-banner">
+    <h2>🏆 IPL 2026 Prediction Contests <span>Live Now!</span></h2>
+    <p>Predict match outcomes, answer questions and win coins every match day. Join thousands of fans already playing.</p>
+    <a href="https://play.google.com/store/apps/details?id=com.offerpay.playgames" class="btn-primary" target="_blank">
+      🏏 Join IPL Contest
+    </a>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <section class="section" id="how-it-works">
+    <h2 class="section-title">How It Works</h2>
+    <p class="section-sub">Start earning in 3 simple steps</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-title">Download the App</div>
+        <div class="step-desc">Install OfferPlay from the Play Store for free. Create your account in seconds.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-title">Complete Tasks & Play</div>
+        <div class="step-desc">Browse offers, play games, predict matches and complete surveys to earn coins.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-title">Redeem Rewards</div>
+        <div class="step-desc">Convert your coins to real cash via UPI, or redeem for gift cards and exciting prizes.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DOWNLOAD -->
+  <section class="download-section">
+    <h2>Ready to Start Earning? 🚀</h2>
+    <p>Join lakhs of users already earning real rewards on OfferPlay</p>
+    <div class="store-badges">
+      <a href="https://play.google.com/store/apps/details?id=com.offerpay.playgames" class="store-badge" target="_blank">
+        <span class="store-badge-icon">🤖</span>
+        <div>
+          <div style="font-size:11px;opacity:0.7;font-weight:400;">GET IT ON</div>
+          <div>Google Play</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <p style="margin-bottom:12px;">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="mailto:support@offerplay.in">Contact Us</a>
+    </p>
+    <p>© 2026 OfferPlay. All rights reserved.</p>
+  </footer>
+
+</body>
+</html>

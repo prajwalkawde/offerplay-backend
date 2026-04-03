@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -70,6 +71,9 @@ app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('public/uploads'));
+
+// ─── Landing page (offerplay.in) ──────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Trust proxy for rate limiting behind load balancer
 app.set('trust proxy', 1);
