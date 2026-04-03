@@ -19,6 +19,14 @@ router.get('/me/referrals', getUserReferrals);
 router.get('/referral/:code', validateReferralCode);
 router.get('/wallet', getWalletData);
 
+router.get('/me/onesignal-debug', async (req: Request, res: Response) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId! },
+    select: { id: true, name: true, phone: true, oneSignalPlayerId: true },
+  });
+  return success(res, user);
+});
+
 router.post('/me/onesignal-token', async (req: Request, res: Response) => {
   const { playerId } = req.body as { playerId?: string };
   if (!playerId) return error(res, 'playerId is required', 400);

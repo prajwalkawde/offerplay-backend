@@ -8,7 +8,7 @@ import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 
 import { env } from './config/env';
-import { connectDatabase } from './config/database';
+import { connectDatabase, prisma } from './config/database';
 import { initFirebase } from './config/firebase';
 import { setupLeaderboardSocket } from './socket/leaderboard';
 import { startCoinWorker, schedulePostbackRetry } from './queues/coinQueue';
@@ -81,6 +81,16 @@ app.set('trust proxy', 1);
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), env: env.NODE_ENV });
+});
+
+// ─── Temp Debug (remove after testing) ────────────────────────────────────────
+app.get('/debug/onesignal', async (_req: Request, res: Response) => {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+    select: { id: true, name: true, phone: true, oneSignalPlayerId: true, createdAt: true },
+  });
+  res.json(users);
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
