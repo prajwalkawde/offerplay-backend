@@ -104,16 +104,6 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
       where: {
         matchDate: { gte: today, lte: nextWeek },
         status: { not: 'cancelled' },
-        // Only show matches that have at least one contest still open for registration
-        contests: {
-          some: {
-            status: 'published',
-            OR: [
-              { regCloseTime: null },
-              { regCloseTime: { gt: new Date() } },
-            ],
-          },
-        },
       },
       include: {
         questions: { select: { id: true } },
@@ -135,7 +125,7 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
 
     const result = matches.map(match => ({
       ...enrichMatch(match, logoUrls),
-      isToday: match.matchDate.toDateString() === new Date().toDateString(),
+      isToday: Math.floor((match.matchDate.getTime() + istOffsetMs) / 86400000) === Math.floor((Date.now() + istOffsetMs) / 86400000),
       questionCount: match.questions.length,
       questions: undefined,
       matchDate: match.matchDate,

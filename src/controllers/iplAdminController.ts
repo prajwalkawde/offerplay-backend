@@ -984,13 +984,17 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
     for (const m of ipl2026Matches) {
       const cricApiId = `ipl2026-match-${m.matchNumber}`;
 
+      // Find by cricApiId first, then fall back to matchNumber (covers manually-created matches)
+      let existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
+      if (!existing) {
+        existing = await prisma.iplMatch.findFirst({ where: { matchNumber: m.matchNumber } }) ?? null;
+      }
+
       // Skip past matches — don't create them, but update if they already exist
       if (m.matchDate < todayUtc) {
-        const existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
         if (!existing) { skipped++; continue; }
       }
 
-      const existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
       if (existing) {
         // Never overwrite a completed/live match status
         if (existing.status === 'completed' || existing.status === 'live') {
@@ -998,8 +1002,9 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
           continue;
         }
         await prisma.iplMatch.update({
-          where: { cricApiId },
+          where: { id: existing.id },
           data: {
+            cricApiId,
             team1: m.team1, team2: m.team2,
             matchDate: m.matchDate,
             matchStartTime: m.matchDate,
