@@ -365,7 +365,7 @@ export async function claimStage(
     uid,
     1,
     'earned_game',
-    `Sports Quiz - ${correctAnswers}/${answers.length} correct`,
+    `Sports Quiz Stage 🏆 - ${correctAnswers}/${answers.length} correct`,
     stageId
   );
 
@@ -408,7 +408,7 @@ export async function claimStage(
 
 // ─── claimBonusTicket ─────────────────────────────────────────────────────────
 
-export async function claimBonusTicket(uid: string, stageId: string): Promise<{ ticketsAwarded: number; newBalance: number }> {
+export async function claimBonusTicket(uid: string, stageId: string, bonusAmount: number = 1): Promise<{ ticketsAwarded: number; newBalance: number }> {
   const settings = await getSettings();
 
   if (!settings.bonusTicketEnabled) {
@@ -427,9 +427,10 @@ export async function claimBonusTicket(uid: string, stageId: string): Promise<{ 
     where: { uid, status: 'completed', completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
-  const dailyTicketsEarned = (dailyAgg._sum.ticketsAwarded ?? 0) + (stage.bonusTicketClaimed ? 0 : 0);
+  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  const amount = Math.min(bonusAmount, Math.max(0, settings.dailyTicketLimit - dailyTicketsEarned));
 
-  if (dailyTicketsEarned >= settings.dailyTicketLimit) {
+  if (amount <= 0) {
     throw Object.assign(new Error('Daily ticket limit reached'), { code: 'DAILY_LIMIT' });
   }
 
@@ -438,11 +439,12 @@ export async function claimBonusTicket(uid: string, stageId: string): Promise<{ 
     data: { bonusTicketClaimed: true },
   });
 
-  const newBalance = await creditTickets(uid, 1, 'earned_game', 'Sports Quiz Bonus Ticket', stageId);
+  const label = bonusAmount >= 2 ? 'Sports Quiz Perfect Score Bonus 🏆🏆' : 'Sports Quiz Bonus Ticket';
+  const newBalance = await creditTickets(uid, amount, 'earned_game', label, stageId);
 
-  logger.info('Bonus ticket claimed', { uid, stageId, newBalance });
+  logger.info('Bonus ticket claimed', { uid, stageId, amount, newBalance });
 
-  return { ticketsAwarded: 1, newBalance };
+  return { ticketsAwarded: amount, newBalance };
 }
 
 // ─── getStatus ────────────────────────────────────────────────────────────────

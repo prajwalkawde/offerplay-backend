@@ -96,9 +96,10 @@ export async function claimStage(req: Request, res: Response): Promise<void> {
 export async function claimBonusTicket(req: Request, res: Response): Promise<void> {
   try {
     const uid = req.userId!;
-    const { session_id } = req.body as { session_id?: string };
+    const { session_id, perfect_score } = req.body as { session_id?: string; perfect_score?: boolean };
     if (!session_id) { error(res, 'session_id is required', 400); return; }
-    const result = await quizService.claimBonusTicket(uid, session_id);
+    const bonusAmount = perfect_score === true ? 2 : 1;
+    const result = await quizService.claimBonusTicket(uid, session_id, bonusAmount);
     success(res, result, 'Bonus ticket claimed');
   } catch (err: unknown) {
     const e = err as { message?: string; code?: string };
