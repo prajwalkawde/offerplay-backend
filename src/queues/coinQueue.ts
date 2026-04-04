@@ -1,36 +1,25 @@
 import { Queue, Worker, Job } from 'bullmq';
 import cron from 'node-cron';
-import { getRedisClient } from '../config/redis';
 import { creditCoins } from '../services/coinService';
 import { TransactionType } from '@prisma/client';
 import { logger } from '../utils/logger';
-import { env } from '../config/env';
 
-function buildConnection() {
-  const isTls = env.REDIS_URL.startsWith('rediss://');
-  if (isTls) {
-    // Upstash / TLS Redis — parse URL manually for BullMQ
-    const url = new URL(env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port || '6379', 10),
-      password: url.password || undefined,
-      username: url.username || undefined,
-      tls: { rejectUnauthorized: false },
-    };
-  }
-  const url = new URL(env.REDIS_URL);
+function getRedisConnection() {
   return {
-    host: url.hostname,
-    port: parseInt(url.port || '6379', 10),
-    password: url.password || undefined,
+    host: process.env.REDIS_HOST || '127.0.0.1',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    username: process.env.REDIS_USERNAME || undefined,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
   };
 }
 
-const connection = buildConnection();
+const connection = getRedisConnection();
 
 export const coinQueue = new Queue('coin-operations', {
   connection,
+  prefix: 'xyvmkurmut',
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
@@ -55,7 +44,7 @@ export function startCoinWorker(): Worker {
       await creditCoins(userId, amount, type, refId, description);
       logger.debug('Coin job processed', { jobId: job.id, userId, amount });
     },
-    { connection }
+    { connection, prefix: 'xyvmkurmut' }
   );
 
   worker.on('failed', (job, err) => {

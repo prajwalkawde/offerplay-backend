@@ -33,22 +33,53 @@ function redeemTransactionType(type: string): TransactionType {
 }
 
 // ─── GET /redeem/packages ──────────────────────────────────────────────────────
-export async function getRedeemPackages(_req: Request, res: Response): Promise<void> {
+export async function getRedeemPackages(req: Request, res: Response): Promise<void> {
   try {
-    let packages = await prisma.redeemPackage.findMany({
+    let allPackages = await prisma.redeemPackage.findMany({
       where: { isActive: true },
-      orderBy: { coinsRequired: 'asc' },
+      orderBy: [
+        { isFeatured: 'desc' },
+        { isPopular: 'desc' },
+        { sortOrder: 'asc' },
+        { coinsRequired: 'asc' },
+      ],
     });
 
-    if (packages.length === 0) {
+    if (allPackages.length === 0) {
       await prisma.redeemPackage.createMany({ data: DEFAULT_PACKAGES, skipDuplicates: true });
-      packages = await prisma.redeemPackage.findMany({
+      allPackages = await prisma.redeemPackage.findMany({
         where: { isActive: true },
-        orderBy: { coinsRequired: 'asc' },
+        orderBy: [{ sortOrder: 'asc' }, { coinsRequired: 'asc' }],
       });
     }
 
-    success(res, packages);
+    // Determine user's country
+    let userCountry = 'IN';
+    const userId = req.userId;
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { country: true },
+      });
+      userCountry = user?.country || 'IN';
+    }
+
+    // Filter by country — include package if:
+    //   - availableIn contains userCountry or "GLOBAL"
+    //   - or isDefault is true
+    const countryPackages = allPackages.filter(p => {
+      const available = (p.availableIn as string[]) || ['IN'];
+      return available.includes(userCountry) || available.includes('GLOBAL') || p.isDefault;
+    });
+
+    // Fallback chain: country match → default only → all
+    const finalPackages = countryPackages.length > 0
+      ? countryPackages
+      : allPackages.filter(p => p.isDefault).length > 0
+        ? allPackages.filter(p => p.isDefault)
+        : allPackages;
+
+    success(res, finalPackages);
   } catch (err) {
     logger.error('getRedeemPackages error:', err);
     error(res, 'Failed to get packages', 500);
@@ -79,6 +110,8 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
       productId, productName, denominationId,
       mobileNumber, operator,
       gameId, gamePlayerId,
+      customFieldValues,
+      packageId,
     } = req.body as {
       type: string; coinsToRedeem: number;
       upiId?: string;
@@ -86,6 +119,8 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
       productId?: string; productName?: string; denominationId?: string;
       mobileNumber?: string; operator?: string;
       gameId?: string; gamePlayerId?: string;
+      customFieldValues?: Record<string, string>;
+      packageId?: string;
     };
 
     if (!type || !coinsToRedeem) {
@@ -101,15 +136,20 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
     if (user.coinBalance < coinsToRedeem) { error(res, 'Insufficient coins', 400); return; }
 
     const coinRate = await prisma.coinConversionRate.findFirst({ where: { countryCode: 'IN' } });
-    const coinsPerUnit = coinRate?.coinsPerUnit || 10;
+    const coinsPerUnit = coinRate?.coinsPerUnit || 100;
     const amountInr = coinsToRedeem / coinsPerUnit;
 
-    if (amountInr < 10) {
-      error(res, `Minimum redemption is ₹10 (${Math.ceil(10 * coinsPerUnit)} coins)`, 400);
-      return;
-    }
-
     const orderId = `OP_${userId.slice(0, 6)}_${Date.now()}`;
+
+    // Look up package for redeemUrl and other metadata
+    let pkgRedeemUrl: string | null = null;
+    if (packageId) {
+      const pkg = await prisma.redeemPackage.findUnique({
+        where: { id: packageId },
+        select: { redeemUrl: true },
+      });
+      pkgRedeemUrl = pkg?.redeemUrl || null;
+    }
 
     const redemption = await prisma.redemptionRequest.create({
       data: {
@@ -118,8 +158,13 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
         upiId, accountNumber, ifscCode, accountName, bankName,
         productId, productName, denominationId,
         mobileNumber, operator, gameId, gamePlayerId,
+        ...(customFieldValues ? { customFieldValues } : {}),
+        ...(pkgRedeemUrl ? { redeemUrl: pkgRedeemUrl } : {}),
       },
     });
+
+    // Admin notification log for new redemption
+    logger.info(`[REDEMPTION] New request #${redemption.id} | user=${userId} | type=${type} | coins=${coinsToRedeem} | ₹${amountInr.toFixed(2)}`);
 
     // Deduct coins immediately
     await prisma.$transaction([
@@ -286,6 +331,17 @@ export async function getAdminPackages(_req: Request, res: Response): Promise<vo
   }
 }
 
+// ─── Admin: Delete package ─────────────────────────────────────────────────────
+export async function deleteRedeemPackage(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params as { id: string };
+    await prisma.redeemPackage.delete({ where: { id } });
+    success(res, null, 'Package deleted');
+  } catch (err) {
+    error(res, 'Failed to delete package', 500);
+  }
+}
+
 // ─── Admin: Create or update package ──────────────────────────────────────────
 export async function upsertRedeemPackage(req: Request, res: Response): Promise<void> {
   try {
@@ -389,15 +445,48 @@ export async function getRedemptionDetails(req: Request, res: Response): Promise
       }),
     ]);
 
+    // Fraud score
+    const accountAgeDays = Math.floor(
+      (Date.now() - new Date(redemption.user?.createdAt || Date.now()).getTime()) / 86400000
+    );
+    const [todayRedemptions, totalRedemptions, offerwallAgg] = await Promise.all([
+      prisma.redemptionRequest.count({
+        where: { userId: redemption.userId, createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) } },
+      }),
+      prisma.redemptionRequest.count({ where: { userId: redemption.userId } }),
+      prisma.transaction.aggregate({
+        where: { userId: redemption.userId, type: { in: [TransactionType.EARN_OFFERWALL, TransactionType.EARN_TASK, TransactionType.EARN_SURVEY] }, amount: { gt: 0 } },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const totalEarned = earnedAgg._sum.amount || 0;
+    const totalRedeemed = Math.abs(redeemedAgg._sum.amount || 0);
+    const offerwallEarnings = offerwallAgg._sum.amount || 0;
+
+    let fraudScore = 0;
+    if (accountAgeDays < 1)    fraudScore += 40;
+    else if (accountAgeDays < 7) fraudScore += 20;
+    if (todayRedemptions > 5)  fraudScore += 30;
+    else if (todayRedemptions > 3) fraudScore += 15;
+    if (!offerwallEarnings)    fraudScore += 25;
+    if (totalRedeemed > totalEarned * 0.9) fraudScore += 15;
+    fraudScore = Math.min(fraudScore, 100);
+
     success(res, {
       redemption,
       userStats: {
-        totalEarned: earnedAgg._sum.amount || 0,
-        totalRedeemed: Math.abs(redeemedAgg._sum.amount || 0),
+        totalEarned,
+        totalRedeemed,
         currentBalance: redemption.user?.coinBalance || 0,
         totalTransactions: totalAgg._count.id,
+        accountAgeDays,
+        todayRedemptions,
+        offerwallEarnings,
+        totalRedemptionCount: totalRedemptions,
       },
       transactions,
+      fraudScore,
     });
   } catch (err) {
     logger.error('getRedemptionDetails error:', err);
@@ -480,6 +569,83 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
   } catch (err) {
     logger.error('approveRedemption error:', err);
     error(res, 'Failed to process', 500);
+  }
+}
+
+// ─── Admin: Update status + save code/note ─────────────────────────────────────
+export async function updateRedemptionStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params as { id: string };
+    const { status, failureReason, redemptionCode, adminNote, processedByAdmin } = req.body as {
+      status: string; failureReason?: string;
+      redemptionCode?: string; adminNote?: string; processedByAdmin?: string;
+    };
+
+    const redemption = await prisma.redemptionRequest.findUnique({ where: { id } });
+    if (!redemption) { error(res, 'Not found', 404); return; }
+
+    await prisma.redemptionRequest.update({
+      where: { id },
+      data: {
+        status,
+        failureReason: failureReason || null,
+        redemptionCode: redemptionCode || null,
+        adminNote: adminNote || null,
+        processedByAdmin: processedByAdmin || 'Admin',
+        processedAt: ['completed', 'failed'].includes(status) ? new Date() : undefined,
+      },
+    });
+
+    if (status === 'failed') {
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: redemption.userId }, data: { coinBalance: { increment: redemption.coinsRedeemed } } }),
+        prisma.transaction.create({
+          data: {
+            userId: redemption.userId,
+            type: TransactionType.REFUND,
+            amount: redemption.coinsRedeemed,
+            refId: id,
+            description: `Refund: ${failureReason || 'Rejected by admin'}`,
+          },
+        }),
+      ]);
+    }
+
+    if (adminNote) {
+      await prisma.notification.create({
+        data: {
+          userId: redemption.userId,
+          title: status === 'completed' ? '✅ Redemption Processed!' : '❌ Redemption Rejected',
+          body: adminNote,
+          type: 'REDEMPTION',
+        },
+      }).catch(() => {});
+    }
+
+    logger.info(`Redemption ${id} → ${status} by ${processedByAdmin || 'Admin'}`);
+    success(res, null, `Redemption ${status}`);
+  } catch (err) {
+    logger.error('updateRedemptionStatus error:', err);
+    error(res, 'Failed to update', 500);
+  }
+}
+
+// ─── User: Rate a completed redemption ────────────────────────────────────────
+export async function rateRedemption(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const { id } = req.params as { id: string };
+    const { rating, feedback } = req.body as { rating: number; feedback?: string };
+
+    if (!rating || rating < 1 || rating > 5) { error(res, 'Rating must be 1-5', 400); return; }
+
+    const redemption = await prisma.redemptionRequest.findFirst({ where: { id, userId } });
+    if (!redemption) { error(res, 'Not found', 404); return; }
+
+    await prisma.redemptionRequest.update({ where: { id }, data: { userRating: rating, userFeedback: feedback || null } });
+    success(res, null, 'Rating submitted!');
+  } catch (err) {
+    error(res, 'Failed to submit rating', 500);
   }
 }
 

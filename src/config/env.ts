@@ -2,11 +2,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const env = {
-  PORT: parseInt(process.env.PORT || '3000', 10),
+  PORT: parseInt(process.env.PORT || '3001', 10),
   NODE_ENV: process.env.NODE_ENV || 'development',
   DATABASE_URL: process.env.DATABASE_URL || '',
-  REDIS_URL: process.env.REDIS_URL || 'redis://localhost:6379',
-  JWT_SECRET: process.env.JWT_SECRET || 'fallback-secret',
+  REDIS_HOST: process.env.REDIS_HOST || '127.0.0.1',
+  REDIS_PORT: parseInt(process.env.REDIS_PORT || '6379', 10),
+  REDIS_USERNAME: process.env.REDIS_USERNAME || undefined,
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD || undefined,
+  JWT_SECRET: process.env.JWT_SECRET || '',
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '30d',
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
   FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
@@ -34,4 +37,7 @@ export const env = {
   CPX_SECURE_HASH: process.env.CPX_SECURE_HASH || '',
   ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID || '',
   ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY || '',
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || '',
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || '',
+  TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID || '',
 };

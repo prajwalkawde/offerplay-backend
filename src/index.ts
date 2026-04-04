@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -7,13 +8,12 @@ import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 
 import { env } from './config/env';
-import { connectDatabase } from './config/database';
+import { connectDatabase, prisma } from './config/database';
 import { initFirebase } from './config/firebase';
 import { setupLeaderboardSocket } from './socket/leaderboard';
 import { startCoinWorker, schedulePostbackRetry } from './queues/coinQueue';
 import { startNotifWorker } from './queues/notifQueue';
 import { scheduleQuizGeneration, scheduleResultVerification, scheduleDailyBonusReminders, scheduleQuestionNotifications } from './jobs/iplQuizJob';
-import { startSuperOfferNotificationJob } from './jobs/superOfferNotification.job';
 import { logger } from './utils/logger';
 import { error } from './utils/response';
 
@@ -28,8 +28,16 @@ import postbackRoutes from './routes/postback';
 import iplRoutes from './routes/ipl';
 import adminRoutes from './routes/admin';
 import appRoutes from './routes/app';
+import homeRoutes from './routes/home';
+import referralRoutes from './routes/referral';
+import questRoutes from './routes/quests';
+import customOfferRoutes from './routes/customOffers';
+import offerwallRoutes from './routes/offerwall';
+import { handleAdjoePostback } from './controllers/adjoeController';
+import { handleReferralRedirect } from './controllers/deepLinkController';
 import superOfferRoutes from './routes/superOffer.routes';
 import adminSuperOfferRoutes from './routes/admin.superOffer.routes';
+import { startSuperOfferNotificationJob } from './jobs/superOfferNotification.job';
 
 const app = express();
 const httpServer = createServer(app);
@@ -42,12 +50,33 @@ const io = new SocketServer(httpServer, {
 setupLeaderboardSocket(io);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'https://admin.offerplay.in',
+  'https://phpstack-1554518-6313385.cloudwaysapps.com',
+  'https://offerplay.in',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.ALLOWED_ORIGINS,
+].filter(Boolean) as string[];
+
 app.use(helmet());
-app.use(cors({ origin: '*', credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
 app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('public/uploads'));
+
+// ─── Landing page (offerplay.in) ──────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Trust proxy for rate limiting behind load balancer
 app.set('trust proxy', 1);
@@ -55,6 +84,16 @@ app.set('trust proxy', 1);
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), env: env.NODE_ENV });
+});
+
+// ─── Temp Debug (remove after testing) ────────────────────────────────────────
+app.get('/debug/onesignal', async (_req: Request, res: Response) => {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+    select: { id: true, name: true, phone: true, oneSignalPlayerId: true, createdAt: true },
+  });
+  res.json(users);
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -68,6 +107,13 @@ app.use('/api/postback', postbackRoutes);
 app.use('/api/ipl', iplRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/app', appRoutes);
+app.use('/api/home', homeRoutes);
+app.use('/api/referral', referralRoutes);
+app.use('/api/quests', questRoutes);
+app.use('/api/custom-offers', customOfferRoutes);
+app.use('/api/offerwall', offerwallRoutes);
+app.get('/api/adjoe/postback', handleAdjoePostback);
+app.get('/r/:code', handleReferralRedirect);
 app.use('/api/superoffers', superOfferRoutes);
 app.use('/api/admin', adminSuperOfferRoutes);
 
@@ -98,6 +144,15 @@ async function bootstrap(): Promise<void> {
     logger.info('BullMQ workers started');
   } catch (err) {
     logger.warn('BullMQ workers failed to start (Redis may be unavailable)', { err });
+  }
+
+  // Start IPL workers
+  try {
+    const { startIPLWorkers } = await import('./queues/iplQueues');
+    startIPLWorkers();
+    logger.info('IPL BullMQ workers started');
+  } catch (err) {
+    logger.warn('IPL workers failed to start', { err });
   }
 
   httpServer.listen(env.PORT, () => {

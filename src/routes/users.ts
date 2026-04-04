@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import {
   getProfile, updateProfile, getTransactions,
-  getStats, getUserReferrals, validateReferralCode,
+  getStats, getUserReferrals, validateReferralCode, getWalletData,
 } from '../controllers/userController';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
@@ -17,6 +17,15 @@ router.get('/me/transactions', getTransactions);
 router.get('/me/stats', getStats);
 router.get('/me/referrals', getUserReferrals);
 router.get('/referral/:code', validateReferralCode);
+router.get('/wallet', getWalletData);
+
+router.get('/me/onesignal-debug', async (req: Request, res: Response) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId! },
+    select: { id: true, name: true, phone: true, oneSignalPlayerId: true },
+  });
+  return success(res, user);
+});
 
 router.post('/me/onesignal-token', async (req: Request, res: Response) => {
   const { playerId } = req.body as { playerId?: string };

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRedisClient } from '../config/redis';
+import { getRedisClient, rk } from '../config/redis';
 import { error } from '../utils/response';
 
 interface RateLimitOptions {
@@ -15,7 +15,7 @@ export function rateLimit(options: RateLimitOptions) {
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const identifier = req.ip || req.socket.remoteAddress || 'unknown';
-    const key = `${keyPrefix}:${identifier}`;
+    const key = rk(`${keyPrefix}:${identifier}`);
 
     try {
       const redis = getRedisClient();
@@ -41,12 +41,24 @@ export function rateLimit(options: RateLimitOptions) {
   };
 }
 
-export const otpRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 3,
-  keyPrefix: 'otp',
-  message: 'Too many OTP requests. Try again after 1 hour.',
-});
+// Test phone numbers — bypass all rate limits
+const TEST_PHONES: string[] = [];
+
+function isTestPhone(req: Request): boolean {
+  const phone: string = req.body?.phone || req.query?.phone || '';
+  return TEST_PHONES.some(p => String(phone).includes(p));
+}
+
+export const otpRateLimit = (req: Request, res: Response, next: NextFunction): void => {
+  // Skip rate limit entirely for test phones
+  if (isTestPhone(req)) { next(); return; }
+  rateLimit({
+    windowMs: 15 * 60 * 1000,  // 15 min
+    max: 100,                    // generous for dev
+    keyPrefix: 'otp',
+    message: 'Too many OTP requests. Please wait a moment.',
+  })(req, res, next);
+};
 
 export const apiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,

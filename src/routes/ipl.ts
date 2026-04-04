@@ -15,6 +15,8 @@ import {
   getMyContests,
   getMyPredictions,
   getGlobalLeaderboard,
+  getRank1Prize,
+  calcTotalPrizePool,
 } from '../controllers/iplAppController';
 import { prisma } from '../config/database';
 import { success } from '../utils/response';
@@ -54,15 +56,54 @@ router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res
   });
 
   const result = contests
-    .map(c => ({
-      ...c,
-      currentPlayers: c._count.entries,
-      spotsLeft: Math.max(0, c.maxPlayers - c._count.entries),
-      isFull: c._count.entries >= c.maxPlayers,
-      hasJoined: userId ? c.entries.length > 0 : false,
-      _count: undefined,
-      entries: undefined,
-    }))
+    .map(c => {
+      const parsedTiersConfig = typeof c.prizeTiersConfig === 'string'
+        ? JSON.parse(c.prizeTiersConfig as string)
+        : c.prizeTiersConfig;
+      const rawTiers: any[] = Array.isArray(parsedTiersConfig) ? parsedTiersConfig as any[] : [];
+      const parsedWinnersConfig = typeof (c as any).winnersConfig === 'string'
+        ? JSON.parse((c as any).winnersConfig)
+        : (c as any).winnersConfig;
+      const rawWinners: any[] = Array.isArray(parsedWinnersConfig) ? parsedWinnersConfig : [];
+      const allTiers = rawTiers.length > 0 ? rawTiers : rawWinners.map((w: any) => ({
+        rankFrom: w.rankFrom, rankTo: w.rankTo, rank: w.rankFrom,
+        type: 'COINS', coins: w.coins, label: w.label,
+      }));
+      return {
+        id: c.id,
+        name: c.name,
+        battleType: c.battleType,
+        entryType: c.entryType || 'FREE',
+        entryFee: c.entryFee,
+        ticketCost: c.ticketCost,
+        isFree: c.isFree,
+        maxPlayers: c.maxPlayers,
+        currentPlayers: c._count.entries,
+        spotsLeft: Math.max(0, c.maxPlayers - c._count.entries),
+        isFull: c._count.entries >= c.maxPlayers,
+        prizeType: c.prizeType,
+        prizeCoins: c.prizeCoins,
+        prizeGiftName: c.prizeGiftName,
+        rewardImageUrl: c.rewardImageUrl,
+        prizeTiersConfig: allTiers,
+        rank1Prize: getRank1Prize({ prizeTiersConfig: allTiers }),
+        totalPrizePool: calcTotalPrizePool(allTiers),
+        youtubeUrl: c.youtubeUrl,
+        questionCount: c.questionCount,
+        questionsAvailableAt: c.questionsAvailableAt,
+        questionsLockAt: c.questionsLockAt,
+        regCloseTime: (c as any).regCloseTime || null,
+        sponsorName: c.sponsorName,
+        sponsorLogo: c.sponsorLogo,
+        hasJoined: userId ? c.entries.length > 0 : false,
+        displayStatus: (() => {
+          const rc = (c as any).regCloseTime as Date | null;
+          if (c.status === 'completed') return 'COMPLETED';
+          if (rc && new Date() > new Date(rc)) return 'LOCKED';
+          return 'OPEN';
+        })(),
+      };
+    })
     .sort((a, b) => {
       if (a.battleType === 'MEGA' && b.battleType !== 'MEGA') return -1;
       if (b.battleType === 'MEGA' && a.battleType !== 'MEGA') return 1;

@@ -5,6 +5,7 @@ import {
   getGiftCards,
   requestRedemption,
   getRedemptionHistory,
+  rateRedemption,
   listOptions,
   redemptionHistory,
 } from '../controllers/redeemController';
@@ -18,6 +19,7 @@ router.get('/packages', getRedeemPackages);
 router.get('/gift-cards', getGiftCards);
 router.post('/request', requestRedemption);
 router.get('/history', getRedemptionHistory);
+router.post('/rate/:id', rateRedemption);
 
 // Legacy compatibility
 router.get('/options', listOptions);

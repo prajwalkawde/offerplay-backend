@@ -60,6 +60,48 @@ export async function getUserReferrals(req: Request, res: Response): Promise<voi
   paginated(res, referrals as unknown[], total, page, limit);
 }
 
+export async function getWalletData(req: Request, res: Response): Promise<void> {
+  const userId = req.userId!;
+
+  const [user, txAgg] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { coinBalance: true, ticketBalance: true },
+    }),
+    prisma.transaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true, type: true, amount: true, description: true, createdAt: true },
+    }),
+  ]);
+
+  if (!user) { error(res, 'User not found', 404); return; }
+
+  let totalEarned = 0;
+  let totalSpent = 0;
+  let totalRedeemed = 0;
+
+  for (const tx of txAgg) {
+    if (tx.amount > 0) {
+      totalEarned += tx.amount;
+    } else if (String(tx.type).toUpperCase().includes('REDEEM')) {
+      totalRedeemed += Math.abs(tx.amount);
+    } else {
+      totalSpent += Math.abs(tx.amount);
+    }
+  }
+
+  success(res, {
+    coinBalance: user.coinBalance,
+    ticketBalance: user.ticketBalance,
+    totalEarned,
+    totalSpent,
+    totalRedeemed,
+    transactions: txAgg,
+  });
+}
+
 export async function validateReferralCode(req: Request, res: Response): Promise<void> {
   const code = String(req.params.code).toUpperCase();
   const user = await prisma.user.findUnique({

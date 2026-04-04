@@ -34,6 +34,7 @@ import {
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { getTicketBalance } from '../services/ticketService';
+import { updateQuestProgress } from '../controllers/questController';
 
 const router = Router();
 
@@ -125,6 +126,8 @@ router.post('/ad-reward', authMiddleware, async (req: Request, res: Response) =>
         },
       }),
     ]);
+
+    await updateQuestProgress(userId, 'WATCH_ADS', 1);
 
     return success(res, { coins }, `+${coins} coins earned!`);
   } catch (err) {

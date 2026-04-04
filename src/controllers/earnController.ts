@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/database';
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { success, error } from '../utils/response';
 import { creditCoins } from '../services/coinService';
 import { logger } from '../utils/logger';
@@ -15,7 +15,7 @@ import dayjs from 'dayjs';
 export async function claimDailyBonus(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;
   const today = dayjs().format('YYYY-MM-DD');
-  const key = `daily:${userId}:${today}`;
+  const key = rk(`daily:${userId}:${today}`);
 
   const claimed = await redis.get(key);
   if (claimed) {
@@ -98,7 +98,7 @@ export async function clickOffer(req: Request, res: Response): Promise<void> {
         await prisma.offerClick.create({ data: { userId, provider, offerId, ip: req.ip } });
 
         // Invalidate user's cached feed
-        const keys = await redis.keys(`offer_feed:${userId}:*`);
+        const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
         if (keys.length > 0) await redis.del(...keys);
       } catch {
         // Non-critical — don't fail the click
@@ -204,7 +204,7 @@ export async function rateOffer(req: Request, res: Response): Promise<void> {
     }
 
     // Invalidate cache
-    const keys = await redis.keys(`offer_feed:${userId}:*`);
+    const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
     if (keys.length > 0) await redis.del(...keys);
 
     success(res, { avgRating: Math.round(avgRating * 100) / 100 });
@@ -251,7 +251,7 @@ export async function reportDeadUrl(req: Request, res: Response): Promise<void> 
     await autoBlacklist(provider, offerId,
       `Dead redirect: ${(finalUrl || '').substring(0, 200)}`);
 
-    const keys = await redis.keys(`offer_feed:${userId}:*`);
+    const keys = await redis.keys(rk(`offer_feed:${userId}:*`));
     if (keys.length > 0) await redis.del(...keys);
 
     success(res, null, 'Thank you for reporting! The offer has been flagged.');
@@ -274,7 +274,7 @@ export async function enhanceOffer(req: Request, res: Response): Promise<void> {
 
     if (!offerId || !offerName) { error(res, 'offerId and offerName required', 400); return; }
 
-    const cacheKey = `enhanced_offer:${provider || 'unknown'}:${offerId}`;
+    const cacheKey = rk(`enhanced_offer:${provider || 'unknown'}:${offerId}`);
     const cached = await redis.get(cacheKey);
     if (cached) { success(res, JSON.parse(cached)); return; }
 
@@ -387,16 +387,37 @@ export async function getTransactions(req: Request, res: Response): Promise<void
     const limit = Math.min(parseInt(String(req.query.limit || '20'), 10), 50);
     const skip = (page - 1) * limit;
 
-    const [transactions, total] = await Promise.all([
+    // Fetch coin transactions and ticket transactions together
+    const [coinTxs, ticketTxs] = await Promise.all([
       prisma.transaction.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
         select: { id: true, type: true, amount: true, description: true, createdAt: true, status: true },
       }),
-      prisma.transaction.count({ where: { userId } }),
+      prisma.ticketTransaction.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, type: true, amount: true, description: true, createdAt: true },
+      }),
     ]);
+
+    // Normalise ticket records to match coin tx shape, tag with currency
+    const ticketNormalised = ticketTxs.map(t => ({
+      ...t,
+      status: 'completed',
+      currency: 'ticket' as const,
+    }));
+    const coinNormalised = coinTxs.map(t => ({
+      ...t,
+      currency: 'coin' as const,
+    }));
+
+    // Merge and sort by date descending, then paginate
+    const all = [...coinNormalised, ...ticketNormalised].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    const total = all.length;
+    const transactions = all.slice(skip, skip + limit);
 
     success(res, { transactions, total, page, limit, pages: Math.ceil(total / limit) });
   } catch (err) {

@@ -2,32 +2,23 @@ import { Queue, Worker, Job } from 'bullmq';
 import { prisma } from '../config/database';
 import { sendPushNotification, createNotification } from '../services/notificationService';
 import { logger } from '../utils/logger';
-import { env } from '../config/env';
 
-function buildConnection() {
-  const isTls = env.REDIS_URL.startsWith('rediss://');
-  if (isTls) {
-    const url = new URL(env.REDIS_URL);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port || '6379', 10),
-      password: url.password || undefined,
-      username: url.username || undefined,
-      tls: { rejectUnauthorized: false },
-    };
-  }
-  const url = new URL(env.REDIS_URL);
+function getRedisConnection() {
   return {
-    host: url.hostname,
-    port: parseInt(url.port || '6379', 10),
-    password: url.password || undefined,
+    host: process.env.REDIS_HOST || '127.0.0.1',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    username: process.env.REDIS_USERNAME || undefined,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
   };
 }
 
-const connection = buildConnection();
+const connection = getRedisConnection();
 
 export const notifQueue = new Queue('notifications', {
   connection,
+  prefix: 'xyvmkurmut',
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 1000 },
@@ -63,7 +54,7 @@ export function startNotifWorker(): Worker {
 
       logger.debug('Notification sent', { jobId: job.id, userId });
     },
-    { connection }
+    { connection, prefix: 'xyvmkurmut' }
   );
 
   worker.on('failed', (job, err) => {

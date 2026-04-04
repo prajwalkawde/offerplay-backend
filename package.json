@@ -10,6 +10,7 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:seed": "ts-node src/seed.ts",
+    "seed:prod": "npx ts-node scripts/seedProduction.ts",
     "db:generate": "prisma generate",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -45,6 +46,7 @@
     "prisma": "^5.22.0",
     "socket.io": "^4.8.3",
     "ts-node": "^10.9.2",
+    "twilio": "^5.13.1",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0",
     "winston": "^3.19.0",

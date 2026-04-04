@@ -4,6 +4,7 @@ import { TransactionType } from '@prisma/client';
 import { timingSafeEqual, hmacSha256 } from '../utils/crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { updateQuestProgress } from '../controllers/questController';
 
 export interface PostbackPayload {
   userId: string;
@@ -82,10 +83,30 @@ export async function processPostback(payload: PostbackPayload): Promise<{ dupli
     `${payload.provider} offer completed`
   );
 
+  // Credit quest progress for offer completion
+  await updateQuestProgress(payload.userId, 'COMPLETE_OFFERS', 1);
+
+  // Bonus: 1 free ticket per completed offer
+  const bonusTickets = 1;
+  await prisma.user.update({
+    where: { id: payload.userId },
+    data:  { ticketBalance: { increment: bonusTickets } },
+  });
+  await prisma.ticketTransaction.create({
+    data: {
+      userId:      payload.userId,
+      amount:      bonusTickets,
+      type:        'EARN_TICKET',
+      refId:       payload.offerId,
+      description: `Offer bonus ticket: ${payload.provider}`,
+    },
+  }).catch(() => {});
+
   logger.info('Postback processed', {
     userId: payload.userId,
     provider: payload.provider,
     coins: payload.coins,
+    bonusTickets,
   });
 
   return { duplicate: false };

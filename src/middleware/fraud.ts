@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRedisClient } from '../config/redis';
+import { getRedisClient, rk } from '../config/redis';
 import { logger } from '../utils/logger';
 
 export async function fraudCheck(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -11,7 +11,7 @@ export async function fraudCheck(req: Request, res: Response, next: NextFunction
 
   try {
     const redis = getRedisClient();
-    const key = `fraud:${userId}`;
+    const key = rk(`fraud:${userId}`);
     const count = await redis.incr(key);
 
     if (count === 1) {

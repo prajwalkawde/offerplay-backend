@@ -24,7 +24,8 @@ import {
   publishIPLContest, processIPLContestResults, getContestParticipants,
   fetchTodayMatches, updateIPLMatch, processIPLResults,
   saveEditedQuestions, generateResultReport,
-  generateIPLQuestions, getIPLAnalytics,
+  generateIPLQuestions, getIPLAnalytics, deleteAdminIPLMatch,
+  fetchIPLSchedule,
 } from '../controllers/iplAdminController';
 import {
   listOfferwallOffers, blacklistOffer, whitelistOffer, getQualityReport,
@@ -37,11 +38,12 @@ import {
   getIplPrizeClaims, updateIplPrizeClaim,
 } from '../controllers/inventoryController';
 import { getCoinRates, updateCoinRate, createCoinRate } from '../controllers/coinRateController';
-import { getSettings, updateSetting, updateMultipleSettings } from '../controllers/settingsController';
+import { getSettings, updateSetting, updateMultipleSettings, updateBulkPut } from '../controllers/settingsController';
 import {
   getAdminRedemptions, getAdminPackages,
-  upsertRedeemPackage, manualProcessRedemption,
-  getRedemptionDetails, approveRedemption,
+  upsertRedeemPackage, deleteRedeemPackage,
+  manualProcessRedemption, getRedemptionDetails, approveRedemption,
+  updateRedemptionStatus,
 } from '../controllers/redeemController';
 import { getXoxodayProducts, testXoxodayConnection } from '../services/xoxodayService';
 import {
@@ -58,6 +60,26 @@ const loginSchema = z.object({ email: z.string().email(), password: z.string().m
 // Public admin login (both paths for compatibility)
 router.post('/auth/login', validate(loginSchema), adminLogin);
 router.post('/login', validate(loginSchema), adminLogin);
+
+// ─── Public: policy content for mobile app ────────────────────────────────────
+router.get('/settings/policy/:type', async (req, res) => {
+  try {
+    const typeMap: Record<string, string> = {
+      TERMS: 'POLICY_TERMS', PRIVACY: 'POLICY_PRIVACY', PAYMENT: 'POLICY_PAYMENT',
+    };
+    const key = typeMap[req.params.type as string];
+    if (!key) return apiError(res, 'Not found', 404);
+    const setting = await prisma.appSettings.findUnique({ where: { key } });
+    return apiSuccess(res, {
+      type: req.params.type,
+      title: setting?.label || 'Policy',
+      content: setting?.value || 'Coming soon...',
+      updatedAt: setting?.updatedAt,
+    });
+  } catch {
+    return apiError(res, 'Failed', 500);
+  }
+});
 
 // All routes below require admin JWT
 router.use(adminAuthMiddleware);
@@ -95,6 +117,7 @@ router.put('/claims/:id', updateClaim);
 router.get('/ipl/matches', getAdminIPLMatches);
 router.post('/ipl/matches', createAdminIPLMatch);
 router.put('/ipl/matches/:id', updateIPLMatch);
+router.delete('/ipl/matches/:id', deleteAdminIPLMatch);
 router.post('/ipl/matches/:id/result', setMatchResult);
 router.post('/ipl/matches/process-results', processIPLResults);
 
@@ -119,6 +142,7 @@ router.get('/ipl/matches/:id/participants', getMatchParticipants);
 
 // IPL — Cricbuzz sync
 router.get('/ipl/fetch-today', fetchTodayMatches);
+router.post('/ipl/fetch-schedule', fetchIPLSchedule);
 
 // IPL — Multi-contest per match
 router.get('/ipl/matches/:matchId/contests', getMatchContests);
@@ -132,13 +156,62 @@ router.get('/ipl/contests/:contestId/participants', getContestParticipants);
 // Legacy AI triggers
 router.post('/ipl/verify-results/:id', triggerResultVerification);
 
+// Automation endpoints
+router.get('/automation/logs', async (req, res) => {
+  const page = Math.max(1, parseInt(String(req.query.page)) || 1);
+  const limit = 50;
+  const logs = await prisma.automationLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: (page - 1) * limit,
+  });
+  const total = await prisma.automationLog.count();
+  return apiSuccess(res, { logs, total, page });
+});
+
+router.get('/automation/flagged', async (_req, res) => {
+  const flagged = await prisma.automationLog.findMany({
+    where: { status: 'FAILED' },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+  return apiSuccess(res, flagged);
+});
+
+router.post('/automation/trigger', async (req, res) => {
+  const { action, matchId } = req.body;
+  try {
+    if (action === 'sync_schedule') {
+      const { fetchTodayMatchesCricAPI } = await import('../services/cricketService');
+      await fetchTodayMatchesCricAPI();
+    } else if (action === 'generate_questions' && matchId) {
+      const { iplQuestionGenQueue } = await import('../queues/iplQueues');
+      await iplQuestionGenQueue.add('generateQuestions', { matchId });
+    } else if (action === 'unlock_contests' && matchId) {
+      const { iplContestUnlockQueue } = await import('../queues/iplQueues');
+      await iplContestUnlockQueue.add('unlockContest', { matchId });
+    }
+    return apiSuccess(res, null, `${action} triggered`);
+  } catch (err: any) {
+    return apiError(res, err.message, 500);
+  }
+});
+
+router.post('/ipl/matches/:id/schedule-jobs', async (req, res) => {
+  const match = await prisma.iplMatch.findUnique({ where: { id: req.params.id as string } });
+  if (!match) return apiError(res, 'Match not found', 404);
+  const { scheduleMatchJobs } = await import('../queues/iplQueues');
+  await scheduleMatchJobs(match.id, match.matchDate);
+  return apiSuccess(res, null, 'Jobs scheduled');
+});
+
 // ─── Cache Management ─────────────────────────────────────────────────────────
-import { redis } from '../config/redis';
+import { redis, rk } from '../config/redis';
 import { prisma } from '../config/database';
 router.delete('/cache/clear', async (req, res) => {
   const [feedKeys, pubscaleKeys] = await Promise.all([
-    redis.keys('offer_feed:*'),
-    redis.keys('pubscale:*'),
+    redis.keys(rk('offer_feed:*')),
+    redis.keys(rk('pubscale:*')),
   ]);
   const allKeys = [...feedKeys, ...pubscaleKeys];
   if (allKeys.length > 0) await redis.del(...allKeys);
@@ -181,13 +254,16 @@ router.put('/coin-rates/:id', updateCoinRate);
 router.get('/settings', getSettings);
 router.put('/settings/:key', updateSetting);
 router.post('/settings/bulk', updateMultipleSettings);
+router.put('/settings/bulk/update', updateBulkPut);
 
 // ─── Redemptions ──────────────────────────────────────────────────────────────
 router.get('/redemptions', getAdminRedemptions);
 router.get('/redeem-packages', getAdminPackages);
 router.post('/redeem-packages', upsertRedeemPackage);
 router.put('/redeem-packages/:id', upsertRedeemPackage);
+router.delete('/redeem-packages/:id', deleteRedeemPackage);
 router.post('/redemptions/:id/process', manualProcessRedemption);
+router.put('/redemptions/:id/status', updateRedemptionStatus);
 
 // ─── Test / Dev Helpers ───────────────────────────────────────────────────────
 router.post('/test/reset-daily-bonus/:userId', async (req, res) => {
@@ -203,7 +279,7 @@ router.post('/test/reset-daily-bonus/:userId', async (req, res) => {
 
     // Also clear Redis key for old claimDailyBonus endpoint
     const today = new Date().toISOString().slice(0, 10);
-    await redis.del(`daily:${userId}:${today}`);
+    await redis.del(rk(`daily:${userId}:${today}`));
 
     return apiSuccess(res, null, 'Daily bonus reset!');
   } catch (err) {
@@ -221,7 +297,7 @@ router.post('/test/reset-all-daily-bonus', async (req, res) => {
 
     // Clear all Redis daily bonus keys for today
     const today = new Date().toISOString().slice(0, 10);
-    const keys = await redis.keys(`daily:*:${today}`);
+    const keys = await redis.keys(rk(`daily:*:${today}`));
     if (keys.length > 0) await redis.del(...keys);
 
     return apiSuccess(res, { usersReset: true }, 'All daily bonuses reset!');

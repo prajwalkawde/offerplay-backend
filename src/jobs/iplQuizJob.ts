@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { prisma } from '../config/database';
-import { getTodayIPLMatches, getMatchScore } from '../services/cricApiService';
+import { getTodayIPLMatches } from '../services/cricApiService';
+import { isMatchEnded, fetchMatchScorecard } from '../services/cricketService';
 import { generateIPLQuestions, verifyAnswersWithAI } from '../services/claudeAiService';
 import { creditCoins } from '../services/coinService';
 import { logger } from '../utils/logger';
@@ -122,50 +123,60 @@ export async function verifyMatchResults(matchId: string): Promise<void> {
     throw new Error('Match not found or has no CricAPI ID');
   }
 
-  const scoreData = await getMatchScore(match.cricApiId);
-
-  // Cricbuzz hscard: matchHeader.state === 'Complete' when done
-  const matchHeader = scoreData?.matchHeader;
-  const isComplete =
-    matchHeader?.state === 'Complete' ||
-    matchHeader?.state === 'complete' ||
-    matchHeader?.complete === true;
-
-  if (!isComplete) {
+  // Use CricAPI (not Cricbuzz) for result checking
+  const ended = await isMatchEnded(match.cricApiId);
+  if (!ended) {
     throw new Error('Match has not ended yet');
   }
 
-  const winner: string = matchHeader?.result?.winningTeam || '';
-  const manOfMatch: string = matchHeader?.playersOfTheMatch?.[0]?.fullName || '';
-  // scoreCard array: each element is an innings
-  const innings = scoreData?.scoreCard || [];
-  const team1Score = innings[0]?.scoreDetails?.runs
-    ? `${innings[0].scoreDetails.runs}/${innings[0].scoreDetails.wickets}`
-    : undefined;
-  const team2Score = innings[1]?.scoreDetails?.runs
-    ? `${innings[1].scoreDetails.runs}/${innings[1].scoreDetails.wickets}`
-    : undefined;
+  const scorecard = await fetchMatchScorecard(match.cricApiId);
+  if (!scorecard) {
+    throw new Error('Could not fetch scorecard from CricAPI');
+  }
+
+  // Parse CricAPI scorecard format
+  const statusText: string = scorecard.status || '';
+  const teamInfo: any[] = scorecard.teamInfo || [];
+  const scores: any[] = scorecard.score || [];
+
+  // Extract winner from status string e.g. "CSK won by 5 wickets"
+  let winner = '';
+  for (const team of teamInfo) {
+    const n = team.name || '';
+    const s = team.shortname || '';
+    if (
+      (n && statusText.toLowerCase().includes(n.toLowerCase())) ||
+      (s && statusText.toLowerCase().includes(s.toLowerCase()))
+    ) {
+      winner = n || s;
+      break;
+    }
+  }
+  if (!winner) {
+    if (statusText.toLowerCase().includes(match.team1.toLowerCase())) winner = match.team1;
+    else if (statusText.toLowerCase().includes(match.team2.toLowerCase())) winner = match.team2;
+  }
+
+  const team1Score = scores[0] ? `${scores[0].r}/${scores[0].w}` : undefined;
+  const team2Score = scores[1] ? `${scores[1].r}/${scores[1].w}` : undefined;
 
   // Update match status
   await prisma.iplMatch.update({
     where: { id: match.id },
     data: {
       status: 'completed',
-      result: matchHeader?.result?.resultDescription || winner,
+      result: statusText || winner,
       winnerId: winner,
       team1Score,
       team2Score,
-      manOfMatch,
     },
   });
 
   // Verify answers with Claude AI
   const verifiedQuestions = await verifyAnswersWithAI(match.questions, {
     winner,
-    manOfMatch,
-    topScorer: '',
-    team1Score: innings[0]?.scoreDetails?.runs,
-    team2Score: innings[1]?.scoreDetails?.runs,
+    team1Score: scores[0]?.r,
+    team2Score: scores[1]?.r,
   });
 
   // Update correct answers

@@ -79,6 +79,14 @@ export async function getMatchContests(req: Request, res: Response): Promise<voi
 // ─── Create a new contest for a match ─────────────────────────────────────────
 export async function createIPLContest(req: Request, res: Response): Promise<void> {
   const { matchId } = req.params as { matchId: string };
+
+  console.log('=== CREATE CONTEST REQUEST ===');
+  console.log('prizeTiersConfig received:', JSON.stringify(req.body.prizeTiersConfig));
+  console.log('winnersConfig received:', JSON.stringify(req.body.winnersConfig));
+  console.log('questionsLockAt:', req.body.questionsLockAt);
+  console.log('questionsAvailableAt:', req.body.questionsAvailableAt);
+  console.log('==============================');
+
   const {
     name,
     contestType,
@@ -96,8 +104,10 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
     rewardImageType,
     questionCount,
     youtubeUrl,
+    entryType,
+    ticketCost,
     winnersConfig,
-    prizeTiers,
+    prizeTiersConfig,
     sponsorId,
     sponsorName,
     sponsorLogo,
@@ -105,18 +115,21 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
     customFields,
     prizeDistribution,
     regCloseTime,
+    questionsAvailableAt,
+    questionsLockAt,
   } = req.body as {
     name: string; contestType: string; battleType: string;
     maxPlayers?: number; minPlayers?: number; entryFee: number;
-    isFree?: boolean;
+    isFree?: boolean; entryType?: string; ticketCost?: number;
     prizeType?: string; prizeCoins?: number; prizeGiftName?: string;
     prizeGiftImage?: string; prizeGiftValue?: number;
     rewardImageUrl?: string; rewardImageType?: string;
     questionCount?: number; youtubeUrl?: string;
-    winnersConfig?: unknown[]; prizeTiers?: unknown[];
+    winnersConfig?: unknown[]; prizeTiersConfig?: unknown[];
     sponsorId?: string; sponsorName?: string; sponsorLogo?: string;
     maxEntriesPerUser?: number;
     customFields?: object; prizeDistribution?: object; regCloseTime?: string;
+    questionsAvailableAt?: string; questionsLockAt?: string;
   };
 
   if (!contestType || !battleType || entryFee === undefined) {
@@ -143,6 +156,8 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
       maxPlayers: resolvedMax,
       minPlayers: minPlayers ?? 2,
       entryFee,
+      entryType: entryType ?? 'TICKET',
+      ticketCost: ticketCost ?? 1,
       isFree: isFree ?? (entryFee === 0),
       prizeType: prizeType ?? 'COINS',
       prizeCoins: prizeCoins ?? null,
@@ -154,7 +169,7 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
       questionCount: questionCount ? parseInt(String(questionCount)) : 10,
       youtubeUrl: youtubeUrl ?? null,
       winnersConfig: (winnersConfig ?? []) as object[],
-      prizeTiers: (prizeTiers ?? []) as object[],
+      prizeTiersConfig: (prizeTiersConfig ?? []) as object[],
       sponsorId: sponsorId ?? null,
       sponsorName: sponsorName ?? null,
       sponsorLogo: sponsorLogo ?? null,
@@ -162,9 +177,14 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
       customFields: customFields ?? undefined,
       prizeDistribution: (prizeDistribution ?? { '1': 40, '2': 25, '3': 15, '4-10': 20 }) as object,
       regCloseTime: regCloseTime ? new Date(regCloseTime) : null,
+      questionsAvailableAt: questionsAvailableAt ? new Date(questionsAvailableAt) : null,
+      questionsLockAt: questionsLockAt ? new Date(questionsLockAt) : null,
       status: 'draft',
     },
   });
+
+  console.log('Contest saved with tiers:', JSON.stringify(contest.prizeTiersConfig));
+  console.log('questionsLockAt saved:', contest.questionsLockAt);
 
   success(res, contest, 'Contest created successfully!', 201);
 }
@@ -801,37 +821,93 @@ export async function fetchTodayMatches(req: Request, res: Response): Promise<vo
 }
 
 // ─── Generate AI questions for a match ────────────────────────────────────────
+const ALL_LANGUAGES = ['en', 'hi', 'hinglish', 'ta', 'te', 'bn', 'mr'];
+
 export async function generateIPLQuestions(req: Request, res: Response): Promise<void> {
-  const { matchId } = req.body as { matchId?: string };
+  const { matchId, questionCount } = req.body as { matchId?: string; questionCount?: number };
 
   if (!matchId) { error(res, 'matchId required', 400); return; }
 
   const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
   if (!match) { error(res, 'Match not found', 404); return; }
 
-  const { generateIPLQuestions: generateQs } = await import('../services/claudeAiService');
-  const questions = await generateQs({
+  const count = questionCount || 30;
+  const { generateQuestionsWithContext } = await import('../services/claudeAiService');
+
+  const matchBase = {
     team1: match.team1, team2: match.team2,
     date: match.matchDate.toDateString(), venue: match.venue ?? 'TBD',
+    team1Players: Array.isArray(match.team1Players) ? match.team1Players as string[] : undefined,
+    team2Players: Array.isArray(match.team2Players) ? match.team2Players as string[] : undefined,
+    questionCount: count,
+  };
+
+  // Delete existing auto-generated questions for all languages
+  await prisma.iplQuestion.deleteMany({
+    where: { matchId: match.id, isAutoGenerated: true },
   });
 
-  const created = await Promise.all(
-    questions.map(q =>
-      prisma.iplQuestion.create({
-        data: {
-          matchId: match.id, question: q.question, options: q.options,
-          correctAnswer: q.correctAnswer ?? '', points: q.points ?? 100,
-          category: q.category ?? 'prediction', difficulty: q.difficulty ?? 'medium',
-          status: 'active', isAutoGenerated: true, generatedBy: 'claude-ai', approved: false,
-        },
-      })
+  // Generate for all 7 languages in parallel
+  logger.info(`Generating questions for ${ALL_LANGUAGES.length} languages for match ${match.id}`);
+
+  const langResults = await Promise.allSettled(
+    ALL_LANGUAGES.map(lang =>
+      generateQuestionsWithContext({ ...matchBase, language: lang })
+        .then(qs => ({ lang, questions: qs }))
     )
   );
 
-  success(res, created, `${created.length} questions generated!`);
+  // Save all questions to DB
+  let totalCreated = 0;
+  for (const result of langResults) {
+    if (result.status === 'rejected') {
+      logger.error('Language batch failed:', result.reason);
+      continue;
+    }
+    const { lang, questions } = result.value;
+    if (questions.length === 0) continue;
+
+    await Promise.all(
+      questions.map((q, i) =>
+        prisma.iplQuestion.create({
+          data: {
+            matchId: match.id, question: q.question, options: q.options,
+            correctAnswer: q.correctAnswer ?? '', points: q.points ?? 100,
+            category: q.category ?? 'prediction', difficulty: q.difficulty ?? 'medium',
+            status: 'active', isAutoGenerated: true, generatedBy: 'claude-ai', approved: false,
+            questionNumber: i + 1,
+            questionContext: (q as any).questionContext || null,
+            language: lang,
+          },
+        })
+      )
+    );
+    totalCreated += questions.length;
+    logger.info(`Saved ${questions.length} questions for language: ${lang}`);
+  }
+
+  await prisma.iplMatch.update({
+    where: { id: matchId },
+    data: { questionsGenerated: true },
+  });
+
+  success(res, { count: totalCreated, languages: ALL_LANGUAGES.length }, `${totalCreated} questions generated across ${ALL_LANGUAGES.length} languages!`);
 }
 
 // ─── IPL analytics ────────────────────────────────────────────────────────────
+export async function deleteAdminIPLMatch(req: Request, res: Response): Promise<void> {
+  const id = req.params.id as string;
+
+  // Cascade delete in order: entries → predictions (via questions) → contests → questions → match
+  await prisma.iplContestEntry.deleteMany({ where: { contest: { matchId: id } } });
+  await prisma.iplPrediction.deleteMany({ where: { question: { matchId: id } } });
+  await prisma.iplContest.deleteMany({ where: { matchId: id } });
+  await prisma.iplQuestion.deleteMany({ where: { matchId: id } });
+  await prisma.iplMatch.delete({ where: { id } });
+
+  success(res, { message: 'Match deleted successfully' });
+}
+
 export async function getIPLAnalytics(_req: Request, res: Response): Promise<void> {
   const [matches, totalContestEntries, totalCoinsDistributed] = await Promise.all([
     prisma.iplMatch.findMany({
@@ -865,4 +941,98 @@ export async function getIPLAnalytics(_req: Request, res: Response): Promise<voi
     totalCoinsDistributed: totalCoinsDistributed._sum.amount ?? 0,
     matches: matchStats,
   });
+}
+
+// ─── Fetch / sync IPL 2026 schedule ──────────────────────────────────────────
+export async function fetchIPLSchedule(req: Request, res: Response): Promise<void> {
+  try {
+    const ipl2026Matches = [
+      { matchNumber: 1,  team1: 'KKR',  team2: 'RCB',  matchDate: new Date('2026-03-22T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+      { matchNumber: 2,  team1: 'SRH',  team2: 'RR',   matchDate: new Date('2026-03-23T10:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+      { matchNumber: 3,  team1: 'DC',   team2: 'LSG',  matchDate: new Date('2026-03-23T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+      { matchNumber: 4,  team1: 'GT',   team2: 'PBKS', matchDate: new Date('2026-03-24T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+      { matchNumber: 5,  team1: 'MI',   team2: 'CSK',  matchDate: new Date('2026-03-25T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+      { matchNumber: 6,  team1: 'RR',   team2: 'KKR',  matchDate: new Date('2026-03-26T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+      { matchNumber: 7,  team1: 'LSG',  team2: 'SRH',  matchDate: new Date('2026-03-27T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+      { matchNumber: 8,  team1: 'RCB',  team2: 'DC',   matchDate: new Date('2026-03-28T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+      { matchNumber: 9,  team1: 'PBKS', team2: 'MI',   matchDate: new Date('2026-03-29T10:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+      { matchNumber: 10, team1: 'CSK',  team2: 'GT',   matchDate: new Date('2026-03-29T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+      { matchNumber: 11, team1: 'KKR',  team2: 'SRH',  matchDate: new Date('2026-03-30T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+      { matchNumber: 12, team1: 'DC',   team2: 'RR',   matchDate: new Date('2026-03-31T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+      { matchNumber: 13, team1: 'RCB',  team2: 'LSG',  matchDate: new Date('2026-04-01T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+      { matchNumber: 14, team1: 'MI',   team2: 'GT',   matchDate: new Date('2026-04-02T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+      { matchNumber: 15, team1: 'PBKS', team2: 'KKR',  matchDate: new Date('2026-04-03T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+      { matchNumber: 16, team1: 'CSK',  team2: 'SRH',  matchDate: new Date('2026-04-04T10:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+      { matchNumber: 17, team1: 'GT',   team2: 'DC',   matchDate: new Date('2026-04-04T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+      { matchNumber: 18, team1: 'RR',   team2: 'MI',   matchDate: new Date('2026-04-05T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+      { matchNumber: 19, team1: 'LSG',  team2: 'PBKS', matchDate: new Date('2026-04-06T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+      { matchNumber: 20, team1: 'KKR',  team2: 'CSK',  matchDate: new Date('2026-04-07T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+    ];
+
+    // Only sync matches from today onwards (IST midnight)
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(Date.now() + istOffsetMs);
+    nowIst.setHours(0, 0, 0, 0);
+    const todayUtc = new Date(nowIst.getTime() - istOffsetMs);
+
+    const upcomingMatches = ipl2026Matches.filter(m => m.matchDate >= todayUtc);
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const m of ipl2026Matches) {
+      const cricApiId = `ipl2026-match-${m.matchNumber}`;
+
+      // Find by cricApiId first, then fall back to matchNumber (covers manually-created matches)
+      let existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
+      if (!existing) {
+        existing = await prisma.iplMatch.findFirst({ where: { matchNumber: m.matchNumber } }) ?? null;
+      }
+
+      // Skip past matches — don't create them, but update if they already exist
+      if (m.matchDate < todayUtc) {
+        if (!existing) { skipped++; continue; }
+      }
+
+      if (existing) {
+        // Never overwrite a completed/live match status
+        if (existing.status === 'completed' || existing.status === 'live') {
+          updated++;
+          continue;
+        }
+        await prisma.iplMatch.update({
+          where: { id: existing.id },
+          data: {
+            cricApiId,
+            team1: m.team1, team2: m.team2,
+            matchDate: m.matchDate,
+            matchStartTime: m.matchDate,
+            venue: m.venue,
+            matchNumber: m.matchNumber,
+          },
+        });
+        updated++;
+      } else {
+        await prisma.iplMatch.create({
+          data: {
+            cricApiId,
+            matchNumber: m.matchNumber,
+            team1: m.team1,
+            team2: m.team2,
+            matchDate: m.matchDate,
+            matchStartTime: m.matchDate,
+            venue: m.venue,
+            status: 'upcoming',
+          },
+        });
+        created++;
+      }
+    }
+
+    success(res, { created, updated, skipped, upcoming: upcomingMatches.length }, `${created} created, ${updated} updated, ${skipped} past matches skipped`);
+  } catch (err) {
+    logger.error('fetchIPLSchedule error:', err);
+    error(res, 'Failed to fetch schedule', 500);
+  }
 }
