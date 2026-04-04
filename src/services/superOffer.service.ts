@@ -6,7 +6,7 @@
  * Never mix these two currencies.
  */
 
-import { TransactionType } from '@prisma/client';
+import { TransactionType, SuperOfferAttempt } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 import { creditTickets, debitTickets, getTicketBalance } from './ticket.service';
@@ -56,15 +56,34 @@ const TERMINAL_STATUSES = ['completed', 'failed'];
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSettings(): Promise<SuperOfferSettings> {
-  const settings = await prisma.superOfferSettings.findUnique({
+  // Auto-create default settings + tiers if they don't exist yet
+  const existing = await prisma.superOfferSettings.findUnique({
     where: { id: 1 },
-    include: {
-      tiers: { orderBy: { attemptNumber: 'asc' } },
+    include: { tiers: { orderBy: { attemptNumber: 'asc' } } },
+  });
+
+  if (existing) return existing;
+
+  // First-time setup: create defaults so the admin panel works before seed runs
+  await prisma.superOfferSettings.create({
+    data: {
+      id: 1,
+      isActive: true,
+      cooldownHours: 24,
+      tiers: {
+        create: [
+          { attemptNumber: 1, ticketCost: 20, coinReward: 100, hasAppInstallStep: false, isDefault: false },
+          { attemptNumber: 2, ticketCost: 18, coinReward: 200, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: false },
+          { attemptNumber: 0, ticketCost: 15, coinReward: 200, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: true  },
+        ],
+      },
     },
   });
 
-  if (!settings) throw new Error('Super Offer settings not found — run seed script');
-  return settings;
+  return prisma.superOfferSettings.findUniqueOrThrow({
+    where: { id: 1 },
+    include: { tiers: { orderBy: { attemptNumber: 'asc' } } },
+  });
 }
 
 // ─── Tier Resolution ──────────────────────────────────────────────────────────
@@ -152,7 +171,7 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
 
 export async function enterOffer(
   uid: string
-): Promise<typeof prisma.superOfferAttempt.fields> {
+): Promise<SuperOfferAttempt> {
   const status = await getStatus(uid);
 
   if (!status.isActive) throw new Error('Super Offer is not active');
@@ -194,7 +213,7 @@ export async function enterOffer(
   });
 
   logger.info('Super Offer entered', { uid, attemptId: attempt.id, attemptNumber: attempt.attemptNumber });
-  return attempt as typeof prisma.superOfferAttempt.fields;
+  return attempt;
 }
 
 // ─── Ad Watched ───────────────────────────────────────────────────────────────
