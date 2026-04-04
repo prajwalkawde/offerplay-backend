@@ -8,7 +8,7 @@ import * as quizService from '../services/quiz.service';
 export async function startStage(req: Request, res: Response): Promise<void> {
   try {
     const uid = req.userId!;
-    const { deviceId } = req.body as { deviceId?: string };
+    const { deviceId } = (req.body ?? {}) as { deviceId?: string };
     const result = await quizService.startStage(uid, deviceId);
     success(res, result, 'Quiz stage started');
   } catch (err: unknown) {
