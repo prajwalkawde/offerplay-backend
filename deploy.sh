@@ -13,6 +13,7 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 npm install
 npx prisma generate
+npx prisma db push --accept-data-loss
 npm run build
 
 echo "🔄 Restarting server..."
