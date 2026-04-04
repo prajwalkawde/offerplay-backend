@@ -12,8 +12,8 @@ export async function startStage(req: Request, res: Response): Promise<void> {
     const result = await quizService.startStage(uid, deviceId);
     success(res, result, 'Quiz stage started');
   } catch (err: unknown) {
-    const e = err as { message?: string; code?: string; remainingMinutes?: number };
-    logger.error('startStage error', { err });
+    const e = err as { message?: string; code?: string; remainingMinutes?: number; stack?: string };
+    logger.error('startStage error', { message: e.message, code: e.code, stack: e.stack });
     if (e.code === 'DAILY_LIMIT') { error(res, e.message ?? 'Daily limit reached', 429); return; }
     if (e.code === 'COOLDOWN') { error(res, e.message ?? 'Cooldown active', 429, { remainingMinutes: e.remainingMinutes }); return; }
     if (e.code === 'ACTIVE_STAGE') { error(res, e.message ?? 'Active stage exists', 409); return; }
