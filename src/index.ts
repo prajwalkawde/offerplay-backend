@@ -38,6 +38,9 @@ import { handleReferralRedirect } from './controllers/deepLinkController';
 import superOfferRoutes from './routes/superOffer.routes';
 import adminSuperOfferRoutes from './routes/admin.superOffer.routes';
 import { startSuperOfferNotificationJob } from './jobs/superOfferNotification.job';
+import quizRoutes from './routes/quiz.routes';
+import adminQuizRoutes from './routes/admin.quiz.routes';
+import { startQuizAIJob } from './jobs/quizAI.job';
 
 const app = express();
 const httpServer = createServer(app);
@@ -116,6 +119,8 @@ app.get('/api/adjoe/postback', handleAdjoePostback);
 app.get('/r/:code', handleReferralRedirect);
 app.use('/api/superoffers', superOfferRoutes);
 app.use('/api/admin', adminSuperOfferRoutes);
+app.use('/api/quiz', quizRoutes);
+app.use('/api/admin/quiz', adminQuizRoutes);
 
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
@@ -166,6 +171,8 @@ async function bootstrap(): Promise<void> {
   logger.info('IPL quiz jobs scheduled');
   schedulePostbackRetry();
   startSuperOfferNotificationJob();
+  startQuizAIJob();
+  logger.info('Sports Quiz AI job scheduled');
 }
 
 bootstrap().catch((err) => {

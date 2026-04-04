@@ -1005,3 +1005,79 @@ model SuperOfferAttempt {
   @@index([uid, status])
   @@index([cooldownEndsAt])
 }
+
+// ─── Sports Quiz Game ─────────────────────────────────────────────────────────
+
+model SportsQuestion {
+  id              Int           @id @default(autoincrement())
+  question        String
+  optionA         String
+  optionB         String
+  optionC         String
+  optionD         String
+  correctOption   String
+  sport           String        @default("ipl")
+  difficulty      String        @default("easy")
+  explanation     String?
+  isActive        Boolean       @default(true)
+  isAiGenerated   Boolean       @default(false)
+  usageCount      Int           @default(0)
+  correctCount    Int           @default(0)
+  hintUsedCount   Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  stageAnswers    StageAnswer[]
+}
+
+model QuizStage {
+  id                  Int           @id @default(autoincrement())
+  stageId             String        @unique
+  stageToken          String
+  uid                 String
+  status              String        @default("started")
+  startedAt           DateTime      @default(now())
+  completedAt         DateTime?
+  expiresAt           DateTime
+  sessionDurationMs   Int?
+  roundTimesJson      String?
+  correctAnswers      Int           @default(0)
+  totalQuestions      Int           @default(10)
+  hintsUsed           Int           @default(0)
+  ticketsAwarded      Int           @default(0)
+  bonusTicketClaimed  Boolean       @default(false)
+  isFlagged           Boolean       @default(false)
+  flagReason          String?
+  createdAt           DateTime      @default(now())
+  answers             StageAnswer[]
+
+  @@index([uid])
+  @@index([uid, status])
+  @@index([uid, completedAt])
+}
+
+model StageAnswer {
+  id              Int            @id @default(autoincrement())
+  stageId         String
+  stage           QuizStage      @relation(fields: [stageId], references: [stageId])
+  questionId      Int
+  question        SportsQuestion @relation(fields: [questionId], references: [id])
+  selectedOption  String
+  isCorrect       Boolean
+  timeTakenMs     Int
+  hintWatched     Boolean        @default(false)
+}
+
+model QuizSettings {
+  id                    Int      @id @default(1)
+  ticketPerStage        Int      @default(1)
+  bonusTicketEnabled    Boolean  @default(true)
+  maxHintsPerStage      Int      @default(3)
+  dailyTicketLimit      Int      @default(20)
+  cooldownMinutes       Int      @default(30)
+  sessionExpiryMinutes  Int      @default(15)
+  minAnswerTimeMs       Int      @default(2000)
+  minSessionTimeMs      Int      @default(20000)
+  questionsPerStage     Int      @default(10)
+  aiGenerationEnabled   Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+}
