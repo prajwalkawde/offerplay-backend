@@ -1,0 +1,83 @@
+import { Queue, Worker, Job } from 'bullmq';
+import cron from 'node-cron';
+import { getRedisClient } from '../config/redis';
+import { creditCoins } from '../services/coinService';
+import { TransactionType } from '@prisma/client';
+import { logger } from '../utils/logger';
+import { env } from '../config/env';
+
+function buildConnection() {
+  const isTls = env.REDIS_URL.startsWith('rediss://');
+  if (isTls) {
+    // Upstash / TLS Redis — parse URL manually for BullMQ
+    const url = new URL(env.REDIS_URL);
+    return {
+      host: url.hostname,
+      port: parseInt(url.port || '6379', 10),
+      password: url.password || undefined,
+      username: url.username || undefined,
+      tls: { rejectUnauthorized: false },
+    };
+  }
+  const url = new URL(env.REDIS_URL);
+  return {
+    host: url.hostname,
+    port: parseInt(url.port || '6379', 10),
+    password: url.password || undefined,
+  };
+}
+
+const connection = buildConnection();
+
+export const coinQueue = new Queue('coin-operations', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 500,
+  },
+});
+
+export interface CoinJobData {
+  userId: string;
+  amount: number;
+  type: TransactionType;
+  refId?: string;
+  description?: string;
+}
+
+export function startCoinWorker(): Worker {
+  const worker = new Worker<CoinJobData>(
+    'coin-operations',
+    async (job: Job<CoinJobData>) => {
+      const { userId, amount, type, refId, description } = job.data;
+      await creditCoins(userId, amount, type, refId, description);
+      logger.debug('Coin job processed', { jobId: job.id, userId, amount });
+    },
+    { connection }
+  );
+
+  worker.on('failed', (job, err) => {
+    logger.error('Coin job failed', { jobId: job?.id, err });
+  });
+
+  return worker;
+}
+
+export async function enqueueCoinCredit(data: CoinJobData): Promise<void> {
+  await coinQueue.add('credit', data);
+}
+
+// ─── Postback Retry Scheduler (every 5 minutes) ───────────────────────────────
+export function schedulePostbackRetry(): void {
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const { processRetryQueue } = await import('../services/postbackService');
+      await processRetryQueue();
+    } catch (err) {
+      logger.error('Postback retry job failed:', { message: (err as Error).message });
+    }
+  });
+  logger.info('Postback retry queue scheduler started (every 5 min)');
+}
