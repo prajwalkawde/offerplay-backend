@@ -125,22 +125,15 @@ export async function startStage(uid: string, _deviceId?: string): Promise<Start
   const settings = await getSettings();
   const now = new Date();
 
-  // Daily ticket limit check — local midnight, count all tickets including extra tickets
-  // Uses OR(completedAt, updatedAt) so extra tickets awarded after completion are included
+  // Daily ticket limit check — local midnight
+  // ticketsAwarded counts base + extra tickets (claimExtraTicket increments the same field)
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const dailyAgg = await prisma.quizStage.aggregate({
-    where: {
-      uid,
-      ticketsAwarded: { gt: 0 },
-      OR: [
-        { completedAt: { gte: todayStart } },
-        { updatedAt: { gte: todayStart } },
-      ],
-    },
+    where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
-  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  const dailyTicketsEarned = dailyAgg._sum?.ticketsAwarded ?? 0;
 
   if (dailyTicketsEarned >= settings.dailyTicketLimit) {
     throw Object.assign(new Error('Daily ticket limit reached. Come back tomorrow!'), {
@@ -453,7 +446,7 @@ export async function claimBonusTicket(uid: string, stageId: string, bonusAmount
     where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
-  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  const dailyTicketsEarned = dailyAgg._sum?.ticketsAwarded ?? 0;
   const amount = Math.min(bonusAmount, Math.max(0, settings.dailyTicketLimit - dailyTicketsEarned));
 
   if (amount <= 0) {
@@ -481,14 +474,7 @@ export async function getStatus(uid: string): Promise<StatusResult> {
   todayStartLocal.setHours(0, 0, 0, 0);
   const [dailyAgg, activeStage] = await Promise.all([
     prisma.quizStage.aggregate({
-      where: {
-        uid,
-        ticketsAwarded: { gt: 0 },
-        OR: [
-          { completedAt: { gte: todayStartLocal } },
-          { updatedAt: { gte: todayStartLocal } },
-        ],
-      },
+      where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStartLocal } },
       _sum: { ticketsAwarded: true },
     }),
     prisma.quizStage.findFirst({
@@ -497,7 +483,7 @@ export async function getStatus(uid: string): Promise<StatusResult> {
     }),
   ]);
 
-  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  const dailyTicketsEarned = dailyAgg._sum?.ticketsAwarded ?? 0;
   const remainingDailyTickets = Math.max(0, settings.dailyTicketLimit - dailyTicketsEarned);
   const dailyLimitReached = dailyTicketsEarned >= settings.dailyTicketLimit;
 
@@ -537,7 +523,7 @@ export async function claimExtraTicket(
     where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
-  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  const dailyTicketsEarned = dailyAgg._sum?.ticketsAwarded ?? 0;
   if (dailyTicketsEarned >= settings.dailyTicketLimit) {
     throw Object.assign(new Error('Daily ticket limit reached'), { code: 'DAILY_LIMIT_REACHED' });
   }
