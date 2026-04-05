@@ -47,10 +47,13 @@ export interface SuperOfferStatusResult {
     status: string;
     hasAppInstallStep: boolean;
     coinReward: number;
+    requiredUsageMinutes: number;
+    detectedAppPackage: string | null;
+    detectedAppName: string | null;
   } | null;
 }
 
-const IN_PROGRESS_STATUSES = ['pending', 'ad_watched', 'installed', 'verifying'];
+const IN_PROGRESS_STATUSES = ['pending', 'game_done', 'ad_watched', 'installed', 'verifying'];
 const TERMINAL_STATUSES = ['completed', 'failed'];
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -112,7 +115,15 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
       prisma.superOfferAttempt.findFirst({
         where: { uid, status: { in: IN_PROGRESS_STATUSES } },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, status: true, hasAppInstallStep: true, coinReward: true },
+        select: {
+          id: true,
+          status: true,
+          hasAppInstallStep: true,
+          coinReward: true,
+          requiredUsageMinutes: true,
+          detectedAppPackage: true,
+          detectedAppName: true,
+        },
       }),
       prisma.superOfferAttempt.findFirst({
         where: {
@@ -162,6 +173,9 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
           status: inProgressAttempt.status,
           hasAppInstallStep: inProgressAttempt.hasAppInstallStep,
           coinReward: inProgressAttempt.coinReward,
+          requiredUsageMinutes: inProgressAttempt.requiredUsageMinutes,
+          detectedAppPackage: inProgressAttempt.detectedAppPackage ?? null,
+          detectedAppName: inProgressAttempt.detectedAppName ?? null,
         }
       : null,
   };
@@ -223,10 +237,10 @@ export async function markAdWatched(
   attemptId: number
 ): Promise<{ nextStep: string }> {
   const attempt = await prisma.superOfferAttempt.findFirst({
-    where: { id: attemptId, uid, status: 'pending' },
+    where: { id: attemptId, uid, status: 'game_done' },
   });
 
-  if (!attempt) throw new Error('Attempt not found or not in pending state');
+  if (!attempt) throw new Error('Attempt not found or not in game_done state');
 
   const nextStatus = attempt.hasAppInstallStep ? 'ad_watched' : 'verifying';
 
@@ -407,4 +421,83 @@ export async function failAttempt(
       ticketsRefunded: attempt.ticketCost,
     });
   }
+}
+
+// ─── Quiz Start ───────────────────────────────────────────────────────────────
+
+export async function quizStart(
+  uid: string,
+  attemptId: number
+): Promise<{ questions: Array<{ id: number; question: string; optionA: string; optionB: string; optionC: string; optionD: string; sport: string; difficulty: string }> }> {
+  const attempt = await prisma.superOfferAttempt.findFirst({
+    where: { id: attemptId, uid, status: 'pending' },
+  });
+  if (!attempt) throw Object.assign(new Error('Attempt not found or not in pending state'), { code: 'INVALID_STATUS' });
+
+  // Fetch a diverse pool and pick 5
+  const pool = await prisma.sportsQuestion.findMany({
+    where: { isActive: true },
+    orderBy: { usageCount: 'asc' },
+    take: 30,
+    select: { id: true, question: true, optionA: true, optionB: true, optionC: true, optionD: true, sport: true, difficulty: true },
+  });
+
+  const shuffled = pool.sort(() => Math.random() - 0.5).slice(0, 5);
+  const questionIds = shuffled.map((q) => q.id);
+
+  await prisma.superOfferAttempt.update({
+    where: { id: attemptId },
+    data: { quizQuestionIdsJson: JSON.stringify(questionIds) },
+  });
+
+  // Increment usageCount
+  await prisma.sportsQuestion.updateMany({
+    where: { id: { in: questionIds } },
+    data: { usageCount: { increment: 1 } },
+  });
+
+  logger.info('Super Offer quiz started', { uid, attemptId, questionCount: shuffled.length });
+  return { questions: shuffled };
+}
+
+// ─── Quiz Complete ────────────────────────────────────────────────────────────
+
+export async function quizComplete(
+  uid: string,
+  attemptId: number,
+  answers: Array<{ questionId: number; selectedOption: string }>
+): Promise<{ correctAnswers: number; totalQuestions: number; passed: boolean }> {
+  const attempt = await prisma.superOfferAttempt.findFirst({
+    where: { id: attemptId, uid, status: 'pending' },
+  });
+  if (!attempt) throw Object.assign(new Error('Attempt not found or not in pending state'), { code: 'INVALID_STATUS' });
+  if (!attempt.quizQuestionIdsJson) throw Object.assign(new Error('Quiz not started yet'), { code: 'NOT_STARTED' });
+
+  const questionIds: number[] = JSON.parse(attempt.quizQuestionIdsJson);
+  const questions = await prisma.sportsQuestion.findMany({
+    where: { id: { in: questionIds } },
+    select: { id: true, correctOption: true },
+  });
+  const qMap = new Map(questions.map((q) => [q.id, q.correctOption]));
+
+  let correctAnswers = 0;
+  for (const ans of answers) {
+    const correct = qMap.get(ans.questionId);
+    if (correct && ans.selectedOption.toUpperCase() === correct) correctAnswers++;
+  }
+
+  const totalQuestions = questionIds.length;
+  const passed = correctAnswers >= 3;
+
+  if (passed) {
+    await prisma.superOfferAttempt.update({
+      where: { id: attemptId },
+      data: { status: 'game_done', quizGameDoneAt: new Date() },
+    });
+    logger.info('Super Offer quiz passed', { uid, attemptId, correctAnswers });
+  } else {
+    logger.info('Super Offer quiz failed', { uid, attemptId, correctAnswers });
+  }
+
+  return { correctAnswers, totalQuestions, passed };
 }

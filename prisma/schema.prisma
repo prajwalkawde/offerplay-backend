@@ -995,6 +995,8 @@ model SuperOfferAttempt {
   usageVerifiedAt      DateTime?
   coinsAwarded         Int       @default(0)
   spendId              String?   @unique
+  quizQuestionIdsJson  String?
+  quizGameDoneAt       DateTime?
   notifCooldownSent    Boolean   @default(false)
   notif6hSent          Boolean   @default(false)
   notif12hSent         Boolean   @default(false)

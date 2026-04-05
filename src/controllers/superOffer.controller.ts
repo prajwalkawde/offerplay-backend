@@ -162,6 +162,49 @@ export async function failSuperOffer(req: Request, res: Response): Promise<void>
   }
 }
 
+// ─── POST /api/superoffers/quiz-start ────────────────────────────────────────
+
+export async function superOfferQuizStart(req: Request, res: Response): Promise<void> {
+  try {
+    const { attempt_id } = req.body as { attempt_id: number };
+    if (!attempt_id) { error(res, 'attempt_id is required', 400); return; }
+
+    const result = await superOfferService.quizStart(req.userId!, Number(attempt_id));
+    success(res, { error: 'false', questions: result.questions });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to start quiz';
+    logger.error('superOfferQuizStart error', { err, uid: req.userId });
+    error(res, message, 400);
+  }
+}
+
+// ─── POST /api/superoffers/quiz-complete ──────────────────────────────────────
+
+export async function superOfferQuizComplete(req: Request, res: Response): Promise<void> {
+  try {
+    const { attempt_id, answers } = req.body as {
+      attempt_id: number;
+      answers: Array<{ questionId: number; selectedOption: string }>;
+    };
+    if (!attempt_id || !Array.isArray(answers)) {
+      error(res, 'attempt_id and answers are required', 400);
+      return;
+    }
+
+    const result = await superOfferService.quizComplete(req.userId!, Number(attempt_id), answers);
+    success(res, {
+      error: 'false',
+      correct_answers: result.correctAnswers,
+      total_questions: result.totalQuestions,
+      passed: result.passed,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to complete quiz';
+    logger.error('superOfferQuizComplete error', { err, uid: req.userId });
+    error(res, message, 400);
+  }
+}
+
 // ─── GET /api/superoffers/tickets ─────────────────────────────────────────────
 
 export async function getMyTickets(req: Request, res: Response): Promise<void> {

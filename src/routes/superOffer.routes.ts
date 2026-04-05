@@ -9,6 +9,8 @@ import {
   completeSuperOffer,
   failSuperOffer,
   getMyTickets,
+  superOfferQuizStart,
+  superOfferQuizComplete,
 } from '../controllers/superOffer.controller';
 
 const router = Router();
@@ -22,5 +24,7 @@ router.post('/verify-usage', verifyUsage);
 router.post('/complete', completeSuperOffer);
 router.post('/fail', failSuperOffer);
 router.get('/tickets', getMyTickets);
+router.post('/quiz-start', superOfferQuizStart);
+router.post('/quiz-complete', superOfferQuizComplete);
 
 export default router;
