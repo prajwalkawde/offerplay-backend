@@ -125,11 +125,19 @@ export async function startStage(uid: string, _deviceId?: string): Promise<Start
   const settings = await getSettings();
   const now = new Date();
 
-  // Daily ticket limit check — local midnight, count only stages that actually awarded tickets
+  // Daily ticket limit check — local midnight, count all tickets including extra tickets
+  // Uses OR(completedAt, updatedAt) so extra tickets awarded after completion are included
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const dailyAgg = await prisma.quizStage.aggregate({
-    where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
+    where: {
+      uid,
+      ticketsAwarded: { gt: 0 },
+      OR: [
+        { completedAt: { gte: todayStart } },
+        { updatedAt: { gte: todayStart } },
+      ],
+    },
     _sum: { ticketsAwarded: true },
   });
   const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
@@ -473,7 +481,14 @@ export async function getStatus(uid: string): Promise<StatusResult> {
   todayStartLocal.setHours(0, 0, 0, 0);
   const [dailyAgg, activeStage] = await Promise.all([
     prisma.quizStage.aggregate({
-      where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStartLocal } },
+      where: {
+        uid,
+        ticketsAwarded: { gt: 0 },
+        OR: [
+          { completedAt: { gte: todayStartLocal } },
+          { updatedAt: { gte: todayStartLocal } },
+        ],
+      },
       _sum: { ticketsAwarded: true },
     }),
     prisma.quizStage.findFirst({
@@ -527,11 +542,12 @@ export async function claimExtraTicket(
     throw Object.assign(new Error('Daily ticket limit reached'), { code: 'DAILY_LIMIT_REACHED' });
   }
 
-  // Atomically mark claimed and award ticket
+  // Atomically mark claimed, increment ticketsAwarded, and award ticket
+  // ticketsAwarded must be incremented so daily limit query counts this ticket
   const newBalance = await prisma.$transaction(async (tx) => {
     await tx.quizStage.update({
       where: { stageId },
-      data: { extraTicketClaimed: true },
+      data: { extraTicketClaimed: true, ticketsAwarded: { increment: 1 } },
     });
     return creditTickets(uid, 1, 'earned_game', 'Sports Quiz Extra Ticket 📺', stageId, tx);
   });
