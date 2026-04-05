@@ -1045,6 +1045,7 @@ model QuizStage {
   hintsUsed           Int           @default(0)
   ticketsAwarded      Int           @default(0)
   bonusTicketClaimed  Boolean       @default(false)
+  extraTicketClaimed  Boolean       @default(false)
   isFlagged           Boolean       @default(false)
   flagReason          String?
   createdAt           DateTime      @default(now())

@@ -51,6 +51,8 @@ interface AnswerInput {
 interface ClaimResult {
   correctAnswers: number;
   totalQuestions: number;
+  isPassed: boolean;
+  passThreshold: number;
   ticketsAwarded: number;
   isFlagged: boolean;
   flagReason: string | null;
@@ -71,6 +73,8 @@ interface StatusResult {
   remainingDailyTickets: number;
   cooldownRemainingMinutes: number;
   nextStageAvailableAt: Date | null;
+  showDailyLimitMessage: boolean;
+  resetsAt: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,52 +112,54 @@ function startOfTodayUTC(): Date {
   return d;
 }
 
+function tomorrowMidnightUTC(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
 // ─── startStage ───────────────────────────────────────────────────────────────
 
 export async function startStage(uid: string, _deviceId?: string): Promise<StartStageResult> {
   const settings = await getSettings();
   const now = new Date();
 
-  // Daily ticket limit check
-  const todayStart = startOfTodayUTC();
+  // Daily ticket limit check — local midnight, count only stages that actually awarded tickets
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
   const dailyAgg = await prisma.quizStage.aggregate({
-    where: { uid, status: 'completed', completedAt: { gte: todayStart } },
+    where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
   const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
 
   if (dailyTicketsEarned >= settings.dailyTicketLimit) {
-    throw Object.assign(new Error('Daily ticket limit reached'), { code: 'DAILY_LIMIT' });
+    throw Object.assign(new Error('Daily ticket limit reached. Come back tomorrow!'), {
+      code: 'DAILY_LIMIT_REACHED',
+      resetsAt: tomorrowMidnightUTC(),
+    });
   }
 
-  // Cooldown check
-  const lastCompleted = await prisma.quizStage.findFirst({
-    where: { uid, status: 'completed' },
-    orderBy: { completedAt: 'desc' },
-    select: { completedAt: true },
+  // Active stage check — auto-expire stuck sessions that have passed their expiry
+  const activeStage = await prisma.quizStage.findFirst({
+    where: { uid, status: 'started' },
+    select: { stageId: true, expiresAt: true },
   });
-
-  if (lastCompleted?.completedAt) {
-    const cooldownMs = settings.cooldownMinutes * 60 * 1000;
-    const elapsed = now.getTime() - lastCompleted.completedAt.getTime();
-    if (elapsed < cooldownMs) {
-      const remainingMinutes = Math.ceil((cooldownMs - elapsed) / 60000);
-      throw Object.assign(
-        new Error(`Cooldown active. Try again in ${remainingMinutes} minutes`),
-        { code: 'COOLDOWN', remainingMinutes }
-      );
+  if (activeStage) {
+    if (activeStage.expiresAt < now) {
+      // Session has expired — auto-expire it and continue
+      await prisma.quizStage.update({
+        where: { stageId: activeStage.stageId },
+        data: { status: 'expired' },
+      });
+      logger.info('Auto-expired stuck quiz stage', { uid, stageId: activeStage.stageId });
+    } else {
+      throw Object.assign(new Error('You have an active stage in progress'), { code: 'ACTIVE_STAGE' });
     }
   }
 
-  // No active stage check
-  const activeStage = await prisma.quizStage.findFirst({
-    where: { uid, status: 'started' },
-  });
-  if (activeStage) {
-    throw Object.assign(new Error('You already have an active quiz stage'), { code: 'ACTIVE_STAGE' });
-  }
-
-  // Create stage
+  // Create stage immediately — no cooldown between stages
   const stageId = crypto.randomUUID();
   const ts = now.getTime();
   const stageToken = makeStageToken(stageId, uid, ts);
@@ -179,7 +185,7 @@ export async function startStage(uid: string, _deviceId?: string): Promise<Start
     dailyTicketsEarned,
     dailyTicketLimit: settings.dailyTicketLimit,
     remainingDailyTickets: settings.dailyTicketLimit - dailyTicketsEarned,
-    cooldownMinutes: settings.cooldownMinutes,
+    cooldownMinutes: 0,
     hintsPerStage: settings.maxHintsPerStage,
   };
 }
@@ -302,6 +308,7 @@ export async function claimStage(
     where: { stageId },
     data: { status: 'completed', completedAt: now },
   });
+  console.log('[Quiz] claimStage complete:', stageId, uid);
 
   // Bot detection: all answers within 200ms of each other
   if (answers.length > 1) {
@@ -360,14 +367,23 @@ export async function claimStage(
     flagReason = 'session_too_short';
   }
 
-  // Award ticket
-  const newBalance = await creditTickets(
-    uid,
-    1,
-    'earned_game',
-    `Sports Quiz Stage 🏆 - ${correctAnswers}/${answers.length} correct`,
-    stageId
-  );
+  // Pass threshold: 50% correct required to earn ticket
+  const totalQuestions = answers.length;
+  const passThreshold = Math.ceil(totalQuestions / 2);
+  const isPassed = correctAnswers >= passThreshold;
+
+  // Award ticket ONLY if passed and not flagged as bot
+  let ticketsAwarded = 0;
+  if (isPassed && !isFlagged) {
+    await creditTickets(
+      uid,
+      1,
+      'earned_game',
+      `Sports Quiz Stage 🏆 - ${correctAnswers}/${totalQuestions} correct`,
+      stageId
+    );
+    ticketsAwarded = 1;
+  }
 
   // Update stage with final data
   await prisma.quizStage.update({
@@ -375,24 +391,24 @@ export async function claimStage(
     data: {
       correctAnswers,
       hintsUsed: stage.hintsUsed,
-      ticketsAwarded: 1,
+      ticketsAwarded,
       sessionDurationMs,
       isFlagged,
       flagReason,
     },
   });
 
-  logger.info('Quiz stage claimed', { uid, stageId, correctAnswers, isFlagged, newBalance });
-
-  const nextStageAvailableAt = new Date(now.getTime() + settings.cooldownMinutes * 60 * 1000);
+  logger.info('Quiz stage claimed', { uid, stageId, correctAnswers, isPassed, ticketsAwarded, isFlagged });
 
   return {
     correctAnswers,
-    totalQuestions: answers.length,
-    ticketsAwarded: 1,
+    totalQuestions,
+    isPassed,
+    passThreshold,
+    ticketsAwarded,
     isFlagged,
     flagReason,
-    nextStageAvailableAt,
+    nextStageAvailableAt: now,
     answers: stageAnswers.map((a) => {
       const q = questionMap.get(a.questionId);
       return {
@@ -401,6 +417,7 @@ export async function claimStage(
         isCorrect: a.isCorrect,
         correctOption: q?.correctOption ?? '',
         explanation: q?.explanation ?? null,
+        hintWatched: a.hintWatched,
       };
     }),
   };
@@ -422,9 +439,10 @@ export async function claimBonusTicket(uid: string, stageId: string, bonusAmount
   if (stage.bonusTicketClaimed) throw Object.assign(new Error('Bonus ticket already claimed'), { code: 'ALREADY_CLAIMED' });
 
   // Check daily limit
-  const todayStart = startOfTodayUTC();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
   const dailyAgg = await prisma.quizStage.aggregate({
-    where: { uid, status: 'completed', completedAt: { gte: todayStart } },
+    where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
     _sum: { ticketsAwarded: true },
   });
   const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
@@ -451,18 +469,16 @@ export async function claimBonusTicket(uid: string, stageId: string, bonusAmount
 
 export async function getStatus(uid: string): Promise<StatusResult> {
   const settings = await getSettings();
-  const now = new Date();
-  const todayStart = startOfTodayUTC();
-
-  const [dailyAgg, lastCompleted] = await Promise.all([
+  const todayStartLocal = new Date();
+  todayStartLocal.setHours(0, 0, 0, 0);
+  const [dailyAgg, activeStage] = await Promise.all([
     prisma.quizStage.aggregate({
-      where: { uid, status: 'completed', completedAt: { gte: todayStart } },
+      where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStartLocal } },
       _sum: { ticketsAwarded: true },
     }),
     prisma.quizStage.findFirst({
-      where: { uid, status: 'completed' },
-      orderBy: { completedAt: 'desc' },
-      select: { completedAt: true },
+      where: { uid, status: 'started' },
+      select: { stageId: true },
     }),
   ]);
 
@@ -470,26 +486,56 @@ export async function getStatus(uid: string): Promise<StatusResult> {
   const remainingDailyTickets = Math.max(0, settings.dailyTicketLimit - dailyTicketsEarned);
   const dailyLimitReached = dailyTicketsEarned >= settings.dailyTicketLimit;
 
-  let cooldownRemainingMinutes = 0;
-  let nextStageAvailableAt: Date | null = null;
-
-  if (lastCompleted?.completedAt) {
-    const cooldownMs = settings.cooldownMinutes * 60 * 1000;
-    const elapsed = now.getTime() - lastCompleted.completedAt.getTime();
-    if (elapsed < cooldownMs) {
-      cooldownRemainingMinutes = Math.ceil((cooldownMs - elapsed) / 60000);
-      nextStageAvailableAt = new Date(lastCompleted.completedAt.getTime() + cooldownMs);
-    }
-  }
-
-  const canPlay = !dailyLimitReached && cooldownRemainingMinutes === 0;
+  // canPlay: no daily limit hit AND no active stage in progress
+  const canPlay = !dailyLimitReached && !activeStage;
+  const showDailyLimitMessage = dailyLimitReached;
 
   return {
     canPlay,
     dailyTicketsEarned,
     dailyTicketLimit: settings.dailyTicketLimit,
     remainingDailyTickets,
-    cooldownRemainingMinutes,
-    nextStageAvailableAt,
+    cooldownRemainingMinutes: 0,
+    nextStageAvailableAt: null,
+    showDailyLimitMessage,
+    resetsAt: tomorrowMidnightUTC(),
   };
+}
+
+// ─── claimExtraTicket ─────────────────────────────────────────────────────────
+
+export async function claimExtraTicket(
+  uid: string,
+  stageId: string
+): Promise<{ ticketsAwarded: number; newBalance: number }> {
+  const stage = await prisma.quizStage.findUnique({ where: { stageId } });
+  if (!stage) throw Object.assign(new Error('Stage not found'), { code: 'NOT_FOUND' });
+  if (stage.uid !== uid) throw Object.assign(new Error('Unauthorized'), { code: 'UNAUTHORIZED' });
+  if (stage.status !== 'completed') throw Object.assign(new Error('Stage not completed'), { code: 'INVALID_STATUS' });
+  if (stage.extraTicketClaimed) throw Object.assign(new Error('Extra ticket already claimed'), { code: 'ALREADY_CLAIMED' });
+
+  // Daily limit check
+  const settings = await getSettings();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const dailyAgg = await prisma.quizStage.aggregate({
+    where: { uid, ticketsAwarded: { gt: 0 }, completedAt: { gte: todayStart } },
+    _sum: { ticketsAwarded: true },
+  });
+  const dailyTicketsEarned = dailyAgg._sum.ticketsAwarded ?? 0;
+  if (dailyTicketsEarned >= settings.dailyTicketLimit) {
+    throw Object.assign(new Error('Daily ticket limit reached'), { code: 'DAILY_LIMIT_REACHED' });
+  }
+
+  // Atomically mark claimed and award ticket
+  const newBalance = await prisma.$transaction(async (tx) => {
+    await tx.quizStage.update({
+      where: { stageId },
+      data: { extraTicketClaimed: true },
+    });
+    return creditTickets(uid, 1, 'earned_game', 'Sports Quiz Extra Ticket 📺', stageId, tx);
+  });
+
+  logger.info('Extra ticket claimed', { uid, stageId, newBalance });
+  return { ticketsAwarded: 1, newBalance };
 }

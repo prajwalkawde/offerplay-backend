@@ -14,8 +14,7 @@ export async function startStage(req: Request, res: Response): Promise<void> {
   } catch (err: unknown) {
     const e = err as { message?: string; code?: string; remainingMinutes?: number; stack?: string };
     logger.error('startStage error', { message: e.message, code: e.code, stack: e.stack });
-    if (e.code === 'DAILY_LIMIT') { error(res, e.message ?? 'Daily limit reached', 429); return; }
-    if (e.code === 'COOLDOWN') { error(res, e.message ?? 'Cooldown active', 429, { remainingMinutes: e.remainingMinutes }); return; }
+    if (e.code === 'DAILY_LIMIT' || e.code === 'DAILY_LIMIT_REACHED') { error(res, e.message ?? 'Daily limit reached', 429); return; }
     if (e.code === 'ACTIVE_STAGE') { error(res, e.message ?? 'Active stage exists', 409); return; }
     error(res, 'Failed to start stage', 500);
   }
@@ -123,5 +122,26 @@ export async function getQuizStatus(req: Request, res: Response): Promise<void> 
   } catch (err) {
     logger.error('getQuizStatus error', { err });
     error(res, 'Failed to get quiz status', 500);
+  }
+}
+
+// ─── claimExtraTicket ─────────────────────────────────────────────────────────
+
+export async function claimExtraTicket(req: Request, res: Response): Promise<void> {
+  try {
+    const uid = req.userId!;
+    const { session_id } = req.body as { session_id?: string };
+    if (!session_id) { error(res, 'session_id is required', 400); return; }
+    const result = await quizService.claimExtraTicket(uid, session_id);
+    success(res, result, 'Extra ticket claimed');
+  } catch (err: unknown) {
+    const e = err as { message?: string; code?: string };
+    logger.error('claimExtraTicket error', { err });
+    if (e.code === 'ALREADY_CLAIMED') { error(res, e.message ?? 'Already claimed', 409); return; }
+    if (e.code === 'DAILY_LIMIT_REACHED') { error(res, e.message ?? 'Daily limit reached', 429); return; }
+    if (e.code === 'INVALID_STATUS') { error(res, e.message ?? 'Stage not completed', 400); return; }
+    if (e.code === 'NOT_FOUND') { error(res, e.message ?? 'Stage not found', 404); return; }
+    if (e.code === 'UNAUTHORIZED') { error(res, 'Unauthorized', 403); return; }
+    error(res, 'Failed to claim extra ticket', 500);
   }
 }

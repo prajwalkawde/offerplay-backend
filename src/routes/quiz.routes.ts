@@ -7,6 +7,7 @@ import {
   claimStage,
   claimBonusTicket,
   getQuizStatus,
+  claimExtraTicket,
 } from '../controllers/quiz.controller';
 
 const router = Router();
@@ -17,6 +18,7 @@ router.post('/questions', getQuestions);
 router.post('/hint', useHint);
 router.post('/claim', claimStage);
 router.post('/bonus', claimBonusTicket);
+router.post('/extra-ticket', claimExtraTicket);
 router.get('/status', getQuizStatus);
 
 export default router;
