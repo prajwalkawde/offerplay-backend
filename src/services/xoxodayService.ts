@@ -134,6 +134,27 @@ const getXoxodayToken = async (): Promise<string> => {
   return '';
 };
 
+const XOXODAY_API = 'https://accounts.xoxoday.com/chef/v1/oauth/api';
+
+function normalizeVoucher(v: any) {
+  return {
+    id:           String(v.productId || v.id || v.voucherId || v.code || ''),
+    name:         v.productName     || v.name  || v.title       || 'Unknown',
+    description:  v.productDescription || v.description || '',
+    imageUrl:     v.imageUrl        || v.image || v.logo         || v.thumbnail || '',
+    category:     v.categoryName    || v.category || 'General',
+    denominations: (v.denominations || v.valueDenominations || v.prices || []).map((d: any) => ({
+      id:           String(d.id || d.denominationId || d.voucherId || d.value || ''),
+      value:        parseFloat(d.price || d.value || d.amount || d.faceValue || 0),
+      currencyCode: d.currencyCode || d.currency || 'INR',
+      discount:     d.discount     || d.discountPercentage || 0,
+    })),
+    minValue: v.minValue || v.minimumValue || 50,
+    maxValue: v.maxValue || v.maximumValue || 10000,
+    isActive: v.isActive !== false && v.status !== 'inactive',
+  };
+}
+
 // ─── Get products / vouchers ──────────────────────────────────────────────────
 export const getXoxodayProducts = async (
   countryCode: string = 'IN',
@@ -152,53 +173,40 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
-    const endpoints = [
-      `https://api.xoxoday.com/v1/plum/products?country=${countryCode}&limit=100`,
-      `https://api.xoxoday.com/api/v1/vouchers?country=${countryCode}&limit=100`,
-      `https://api.xoxoday.com/api/v1/catalog?country=${countryCode}&limit=100`,
-    ];
+    // Xoxoday uses a single GraphQL-style endpoint for all operations
+    const body = {
+      query: 'plumProAPI.mutation.getVouchers',
+      tag:   'plumProAPI',
+      variables: {
+        filters:    { countryCodes: [countryCode] },
+        pagination: { pageNumber: 1, limit: 100 },
+      },
+    };
 
-    for (const url of endpoints) {
-      try {
-        const res = await axios.get(url, { headers, timeout: 15000 });
-        const data = res.data;
+    try {
+      const res  = await axios.post(XOXODAY_API, body, { headers, timeout: 15000 });
+      const data = res.data;
 
-        const vouchers =
-          data?.data?.vouchers  ||
-          data?.data?.products  ||
-          data?.vouchers        ||
-          data?.products        ||
-          data?.data            ||
-          [];
+      // Response can be nested in data.data.getVouchers or data.data or data directly
+      const vouchers: any[] =
+        data?.data?.getVouchers?.data  ||
+        data?.data?.vouchers           ||
+        data?.data                     ||
+        data?.vouchers                 ||
+        [];
 
-        if (Array.isArray(vouchers) && vouchers.length > 0) {
-          logger.info(`[Xoxoday] Got ${vouchers.length} products from ${url}`);
-          return vouchers.map((v: any) => ({
-            id:           String(v.productId || v.id || v.voucherId || v.code || ''),
-            name:         v.productName     || v.name  || v.title       || 'Unknown',
-            description:  v.productDescription || v.description || '',
-            imageUrl:     v.imageUrl        || v.image || v.logo         || v.thumbnail || '',
-            category:     v.categoryName    || v.category || 'General',
-            denominations: (v.denominations || v.valueDenominations || v.prices || []).map((d: any) => ({
-              id:           String(d.id || d.denominationId || d.voucherId || d.value || ''),
-              value:        parseFloat(d.price || d.value || d.amount || d.faceValue || 0),
-              currencyCode: d.currencyCode || d.currency || 'INR',
-              discount:     d.discount     || d.discountPercentage || 0,
-            })),
-            minValue: v.minValue || v.minimumValue || 50,
-            maxValue: v.maxValue || v.maximumValue || 10000,
-            isActive: v.isActive !== false && v.status !== 'inactive',
-          }));
-        }
-
-        logger.warn(`[Xoxoday] ${url} returned empty/unexpected:`, JSON.stringify(data)?.slice(0, 200));
-
-      } catch (err: any) {
-        logger.warn(`[Xoxoday] Products endpoint ${url} failed (${err.response?.status}):`, err.response?.data || err.message);
+      if (Array.isArray(vouchers) && vouchers.length > 0) {
+        logger.info(`[Xoxoday] Got ${vouchers.length} vouchers`);
+        return vouchers.map(normalizeVoucher);
       }
+
+      logger.warn(`[Xoxoday] getVouchers returned empty: ${JSON.stringify(data)?.slice(0, 300)}`);
+
+    } catch (err: any) {
+      logger.warn(`[Xoxoday] getVouchers failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }
 
-    logger.warn('[Xoxoday] All product endpoints failed — returning mock');
+    logger.warn('[Xoxoday] Product fetch failed — returning mock');
     return getMockProducts();
 
   } catch (err: any) {
@@ -224,40 +232,36 @@ export const placeXoxodayOrder = async (
     }
 
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    const payload = {
-      externalOrderId: orderId,
-      items: [{
+    const body = {
+      query: 'plumProAPI.mutation.placeOrder',
+      tag:   'plumProAPI',
+      variables: {
         productId,
-        denominationId,
         quantity,
-        recipientEmail: userEmail,
-        recipient: { email: userEmail, name: `User_${userId.slice(0, 6)}` },
-      }],
-      notifyRecipient: true,
+        denomination:  parseFloat(denominationId) || denominationId,
+        email:         userEmail,
+        tag:           orderId,
+        poNumber:      orderId,
+        notifyReceiver: 1,
+      },
     };
 
-    const endpoints = [
-      'https://api.xoxoday.com/v1/plum/orders',
-      'https://api.xoxoday.com/api/v1/orders',
-    ];
+    try {
+      const res     = await axios.post(XOXODAY_API, body, { headers, timeout: 30000 });
+      const order   = res.data?.data?.placeOrder || res.data?.data || res.data;
+      const voucher = order?.vouchers?.[0] || order?.items?.[0] || order?.data?.[0] || order || {};
 
-    for (const url of endpoints) {
-      try {
-        const res     = await axios.post(url, payload, { headers, timeout: 30000 });
-        const order   = res.data?.data || res.data;
-        const voucher = order?.vouchers?.[0] || order?.items?.[0] || order || {};
-
-        return {
-          success:     true,
-          voucherCode: voucher.code        || voucher.voucherCode || voucher.pin   || '',
-          voucherLink: voucher.link        || voucher.url         || voucher.redemptionUrl || '',
-        };
-      } catch (err: any) {
-        logger.warn(`[Xoxoday] Order endpoint ${url} failed:`, err.response?.data || err.message);
-      }
+      logger.info(`[Xoxoday] Order placed: ${JSON.stringify(res.data)?.slice(0, 200)}`);
+      return {
+        success:     true,
+        voucherCode: voucher.code        || voucher.voucherCode || voucher.pin          || '',
+        voucherLink: voucher.link        || voucher.url         || voucher.redemptionUrl || '',
+      };
+    } catch (err: any) {
+      logger.warn(`[Xoxoday] placeOrder failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }
 
-    return { success: false, error: 'All order endpoints failed' };
+    return { success: false, error: 'Order placement failed' };
 
   } catch (err: any) {
     logger.error('[Xoxoday] placeXoxodayOrder error:', err.message);
