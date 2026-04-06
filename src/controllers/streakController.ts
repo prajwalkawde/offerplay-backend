@@ -83,6 +83,16 @@ export const claimDailyStreak = async (req: Request, res: Response): Promise<voi
   try {
     const userId = req.userId!;
 
+    // Gate: must have completed at least one Super Offer
+    const completedSuperOffer = await prisma.superOfferAttempt.findFirst({
+      where: { uid: userId, status: 'completed' },
+      select: { id: true },
+    });
+    if (!completedSuperOffer) {
+      error(res, 'Complete 1 Super Offer first to unlock Daily Bonus', 403);
+      return;
+    }
+
     let streak = await prisma.userStreak.findUnique({ where: { userId } });
     if (!streak) {
       streak = await prisma.userStreak.create({ data: { userId } });
