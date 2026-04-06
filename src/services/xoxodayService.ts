@@ -167,6 +167,8 @@ export const getXoxodayProducts = async (
       return getMockProducts();
     }
 
+    logger.info(`[Xoxoday] Token preview: ${token.slice(0, 30)}...`);
+
     const headers = {
       Authorization:  `Bearer ${token}`,
       'Content-Type': 'application/json',
