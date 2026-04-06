@@ -43,9 +43,13 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
       sid,
       device_id,
       sdk_app_id,
+      app_id,
       app_name,
       reward_type,
     } = req.query as Record<string, string>;
+
+    // app_id and sdk_app_id are both used by Adjoe in different contexts
+    const resolvedAppId = sdk_app_id || app_id;
 
     // ── Required param check ──────────────────────────────────────────────────
     if (!user_uuid || !trans_uuid || !coin_amount || !currency || !sid) {
@@ -54,7 +58,7 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
     }
 
     // ── SID verification ──────────────────────────────────────────────────────
-    const sidValid = verifySid({ trans_uuid, user_uuid, currency, coin_amount, device_id, sdk_app_id, sid });
+    const sidValid = verifySid({ trans_uuid, user_uuid, currency, coin_amount, device_id, sdk_app_id: resolvedAppId, sid });
     if (!sidValid) {
       logger.warn('[Adjoe] invalid SID for user:', user_uuid, 'trans:', trans_uuid);
       return res.status(403).send('Forbidden');
@@ -96,8 +100,8 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
       create: {
         userId:        user_uuid,
         sessionId:     trans_uuid,
-        gameId:        sdk_app_id  || '',
-        gameName:      app_name    || reward_type || '',
+        gameId:        resolvedAppId || '',
+        gameName:      app_name      || reward_type || '',
         minutesPlayed: 0,
         ticketsEarned: ticketsToCredit,
         coinsEarned:   0,
