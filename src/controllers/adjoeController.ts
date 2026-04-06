@@ -1,139 +1,142 @@
 import { Request, Response } from 'express';
+import { createHash } from 'crypto';
 import { prisma } from '../config/database';
-import { updateQuestProgress } from './questController';
 import { logger } from '../utils/logger';
-import { TransactionType } from '@prisma/client';
+import { creditTickets } from '../services/ticketService';
 
-// GET /api/adjoe/postback  — called by adjoe servers (no auth)
+const S2S_TOKEN = 'unucagmxxbpiwtwifyjhvwzudmqxcwkz';
+
+// ─── SID verification ────────────────────────────────────────────────────────
+// sid = sha1(trans_uuid + user_uuid + currency + coin_amount + device_id + sdk_app_id + s2s_token)
+// Missing optional params are simply omitted (not replaced with empty string).
+function verifySid(params: {
+  trans_uuid: string;
+  user_uuid:  string;
+  currency:   string;
+  coin_amount: string;
+  device_id?:  string;
+  sdk_app_id?: string;
+  sid:         string;
+}): boolean {
+  const parts = [
+    params.trans_uuid,
+    params.user_uuid,
+    params.currency,
+    params.coin_amount,
+    params.device_id,
+    params.sdk_app_id,
+    S2S_TOKEN,
+  ].filter(Boolean) as string[];
+
+  const expected = createHash('sha1').update(parts.join('')).digest('hex');
+  return expected === params.sid;
+}
+
+// ─── GET /api/adjoe/postback  — called by adjoe servers (no auth) ─────────────
 export const handleAdjoePostback = async (req: Request, res: Response) => {
   try {
     const {
-      user_id,
-      session_id,
-      minutes,
-      game_id,
-      game_name,
+      user_uuid,
+      trans_uuid,
+      coin_amount,
+      currency,
+      sid,
+      device_id,
+      sdk_app_id,
+      app_name,
+      reward_type,
     } = req.query as Record<string, string>;
 
-    if (!user_id || !session_id) {
+    // ── Required param check ──────────────────────────────────────────────────
+    if (!user_uuid || !trans_uuid || !coin_amount || !currency || !sid) {
+      logger.warn('[Adjoe] postback missing required params', req.query);
       return res.status(400).send('Bad Request');
     }
 
-    // Idempotency check
-    const existingSession = await prisma.adjoeSession.findUnique({
-      where: { sessionId: String(session_id) },
+    // ── SID verification ──────────────────────────────────────────────────────
+    const sidValid = verifySid({ trans_uuid, user_uuid, currency, coin_amount, device_id, sdk_app_id, sid });
+    if (!sidValid) {
+      logger.warn('[Adjoe] invalid SID for user:', user_uuid, 'trans:', trans_uuid);
+      return res.status(403).send('Forbidden');
+    }
+
+    // ── Idempotency — trans_uuid must be unique ───────────────────────────────
+    const existing = await prisma.adjoeSession.findUnique({
+      where: { sessionId: trans_uuid },
     });
-    if (existingSession?.status === 'credited') {
-      logger.warn('adjoe duplicate postback:', session_id);
-      return res.send('OK');
+    if (existing?.status === 'credited') {
+      logger.warn('[Adjoe] duplicate trans_uuid:', trans_uuid);
+      return res.status(200).send('OK'); // must return 200 so adjoe stops retrying
     }
 
-    const userId       = String(user_id);
-    const minutesPlayed = parseInt(String(minutes || '0'), 10) || 0;
-
-    // 5 min = 1 ticket; 1 min = 2 bonus coins
-    const ticketsEarned = Math.floor(minutesPlayed / 5);
-    const coinsBonus    = minutesPlayed * 2;
-
-    if (ticketsEarned > 0 || coinsBonus > 0) {
-      await prisma.$transaction(async tx => {
-        if (ticketsEarned > 0) {
-          await tx.user.update({
-            where: { id: userId },
-            data:  { ticketBalance: { increment: ticketsEarned } },
-          });
-          await tx.ticketTransaction.create({
-            data: {
-              userId,
-              amount:      ticketsEarned,
-              type:        'EARN_TICKET',
-              refId:       String(session_id),
-              description: `adjoe: ${game_name || 'game'} - ${minutesPlayed} min`,
-            },
-          }).catch(() => {});
-        }
-
-        if (coinsBonus > 0) {
-          await tx.user.update({
-            where: { id: userId },
-            data:  { coinBalance: { increment: coinsBonus } },
-          });
-          await tx.transaction.create({
-            data: {
-              userId,
-              type:        TransactionType.ADJOE_BONUS,
-              amount:      coinsBonus,
-              description: `adjoe coins: ${game_name || 'game'}`,
-              status:      'completed',
-              refId:       String(session_id),
-            },
-          });
-        }
-
-        await tx.adjoeSession.upsert({
-          where:  { sessionId: String(session_id) },
-          update: {
-            minutesPlayed,
-            ticketsEarned,
-            coinsEarned: coinsBonus,
-            status:      'credited',
-            endedAt:     new Date(),
-          },
-          create: {
-            userId,
-            sessionId:    String(session_id),
-            gameId:       String(game_id   || ''),
-            gameName:     String(game_name || ''),
-            minutesPlayed,
-            ticketsEarned,
-            coinsEarned:  coinsBonus,
-            status:       'credited',
-          },
-        });
-      });
-
-      await updateQuestProgress(userId, 'PLAY_MINUTES', minutesPlayed);
-
-      logger.info(
-        `adjoe credited: ${userId} - ${minutesPlayed}min → ${ticketsEarned} tickets + ${coinsBonus} coins`,
-      );
+    // ── Find user ─────────────────────────────────────────────────────────────
+    const user = await prisma.user.findUnique({ where: { id: user_uuid }, select: { id: true } });
+    if (!user) {
+      logger.warn('[Adjoe] user not found:', user_uuid);
+      return res.status(404).send('User not found');
     }
 
-    return res.send('OK');
+    const ticketsToCredit = parseInt(coin_amount, 10);
+    if (isNaN(ticketsToCredit) || ticketsToCredit <= 0) {
+      return res.status(400).send('Invalid coin_amount');
+    }
+
+    // ── Credit tickets ────────────────────────────────────────────────────────
+    await creditTickets(
+      user_uuid,
+      ticketsToCredit,
+      `Adjoe reward: ${app_name || reward_type || 'game'} (${currency})`,
+      `adjoe_${trans_uuid}`,
+    );
+
+    // ── Record session ────────────────────────────────────────────────────────
+    await prisma.adjoeSession.upsert({
+      where:  { sessionId: trans_uuid },
+      update: { ticketsEarned: ticketsToCredit, status: 'credited', endedAt: new Date() },
+      create: {
+        userId:        user_uuid,
+        sessionId:     trans_uuid,
+        gameId:        sdk_app_id  || '',
+        gameName:      app_name    || reward_type || '',
+        minutesPlayed: 0,
+        ticketsEarned: ticketsToCredit,
+        coinsEarned:   0,
+        status:        'credited',
+      },
+    });
+
+    logger.info(`[Adjoe] credited ${ticketsToCredit} tickets → user ${user_uuid} (trans: ${trans_uuid})`);
+    return res.status(200).send('OK');
+
   } catch (err) {
-    logger.error('adjoe postback error:', err);
+    logger.error('[Adjoe] postback error:', err);
     return res.status(500).send('ERROR');
   }
 };
 
-// GET /api/adjoe/stats  — authenticated user
+// ─── GET /api/adjoe/stats  — authenticated user ───────────────────────────────
 export const getAdjoeStats = async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
     const today  = new Date(); today.setHours(0, 0, 0, 0);
 
     const [todaySessions, allSessions] = await Promise.all([
-      prisma.adjoeSession.findMany({ where: { userId, startedAt: { gte: today } } }),
+      prisma.adjoeSession.findMany({ where: { userId, startedAt: { gte: today }, status: 'credited' } }),
       prisma.adjoeSession.aggregate({
-        where: { userId },
-        _sum: { minutesPlayed: true, ticketsEarned: true, coinsEarned: true },
+        where: { userId, status: 'credited' },
+        _sum:  { ticketsEarned: true, coinsEarned: true },
       }),
     ]);
 
-    const todayMinutes = todaySessions.reduce((s, sess) => s + sess.minutesPlayed, 0);
     const todayTickets = todaySessions.reduce((s, sess) => s + sess.ticketsEarned, 0);
 
     return res.json({
       success: true,
       data: {
         today: {
-          minutes:          todayMinutes,
-          tickets:          todayTickets,
-          dailyLimitMinutes: 30,
-          remainingMinutes:  Math.max(0, 30 - todayMinutes),
+          tickets: todayTickets,
         },
         allTime: {
-          minutes: allSessions._sum.minutesPlayed || 0,
           tickets: allSessions._sum.ticketsEarned || 0,
           coins:   allSessions._sum.coinsEarned   || 0,
         },
