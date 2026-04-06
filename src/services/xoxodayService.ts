@@ -21,6 +21,47 @@ function getCredentials() {
 const getXoxodayToken = async (): Promise<string> => {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
+  // ── Use static access token from env if available (fastest, no OAuth round-trip)
+  const staticToken = process.env.XOXODAY_ACCESS_TOKEN;
+  const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
+  if (staticToken) {
+    // expiry is in ms; if not set assume valid
+    if (!staticExpiry || Date.now() < staticExpiry) {
+      cachedToken = staticToken;
+      tokenExpiry = staticExpiry || Date.now() + 365 * 24 * 60 * 60 * 1000;
+      logger.info('[Xoxoday] Using static access token from env');
+      return staticToken;
+    }
+    logger.warn('[Xoxoday] Static access token is expired — falling back to OAuth');
+  }
+
+  // ── Try refresh_token grant if available
+  const refreshToken = process.env.XOXODAY_REFRESH_TOKEN;
+  if (refreshToken) {
+    try {
+      logger.info('[Xoxoday] Trying refresh_token grant');
+      const res = await axios.post(
+        'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
+        new URLSearchParams({
+          grant_type:    'refresh_token',
+          refresh_token: refreshToken,
+          client_id:     process.env.XOXODAY_CLIENT_ID || process.env.XOXODAY_API_KEY || '',
+          client_secret: process.env.XOXODAY_SECRET_ID || process.env.XOXODAY_API_SECRET || '',
+        }).toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 },
+      );
+      const token = res.data?.access_token || res.data?.data?.access_token;
+      if (token) {
+        cachedToken = token;
+        tokenExpiry = Date.now() + 50 * 60 * 1000;
+        logger.info('[Xoxoday] Token obtained via refresh_token');
+        return token;
+      }
+    } catch (err: any) {
+      logger.warn(`[Xoxoday] refresh_token grant failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
+    }
+  }
+
   const { clientId, secretId } = getCredentials();
 
   if (!clientId || !secretId) {
