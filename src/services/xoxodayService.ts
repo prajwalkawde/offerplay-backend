@@ -170,13 +170,13 @@ export const getXoxodayProducts = async (
     logger.info(`[Xoxoday] Token preview: ${token.slice(0, 30)}...`);
 
     const headers = {
-      Authorization:  `Bearer ${token}`,
       'Content-Type': 'application/json',
       Accept:         'application/json',
     };
 
-    // Xoxoday uses a single GraphQL-style endpoint for all operations
+    // Xoxoday Plum API — token goes in the request body, not Authorization header
     const body = {
+      token,
       query: 'plumProAPI.mutation.getVouchers',
       tag:   'plumProAPI',
       variables: {
@@ -233,8 +233,9 @@ export const placeXoxodayOrder = async (
       return { success: true, voucherCode: `TEST${orderId.slice(-6).toUpperCase()}`, voucherLink: 'https://xoxoday.com/redeem' };
     }
 
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json' };
     const body = {
+      token,
       query: 'plumProAPI.mutation.placeOrder',
       tag:   'plumProAPI',
       variables: {
