@@ -10,12 +10,21 @@ export const getStreakData = async (req: Request, res: Response): Promise<void> 
   try {
     const userId = req.userId!;
 
-    let streak = await prisma.userStreak.findUnique({ where: { userId } });
+    const [streakRecord, config, completedSuperOffer] = await Promise.all([
+      prisma.userStreak.findUnique({ where: { userId } }),
+      prisma.dailyStreakConfig.findMany({ orderBy: { day: 'asc' } }),
+      prisma.superOfferAttempt.findFirst({
+        where: { uid: userId, status: 'completed' },
+        select: { id: true },
+      }),
+    ]);
+
+    let streak = streakRecord;
     if (!streak) {
       streak = await prisma.userStreak.create({ data: { userId } });
     }
 
-    const config = await prisma.dailyStreakConfig.findMany({ orderBy: { day: 'asc' } });
+    const hasCompletedSuperOffer = !!completedSuperOffer;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -60,6 +69,7 @@ export const getStreakData = async (req: Request, res: Response): Promise<void> 
       todayTickets: todayConfig?.tickets ?? 0,
       todayIcon: todayConfig?.icon ?? '🪙',
       isSpecialDay: todayConfig?.isSpecial ?? false,
+      hasCompletedSuperOffer,
       config,
     });
   } catch (err) {
@@ -72,6 +82,16 @@ export const getStreakData = async (req: Request, res: Response): Promise<void> 
 export const claimDailyStreak = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
+
+    // Gate: must have completed at least one Super Offer
+    const completedSuperOffer = await prisma.superOfferAttempt.findFirst({
+      where: { uid: userId, status: 'completed' },
+      select: { id: true },
+    });
+    if (!completedSuperOffer) {
+      error(res, 'Complete 1 Super Offer first to unlock Daily Bonus', 403);
+      return;
+    }
 
     let streak = await prisma.userStreak.findUnique({ where: { userId } });
     if (!streak) {
