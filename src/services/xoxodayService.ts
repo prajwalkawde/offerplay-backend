@@ -1,358 +1,285 @@
 import axios from 'axios';
 import { logger } from '../utils/logger';
 
-// Xoxoday uses a specific auth format
-// Reference: https://docs.xoxoday.com/
-
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
-const getXoxodayToken = async (): Promise<string> => {
-  // Return cached token if still valid
-  if (cachedToken && Date.now() < tokenExpiry) {
-    return cachedToken;
-  }
+// ─── Resolve credentials (support all env var name variants) ──────────────────
+function getCredentials() {
+  const clientId =
+    process.env.XOXODAY_CLIENT_ID ||
+    process.env.XOXODAY_API_KEY    || '';
 
-  const clientId = process.env.XOXODAY_CLIENT_ID || '';
-  const secretId = process.env.XOXODAY_SECRET_ID ||
-                   process.env.XOXODAY_API_SECRET || '';
+  const secretId =
+    process.env.XOXODAY_SECRET_ID  ||
+    process.env.XOXODAY_API_SECRET || '';
+
+  return { clientId, secretId };
+}
+
+// ─── Get OAuth2 token ─────────────────────────────────────────────────────────
+const getXoxodayToken = async (): Promise<string> => {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+
+  const { clientId, secretId } = getCredentials();
 
   if (!clientId || !secretId) {
-    logger.warn('Xoxoday credentials missing in .env');
+    logger.error('[Xoxoday] Missing credentials — set XOXODAY_CLIENT_ID and XOXODAY_SECRET_ID in .env');
     return '';
   }
 
-  // Xoxoday Storefront/Rewards API auth endpoint (trailing slash required)
-  const authEndpoints = [
+  // Try both JSON and form-encoded, with and without scope
+  const attempts = [
     {
-      url: 'https://accounts.xoxoday.com/auth/api/oauth/token/',
-      data: {
-        client_id: clientId,
-        client_secret: secretId,
-        grant_type: 'client_credentials',
-      },
+      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
+      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
       contentType: 'application/json',
     },
     {
-      url: 'https://accounts.xoxoday.com/auth/api/oauth/token/',
-      data: new URLSearchParams({
-        client_id: clientId,
-        client_secret: secretId,
-        grant_type: 'client_credentials',
-      }).toString(),
+      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
+      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' }).toString(),
       contentType: 'application/x-www-form-urlencoded',
+    },
+    {
+      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
+      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'gift_cards' },
+      contentType: 'application/json',
     },
   ];
 
-  for (const endpoint of authEndpoints) {
+  for (const attempt of attempts) {
     try {
-      logger.info(`Trying Xoxoday auth: ${endpoint.url}`);
+      logger.info(`[Xoxoday] Trying token: ${attempt.url} (${attempt.contentType})`);
 
-      const response = await axios.post(
-        endpoint.url,
-        endpoint.data,
-        {
-          headers: {
-            'Content-Type': endpoint.contentType,
-            'Accept': 'application/json',
-          },
-          timeout: 10000,
-        }
-      );
+      const res = await axios.post(attempt.url, attempt.data, {
+        headers: { 'Content-Type': attempt.contentType, Accept: 'application/json' },
+        timeout: 10000,
+      });
 
-      const token = response.data?.access_token ||
-                   response.data?.token ||
-                   response.data?.data?.access_token ||
-                   response.data?.data?.token;
+      const token =
+        res.data?.access_token ||
+        res.data?.token         ||
+        res.data?.data?.access_token ||
+        res.data?.data?.token;
 
       if (token) {
-        cachedToken = token;
-        // Cache for 50 minutes (tokens usually expire in 1 hour)
-        tokenExpiry = Date.now() + 50 * 60 * 1000;
-        logger.info('Xoxoday token obtained successfully!');
+        cachedToken  = token;
+        tokenExpiry  = Date.now() + 50 * 60 * 1000; // 50 min
+        logger.info('[Xoxoday] Token obtained successfully');
         return token;
       }
+
+      // Got 200 but no token field
+      logger.warn('[Xoxoday] 200 but no token in response:', JSON.stringify(res.data));
+
     } catch (err: any) {
-      logger.warn(
-        `Xoxoday auth failed for ${endpoint.url}:`,
-        err.response?.data || err.message
-      );
-      continue;
+      const status  = err.response?.status;
+      const errData = err.response?.data;
+      logger.warn(`[Xoxoday] Auth attempt failed (${status}):`, JSON.stringify(errData) || err.message);
     }
   }
 
-  logger.error('All Xoxoday auth endpoints failed');
+  logger.error('[Xoxoday] All token attempts failed');
   return '';
 };
 
-// Get products - try multiple API formats
+// ─── Get products / vouchers ──────────────────────────────────────────────────
 export const getXoxodayProducts = async (
   countryCode: string = 'IN',
-  _category?: string
+  _category?: string,
 ): Promise<any[]> => {
   try {
     const token = await getXoxodayToken();
-
     if (!token) {
-      logger.warn('No Xoxoday token - using mock products');
+      logger.warn('[Xoxoday] No token — returning mock products');
       return getMockProducts();
     }
 
-    // Xoxoday Gift Cards API voucher catalog endpoint
-    const productEndpoints = [
+    const headers = {
+      Authorization:  `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept:         'application/json',
+    };
+
+    const endpoints = [
+      `https://api.xoxoday.com/v1/plum/products?country=${countryCode}&limit=100`,
       `https://api.xoxoday.com/api/v1/vouchers?country=${countryCode}&limit=100`,
       `https://api.xoxoday.com/api/v1/catalog?country=${countryCode}&limit=100`,
-      `https://api.xoxoday.com/v1/vouchers?country=${countryCode}&limit=100`,
     ];
 
-    for (const url of productEndpoints) {
+    for (const url of endpoints) {
       try {
-        const response = await axios.get(url, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          timeout: 15000,
-        });
+        const res = await axios.get(url, { headers, timeout: 15000 });
+        const data = res.data;
 
-        const data = response.data;
-        const vouchers = data?.data?.vouchers ||
-                        data?.vouchers ||
-                        data?.data ||
-                        data?.products ||
-                        [];
+        const vouchers =
+          data?.data?.vouchers  ||
+          data?.data?.products  ||
+          data?.vouchers        ||
+          data?.products        ||
+          data?.data            ||
+          [];
 
         if (Array.isArray(vouchers) && vouchers.length > 0) {
-          logger.info(
-            `Xoxoday: Got ${vouchers.length} products from ${url}`
-          );
+          logger.info(`[Xoxoday] Got ${vouchers.length} products from ${url}`);
           return vouchers.map((v: any) => ({
-            id: String(
-              v.productId || v.id || v.voucherId || v.code || ''
-            ),
-            name: v.productName || v.name || v.title || 'Unknown',
-            description: v.productDescription ||
-                        v.description || '',
-            imageUrl: v.imageUrl || v.image ||
-                     v.logo || v.thumbnail || '',
-            category: v.categoryName ||
-                     v.category || 'General',
-            denominations: (
-              v.denominations ||
-              v.valueDenominations ||
-              v.vouchers ||
-              v.prices ||
-              []
-            ).map((d: any) => ({
-              id: String(
-                d.id || d.denominationId ||
-                d.voucherId || d.value || ''
-              ),
-              value: parseFloat(
-                d.price || d.value ||
-                d.amount || d.faceValue || 0
-              ),
-              currencyCode: d.currencyCode ||
-                           d.currency || 'INR',
-              discount: d.discount ||
-                       d.discountPercentage || 0,
+            id:           String(v.productId || v.id || v.voucherId || v.code || ''),
+            name:         v.productName     || v.name  || v.title       || 'Unknown',
+            description:  v.productDescription || v.description || '',
+            imageUrl:     v.imageUrl        || v.image || v.logo         || v.thumbnail || '',
+            category:     v.categoryName    || v.category || 'General',
+            denominations: (v.denominations || v.valueDenominations || v.prices || []).map((d: any) => ({
+              id:           String(d.id || d.denominationId || d.voucherId || d.value || ''),
+              value:        parseFloat(d.price || d.value || d.amount || d.faceValue || 0),
+              currencyCode: d.currencyCode || d.currency || 'INR',
+              discount:     d.discount     || d.discountPercentage || 0,
             })),
-            minValue: v.minValue ||
-                     v.minimumValue || 50,
-            maxValue: v.maxValue ||
-                     v.maximumValue || 10000,
-            isActive: v.isActive !== false &&
-                     v.status !== 'inactive',
+            minValue: v.minValue || v.minimumValue || 50,
+            maxValue: v.maxValue || v.maximumValue || 10000,
+            isActive: v.isActive !== false && v.status !== 'inactive',
           }));
         }
+
+        logger.warn(`[Xoxoday] ${url} returned empty/unexpected:`, JSON.stringify(data)?.slice(0, 200));
+
       } catch (err: any) {
-        logger.warn(
-          `Product endpoint ${url} failed:`,
-          err.response?.status
-        );
-        continue;
+        logger.warn(`[Xoxoday] Products endpoint ${url} failed (${err.response?.status}):`, err.response?.data || err.message);
       }
     }
 
-    logger.warn('All Xoxoday product endpoints failed, using mock');
+    logger.warn('[Xoxoday] All product endpoints failed — returning mock');
     return getMockProducts();
 
   } catch (err: any) {
-    logger.error('getXoxodayProducts error:', err.message);
+    logger.error('[Xoxoday] getXoxodayProducts error:', err.message);
     return getMockProducts();
   }
 };
 
+// ─── Place order ──────────────────────────────────────────────────────────────
 export const placeXoxodayOrder = async (
-  productId: string,
+  productId:     string,
   denominationId: string,
-  quantity: number,
-  userId: string,
-  userEmail: string,
-  orderId: string
-): Promise<{
-  success: boolean;
-  voucherCode?: string;
-  voucherLink?: string;
-  error?: string;
-}> => {
+  quantity:      number,
+  userId:        string,
+  userEmail:     string,
+  orderId:       string,
+): Promise<{ success: boolean; voucherCode?: string; voucherLink?: string; error?: string }> => {
   try {
     const token = await getXoxodayToken();
 
     if (!token) {
-      // Mock for testing without real credentials
-      return {
-        success: true,
-        voucherCode: `TEST${orderId.slice(-6).toUpperCase()}`,
-        voucherLink: 'https://xoxoday.com/redeem',
-      };
+      return { success: true, voucherCode: `TEST${orderId.slice(-6).toUpperCase()}`, voucherLink: 'https://xoxoday.com/redeem' };
     }
 
-    const orderEndpoints = [
-      'https://api.xoxoday.com/v1/orders',
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const payload = {
+      externalOrderId: orderId,
+      items: [{
+        productId,
+        denominationId,
+        quantity,
+        recipientEmail: userEmail,
+        recipient: { email: userEmail, name: `User_${userId.slice(0, 6)}` },
+      }],
+      notifyRecipient: true,
+    };
+
+    const endpoints = [
+      'https://api.xoxoday.com/v1/plum/orders',
       'https://api.xoxoday.com/api/v1/orders',
     ];
 
-    for (const url of orderEndpoints) {
+    for (const url of endpoints) {
       try {
-        const response = await axios.post(
-          url,
-          {
-            externalOrderId: orderId,
-            items: [{
-              productId,
-              denominationId,
-              quantity,
-              recipientEmail: userEmail,
-              recipient: {
-                email: userEmail,
-                name: `User_${userId.slice(0, 6)}`,
-              }
-            }],
-            notifyRecipient: true,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 30000,
-          }
-        );
-
-        const order = response.data?.data ||
-                     response.data;
-        const voucher = order?.vouchers?.[0] ||
-                       order?.items?.[0] ||
-                       order || {};
+        const res     = await axios.post(url, payload, { headers, timeout: 30000 });
+        const order   = res.data?.data || res.data;
+        const voucher = order?.vouchers?.[0] || order?.items?.[0] || order || {};
 
         return {
-          success: true,
-          voucherCode: voucher.code ||
-                      voucher.voucherCode ||
-                      voucher.pin || '',
-          voucherLink: voucher.link ||
-                      voucher.url ||
-                      voucher.redemptionUrl || '',
+          success:     true,
+          voucherCode: voucher.code        || voucher.voucherCode || voucher.pin   || '',
+          voucherLink: voucher.link        || voucher.url         || voucher.redemptionUrl || '',
         };
       } catch (err: any) {
-        logger.warn(
-          `Order endpoint ${url} failed:`,
-          err.response?.data
-        );
-        continue;
+        logger.warn(`[Xoxoday] Order endpoint ${url} failed:`, err.response?.data || err.message);
       }
     }
 
     return { success: false, error: 'All order endpoints failed' };
 
   } catch (err: any) {
-    logger.error('placeXoxodayOrder error:', err.message);
+    logger.error('[Xoxoday] placeXoxodayOrder error:', err.message);
     return { success: false, error: err.message };
   }
 };
 
+// ─── Test connection ──────────────────────────────────────────────────────────
 export const testXoxodayConnection = async (): Promise<{
   connected: boolean;
   message: string;
   tokenObtained?: boolean;
+  credentialsFound?: boolean;
 }> => {
-  const clientId = process.env.XOXODAY_CLIENT_ID || '';
-  const secretId = process.env.XOXODAY_SECRET_ID ||
-                  process.env.XOXODAY_API_SECRET || '';
+  const { clientId, secretId } = getCredentials();
 
   if (!clientId || !secretId) {
     return {
-      connected: false,
-      message: 'Missing XOXODAY_CLIENT_ID or XOXODAY_SECRET_ID in .env',
+      connected:        false,
+      credentialsFound: false,
+      message:          'Missing credentials — add XOXODAY_CLIENT_ID and XOXODAY_SECRET_ID to server .env',
     };
   }
+
+  // Reset cache so we always do a fresh test
+  cachedToken = null;
+  tokenExpiry = 0;
 
   const token = await getXoxodayToken();
 
   if (token) {
     return {
-      connected: true,
-      message: `Connected! Token obtained. Client: ${clientId.slice(0, 8)}...`,
-      tokenObtained: true,
+      connected:        true,
+      credentialsFound: true,
+      tokenObtained:    true,
+      message:          `Connected! Client: ${clientId.slice(0, 8)}... Token: ${token.slice(0, 12)}...`,
     };
   }
 
   return {
-    connected: false,
-    message: 'Could not get token. Check credentials in .env file.',
-    tokenObtained: false,
+    connected:        false,
+    credentialsFound: true,
+    tokenObtained:    false,
+    message:          'Credentials found but token request failed — check server logs for exact Xoxoday error response',
   };
 };
 
+// ─── Mock products (fallback) ─────────────────────────────────────────────────
 const getMockProducts = (): any[] => [
   {
-    id: 'amazon_in',
-    name: 'Amazon Gift Card',
-    description: 'Shop anything on Amazon India',
-    imageUrl: 'https://m.media-amazon.com/images/I/31lGPasq9wL.jpg',
-    category: 'Shopping',
+    id: 'amazon_in', name: 'Amazon Gift Card', description: 'Shop anything on Amazon India',
+    imageUrl: 'https://m.media-amazon.com/images/I/31lGPasq9wL.jpg', category: 'Shopping',
     denominations: [
-      { id: 'amz_100', value: 100, currencyCode: 'INR', discount: 0 },
-      { id: 'amz_250', value: 250, currencyCode: 'INR', discount: 0 },
-      { id: 'amz_500', value: 500, currencyCode: 'INR', discount: 0 },
+      { id: 'amz_100',  value: 100,  currencyCode: 'INR', discount: 0 },
+      { id: 'amz_250',  value: 250,  currencyCode: 'INR', discount: 0 },
+      { id: 'amz_500',  value: 500,  currencyCode: 'INR', discount: 0 },
       { id: 'amz_1000', value: 1000, currencyCode: 'INR', discount: 0 },
     ],
     minValue: 100, maxValue: 10000, isActive: true,
   },
   {
-    id: 'flipkart_in',
-    name: 'Flipkart Gift Card',
-    description: 'Shop on Flipkart',
-    imageUrl: '',
-    category: 'Shopping',
+    id: 'flipkart_in', name: 'Flipkart Gift Card', description: 'Shop on Flipkart',
+    imageUrl: '', category: 'Shopping',
     denominations: [
-      { id: 'fk_100', value: 100, currencyCode: 'INR', discount: 0 },
-      { id: 'fk_500', value: 500, currencyCode: 'INR', discount: 0 },
+      { id: 'fk_100',  value: 100,  currencyCode: 'INR', discount: 0 },
+      { id: 'fk_500',  value: 500,  currencyCode: 'INR', discount: 0 },
       { id: 'fk_1000', value: 1000, currencyCode: 'INR', discount: 0 },
     ],
     minValue: 100, maxValue: 10000, isActive: true,
   },
   {
-    id: 'freefire_in',
-    name: 'Free Fire Diamonds',
-    description: 'Top up Free Fire diamonds',
-    imageUrl: '',
-    category: 'Gaming',
-    denominations: [
-      { id: 'ff_100', value: 80, currencyCode: 'INR', discount: 0 },
-      { id: 'ff_310', value: 250, currencyCode: 'INR', discount: 0 },
-      { id: 'ff_520', value: 400, currencyCode: 'INR', discount: 0 },
-    ],
-    minValue: 80, maxValue: 2000, isActive: true,
-  },
-  {
-    id: 'paytm_in',
-    name: 'Paytm Wallet',
-    description: 'Add money to Paytm wallet',
-    imageUrl: '',
-    category: 'Wallet',
+    id: 'paytm_in', name: 'Paytm Wallet', description: 'Add money to Paytm wallet',
+    imageUrl: '', category: 'Wallet',
     denominations: [
       { id: 'ptm_100', value: 100, currencyCode: 'INR', discount: 0 },
       { id: 'ptm_500', value: 500, currencyCode: 'INR', discount: 0 },
@@ -360,26 +287,20 @@ const getMockProducts = (): any[] => [
     minValue: 100, maxValue: 5000, isActive: true,
   },
   {
-    id: 'jio_recharge',
-    name: 'Jio Mobile Recharge',
-    description: 'Recharge Jio number instantly',
-    imageUrl: '',
-    category: 'Mobile Recharge',
+    id: 'freefire_in', name: 'Free Fire Diamonds', description: 'Top up Free Fire diamonds',
+    imageUrl: '', category: 'Gaming',
     denominations: [
-      { id: 'jio_149', value: 149, currencyCode: 'INR', discount: 0 },
-      { id: 'jio_239', value: 239, currencyCode: 'INR', discount: 0 },
-      { id: 'jio_666', value: 666, currencyCode: 'INR', discount: 0 },
+      { id: 'ff_100', value: 80,  currencyCode: 'INR', discount: 0 },
+      { id: 'ff_310', value: 250, currencyCode: 'INR', discount: 0 },
+      { id: 'ff_520', value: 400, currencyCode: 'INR', discount: 0 },
     ],
-    minValue: 149, maxValue: 2999, isActive: true,
+    minValue: 80, maxValue: 2000, isActive: true,
   },
   {
-    id: 'bgmi_in',
-    name: 'BGMI Unknown Cash',
-    description: 'Buy BGMI UC Credits',
-    imageUrl: '',
-    category: 'Gaming',
+    id: 'bgmi_in', name: 'BGMI Unknown Cash', description: 'Buy BGMI UC Credits',
+    imageUrl: '', category: 'Gaming',
     denominations: [
-      { id: 'bgmi_60', value: 75, currencyCode: 'INR', discount: 0 },
+      { id: 'bgmi_60',  value: 75,  currencyCode: 'INR', discount: 0 },
       { id: 'bgmi_325', value: 380, currencyCode: 'INR', discount: 0 },
       { id: 'bgmi_660', value: 750, currencyCode: 'INR', discount: 0 },
     ],
