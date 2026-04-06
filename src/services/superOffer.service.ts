@@ -288,7 +288,7 @@ export async function reportInstall(
 export async function verifyUsage(
   uid: string,
   attemptId: number,
-  usageMinutes: number
+  _usageMinutes: number   // kept for API compatibility but NOT trusted
 ): Promise<void> {
   const attempt = await prisma.superOfferAttempt.findFirst({
     where: { id: attemptId, uid, status: 'installed' },
@@ -296,9 +296,21 @@ export async function verifyUsage(
 
   if (!attempt) throw new Error('Attempt not found or not in installed state');
 
-  if (usageMinutes < attempt.requiredUsageMinutes) {
+  // ── Server-side time enforcement ──────────────────────────────────────────
+  // We do NOT trust the usage_minutes value sent by the client — it can be
+  // intercepted and forged. Instead we check how much real-world time has
+  // elapsed since the server recorded appInstalledAt.
+  if (!attempt.appInstalledAt) {
+    throw new Error('Install time not recorded — cannot verify usage');
+  }
+
+  const elapsedMs = Date.now() - attempt.appInstalledAt.getTime();
+  const elapsedMinutes = elapsedMs / 60000;
+
+  if (elapsedMinutes < attempt.requiredUsageMinutes) {
+    const remaining = Math.ceil(attempt.requiredUsageMinutes - elapsedMinutes);
     throw new Error(
-      `Insufficient usage time — required: ${attempt.requiredUsageMinutes} min, provided: ${usageMinutes} min`
+      `Not enough time has passed since install — need ${remaining} more minute(s)`
     );
   }
 
