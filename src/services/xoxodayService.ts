@@ -30,28 +30,29 @@ const getXoxodayToken = async (): Promise<string> => {
 
   // Try all known Xoxoday token endpoint variants
   const attempts = [
-    // Correct Xoxoday Chef API endpoint (JSON)
+    // Chef API — form-encoded (OAuth2 standard)
     {
       url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
-      contentType: 'application/json',
+      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' }).toString(),
+      contentType: 'application/x-www-form-urlencoded',
     },
-    // Same endpoint with clientId/secretId field names (Gitbook variant)
+    // Chef API — form-encoded with scope
     {
       url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        { clientId, secretId },
-      contentType: 'application/json',
+      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'plum' }).toString(),
+      contentType: 'application/x-www-form-urlencoded',
     },
-    // Staging account endpoint (some accounts use this even in production)
+    // Chef API — Basic auth header + form body (RFC 6749 variant)
     {
-      url:         'https://stagingaccount.xoxoday.com/chef/v1/oauth/token/company',
-      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
-      contentType: 'application/json',
+      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
+      data:        new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+      contentType: 'application/x-www-form-urlencoded',
+      authHeader:  `Basic ${Buffer.from(`${clientId}:${secretId}`).toString('base64')}`,
     },
-    // Plum API getToken (different product line)
+    // Chef API — JSON with clientId/secretId camelCase (Gitbook variant)
     {
-      url:         'https://api.xoxoday.com/tapiV2/plumProAPI.php/api/getToken',
-      data:        { clientId, secretId },
+      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
+      data:        { clientId, secretId, grant_type: 'client_credentials' },
       contentType: 'application/json',
     },
   ];
@@ -60,10 +61,10 @@ const getXoxodayToken = async (): Promise<string> => {
     try {
       logger.info(`[Xoxoday] Trying token: ${attempt.url} (${attempt.contentType})`);
 
-      const res = await axios.post(attempt.url, attempt.data, {
-        headers: { 'Content-Type': attempt.contentType, Accept: 'application/json' },
-        timeout: 10000,
-      });
+      const headers: Record<string, string> = { 'Content-Type': attempt.contentType, Accept: 'application/json' };
+      if ((attempt as any).authHeader) headers['Authorization'] = (attempt as any).authHeader;
+
+      const res = await axios.post(attempt.url, attempt.data, { headers, timeout: 10000 });
 
       const token =
         res.data?.access_token ||
