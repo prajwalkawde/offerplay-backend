@@ -50,6 +50,7 @@ export interface SuperOfferStatusResult {
     requiredUsageMinutes: number;
     detectedAppPackage: string | null;
     detectedAppName: string | null;
+    appInstalledAt: string | null;
   } | null;
 }
 
@@ -123,6 +124,7 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
           requiredUsageMinutes: true,
           detectedAppPackage: true,
           detectedAppName: true,
+          appInstalledAt: true,
         },
       }),
       prisma.superOfferAttempt.findFirst({
@@ -176,6 +178,7 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
           requiredUsageMinutes: inProgressAttempt.requiredUsageMinutes,
           detectedAppPackage: inProgressAttempt.detectedAppPackage ?? null,
           detectedAppName: inProgressAttempt.detectedAppName ?? null,
+          appInstalledAt: inProgressAttempt.appInstalledAt?.toISOString() ?? null,
         }
       : null,
   };
@@ -259,14 +262,14 @@ export async function reportInstall(
   attemptId: number,
   appPackage: string,
   appName: string
-): Promise<void> {
+): Promise<{ appInstalledAt: string }> {
   const attempt = await prisma.superOfferAttempt.findFirst({
     where: { id: attemptId, uid, status: 'ad_watched' },
   });
 
   if (!attempt) throw new Error('Attempt not found or not in ad_watched state');
 
-  await prisma.superOfferAttempt.update({
+  const updated = await prisma.superOfferAttempt.update({
     where: { id: attemptId },
     data: {
       detectedAppPackage: appPackage,
@@ -274,7 +277,10 @@ export async function reportInstall(
       appInstalledAt: new Date(),
       status: 'installed',
     },
+    select: { appInstalledAt: true },
   });
+
+  return { appInstalledAt: updated.appInstalledAt!.toISOString() };
 }
 
 // ─── Verify Usage ─────────────────────────────────────────────────────────────

@@ -76,11 +76,12 @@ export async function installDetected(req: Request, res: Response): Promise<void
       return;
     }
 
-    await superOfferService.reportInstall(req.userId!, Number(attempt_id), app_package, app_name);
+    const installResult = await superOfferService.reportInstall(req.userId!, Number(attempt_id), app_package, app_name);
     success(res, {
       error: 'false',
       next_step: 'use_app',
       detected_app_name: app_name,
+      app_installed_at: installResult.appInstalledAt,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to report install';
