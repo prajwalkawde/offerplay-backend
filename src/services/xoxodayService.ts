@@ -28,21 +28,30 @@ const getXoxodayToken = async (): Promise<string> => {
     return '';
   }
 
-  // Try both JSON and form-encoded, with and without scope
+  // Try all known Xoxoday token endpoint variants
   const attempts = [
+    // Standard IdentityServer4 endpoint (most common)
     {
-      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
-      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
-      contentType: 'application/json',
-    },
-    {
-      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
+      url:         'https://accounts.xoxoday.com/auth/connect/token',
       data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' }).toString(),
       contentType: 'application/x-www-form-urlencoded',
     },
+    // With scope
+    {
+      url:         'https://accounts.xoxoday.com/auth/connect/token',
+      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'plum' }).toString(),
+      contentType: 'application/x-www-form-urlencoded',
+    },
+    // Plum API token endpoint
+    {
+      url:         'https://api.xoxoday.com/tapiV2/plumProAPI.php/api/getToken',
+      data:        { clientId, secretId },
+      contentType: 'application/json',
+    },
+    // Legacy path (JSON)
     {
       url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
-      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'gift_cards' },
+      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
       contentType: 'application/json',
     },
   ];
