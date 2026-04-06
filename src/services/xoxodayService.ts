@@ -84,7 +84,7 @@ const getXoxodayToken = async (): Promise<string> => {
     } catch (err: any) {
       const status  = err.response?.status;
       const errData = err.response?.data;
-      logger.warn(`[Xoxoday] Auth attempt failed (${status}):`, JSON.stringify(errData) || err.message);
+      logger.warn(`[Xoxoday] Auth attempt failed (${status}): ${JSON.stringify(errData) ?? err.message}`);
     }
   }
 
