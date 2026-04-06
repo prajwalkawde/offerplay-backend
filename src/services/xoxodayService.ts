@@ -30,28 +30,28 @@ const getXoxodayToken = async (): Promise<string> => {
 
   // Try all known Xoxoday token endpoint variants
   const attempts = [
-    // Standard IdentityServer4 endpoint (most common)
+    // Correct Xoxoday Chef API endpoint (JSON)
     {
-      url:         'https://accounts.xoxoday.com/auth/connect/token',
-      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' }).toString(),
-      contentType: 'application/x-www-form-urlencoded',
+      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
+      data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
+      contentType: 'application/json',
     },
-    // With scope
+    // Same endpoint with clientId/secretId field names (Gitbook variant)
     {
-      url:         'https://accounts.xoxoday.com/auth/connect/token',
-      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'plum' }).toString(),
-      contentType: 'application/x-www-form-urlencoded',
-    },
-    // Plum API token endpoint
-    {
-      url:         'https://api.xoxoday.com/tapiV2/plumProAPI.php/api/getToken',
+      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
       data:        { clientId, secretId },
       contentType: 'application/json',
     },
-    // Legacy path (JSON)
+    // Staging account endpoint (some accounts use this even in production)
     {
-      url:         'https://accounts.xoxoday.com/auth/api/oauth/token/',
+      url:         'https://stagingaccount.xoxoday.com/chef/v1/oauth/token/company',
       data:        { client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' },
+      contentType: 'application/json',
+    },
+    // Plum API getToken (different product line)
+    {
+      url:         'https://api.xoxoday.com/tapiV2/plumProAPI.php/api/getToken',
+      data:        { clientId, secretId },
       contentType: 'application/json',
     },
   ];
