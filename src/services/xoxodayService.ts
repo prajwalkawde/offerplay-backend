@@ -25,12 +25,23 @@ const getXoxodayToken = async (): Promise<string> => {
   const staticToken = process.env.XOXODAY_ACCESS_TOKEN;
   const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
   if (staticToken) {
-    // expiry is in ms; if not set assume valid
     if (!staticExpiry || Date.now() < staticExpiry) {
-      cachedToken = staticToken;
+      // The dashboard token is a base64-wrapped JSON: { tokenContent: {...}, a_t: "<inner JWT>" }
+      // Extract the inner a_t JWT if present — that's the actual bearer token the API expects
+      let resolvedToken = staticToken;
+      try {
+        const decoded = JSON.parse(Buffer.from(staticToken, 'base64').toString('utf8'));
+        if (decoded?.a_t) {
+          resolvedToken = decoded.a_t;
+          logger.info('[Xoxoday] Extracted inner JWT (a_t) from dashboard token');
+        }
+      } catch {
+        // not base64 JSON — use as-is
+      }
+      cachedToken = resolvedToken;
       tokenExpiry = staticExpiry || Date.now() + 365 * 24 * 60 * 60 * 1000;
       logger.info('[Xoxoday] Using static access token from env');
-      return staticToken;
+      return resolvedToken;
     }
     logger.warn('[Xoxoday] Static access token is expired — falling back to OAuth');
   }
@@ -170,11 +181,12 @@ export const getXoxodayProducts = async (
     logger.info(`[Xoxoday] Token preview: ${token.slice(0, 30)}...`);
 
     const headers = {
+      Authorization:  `Bearer ${token}`,
       'Content-Type': 'application/json',
       Accept:         'application/json',
     };
 
-    // Xoxoday Plum API — token goes in the request body, not Authorization header
+    // Xoxoday Plum API — send token in both header and body
     const body = {
       token,
       query: 'plumProAPI.mutation.getVouchers',
@@ -233,7 +245,7 @@ export const placeXoxodayOrder = async (
       return { success: true, voucherCode: `TEST${orderId.slice(-6).toUpperCase()}`, voucherLink: 'https://xoxoday.com/redeem' };
     }
 
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     const body = {
       token,
       query: 'plumProAPI.mutation.placeOrder',
