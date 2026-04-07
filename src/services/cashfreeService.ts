@@ -18,13 +18,14 @@ async function getCashfreeToken(): Promise<string> {
   if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
 
   try {
+    // V1 authorize is the correct endpoint for Cashfree Payout (V2 authorize doesn't exist)
     const res = await axios.post(
-      `${getBaseUrl()}/v2/authorize`,
+      `${getBaseUrl()}/v1/authorize`,
       {},
       {
         headers: {
-          'x-client-id':     env.CASHFREE_APP_ID,
-          'x-client-secret': env.CASHFREE_SECRET_KEY,
+          'X-Client-Id':     env.CASHFREE_APP_ID,
+          'X-Client-Secret': env.CASHFREE_SECRET_KEY,
           'Content-Type':    'application/json',
         },
         timeout: 15000,
