@@ -331,12 +331,19 @@ export const placeXoxodayOrder = async (
       logger.info(`[Xoxoday] Order placed. voucher fields: ${JSON.stringify(Object.keys(voucher))}`);
       logger.info(`[Xoxoday] Full voucher: ${JSON.stringify(voucher)}`);
 
-      const code     = voucher.voucherCode || '';
+      const rawCode  = voucher.voucherCode || '';
       const pin      = voucher.pin || '';
-      const validity = voucher.validity   || voucher.expiryDate || voucher.expiry || '';
-      // Only expose the plum.gift link when there is no direct code (email-delivered cards)
-      const link     = !code ? (voucher.link || voucher.url || '') : '';
+      const validity = voucher.validity || voucher.expiryDate || voucher.expiry || '';
 
+      // Xoxoday sometimes puts the plum.gift URL inside voucherCode instead of a plain text code.
+      // Detect this and move it to voucherLink so the app shows an "Open" button, not a code box.
+      const isUrl    = rawCode.startsWith('http://') || rawCode.startsWith('https://');
+      const code     = isUrl ? '' : rawCode;
+      const link     = isUrl
+        ? rawCode                                    // URL was in voucherCode — use it as the link
+        : (voucher.link || voucher.url || '');       // plain code — use separate link field if any
+
+      logger.info(`[Xoxoday] Voucher: code="${code || '(url)'}" isUrl=${isUrl} link="${link?.slice(0, 40)}"`);
       return { success: true, voucherCode: code, voucherPin: pin, voucherLink: link, validity };
     } catch (err: any) {
       logger.warn(`[Xoxoday] placeOrder failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
