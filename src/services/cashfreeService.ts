@@ -10,10 +10,8 @@ const getV1BaseUrl = (): string =>
     ? 'https://api.cashfree.com/payout'
     : 'https://sandbox.cashfree.com/payout';
 
-const getV2BaseUrl = (): string =>
-  env.CASHFREE_ENV === 'PROD'
-    ? 'https://payout-api.cashfree.com/payout'
-    : 'https://payout-gamma.cashfree.com/payout';
+// V2 transfers share the same base host as V1 (different path prefix only)
+const getV2BaseUrl = (): string => getV1BaseUrl();
 
 // ─── Token cache (V1 auth — used for beneficiary operations only) ─────────────
 let _cachedToken: string = '';
