@@ -64,7 +64,9 @@ export async function getMergedFeed(
     if (result.status !== 'fulfilled') continue;
     for (const offer of result.value) {
       if (isBadOffer(offer, offer.provider, qualityMap)) continue;
+      const record = qualityMap[`${offer.provider}:${offer.offerId}`];
       offer.quality = scoreOffer(offer, offer.provider, qualityMap);
+      offer.completionRate = record?.completionRate ?? (record ? 0 : 50); // 50 = optimistic default for new offers
       offer.timeEstimate = TIME_ESTIMATES[offer.offType] || '5-10 min';
       offer.isHighValue = (offer.payoutUsd || 0) >= HIGH_VALUE_USD;
       offer.completionsToday = socialMap[`${offer.provider}:${offer.offerId}`] || 0;
@@ -80,9 +82,12 @@ export async function getMergedFeed(
 
   const deduplicated = deduplicateOffers(allOffers);
 
-  let finalOffers = deduplicated;
+  // Provider diversity: cap at 5 offers per provider in top 15, then allow more below
+  const diversified = diversifyProviders(deduplicated, 5, 15);
+
+  let finalOffers = diversified;
   if (language !== 'en') {
-    finalOffers = await translateOffers(deduplicated, language);
+    finalOffers = await translateOffers(diversified, language);
   }
 
   await redis.setex(cacheKey, FEED_CACHE_TTL, JSON.stringify(finalOffers));
@@ -433,8 +438,8 @@ function isBadOffer(offer: any, provider: string, qualityMap: Record<string, any
   if (!record) return false;
   if (record.isBlacklisted) return true;
   if (record.missingCoinReports >= 2) return true;
-  if (record.totalClicks >= 20 && record.totalCompletions === 0) {
-    autoBlacklist(provider, offer.offerId, `Auto: ${record.totalClicks} clicks, 0 completions`).catch(() => null);
+  if (record.totalClicks >= 30 && record.completionRate < 3) {
+    autoBlacklist(provider, offer.offerId, `Auto: ${record.totalClicks} clicks, ${record.completionRate}% completion`).catch(() => null);
     return true;
   }
   if (record.avgRating > 0 && record.avgRating < 2.0 && record.ratingCount >= 5) return true;
@@ -514,6 +519,27 @@ function deduplicateOffers(offers: any[]): any[] {
     result.push(offer);
   }
   return result;
+}
+
+// ─── Provider Diversity ───────────────────────────────────────────────────────
+// In the top `topN` results, cap each provider to `maxPerProvider`.
+// Offers beyond that cap are appended after position `topN` in original score order.
+function diversifyProviders(offers: any[], maxPerProvider: number, topN: number): any[] {
+  const top: any[] = [];
+  const overflow: any[] = [];
+  const providerCount: Record<string, number> = {};
+
+  for (const offer of offers) {
+    const p = offer.provider || 'unknown';
+    if (top.length < topN && (providerCount[p] || 0) < maxPerProvider) {
+      top.push(offer);
+      providerCount[p] = (providerCount[p] || 0) + 1;
+    } else {
+      overflow.push(offer);
+    }
+  }
+
+  return [...top, ...overflow];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

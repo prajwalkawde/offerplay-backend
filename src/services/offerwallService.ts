@@ -1,7 +1,7 @@
 import { prisma } from '../config/database';
 import { creditCoins } from './coinService';
 import { TransactionType } from '@prisma/client';
-import { timingSafeEqual, hmacSha256 } from '../utils/crypto';
+import { timingSafeEqual, hmacSha256, md5 } from '../utils/crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { updateQuestProgress } from '../controllers/questController';
@@ -15,16 +15,17 @@ export interface PostbackPayload {
 }
 
 export async function verifyPubscaleSignature(
-  query: Record<string, string>,
+  userId: string,
+  value: string,
+  token: string,
   sig: string
 ): Promise<boolean> {
-  // Pubscale sends HMAC-SHA256 of sorted query params
-  const sorted = Object.keys(query)
-    .filter((k) => k !== 'sig')
-    .sort()
-    .map((k) => `${k}=${query[k]}`)
-    .join('&');
-  const expected = hmacSha256(env.PUBSCALE_SECRET, sorted);
+  // PubScale signature = MD5(secret_key + "." + user_id + "." + int(value) + "." + token)
+  const intValue = Math.trunc(parseFloat(value) || 0);
+  const template = `${env.PUBSCALE_SECRET}.${userId}.${intValue}.${token}`;
+  const expected = md5(template);
+  logger.info(`[PubScale] Sig template: ${env.PUBSCALE_SECRET.slice(0,4)}***.${userId}.${intValue}.${token.slice(0,8)}***`);
+  logger.info(`[PubScale] Expected: ${expected} | Received: ${sig}`);
   return timingSafeEqual(expected, sig);
 }
 

@@ -4,6 +4,33 @@ import { creditCoins } from './coinService';
 import { verifyPubscaleSignature, verifyToroxSignature, verifyAyetSignature } from './offerwallService';
 import { TransactionType } from '@prisma/client';
 
+// ─── Param helpers ────────────────────────────────────────────────────────────
+// Express makes duplicate query params an array. PubScale sometimes sends
+// value={unreplaced_macro}&value=100 (two value params). Pick the real one.
+function pickStr(val: any): string {
+  if (Array.isArray(val)) {
+    // Find first entry that isn't an unreplaced macro placeholder
+    const real = val.find((v: any) => {
+      const s = String(v ?? '');
+      return s && !s.includes('{') && !s.includes('%7B');
+    });
+    return real ? String(real) : '';
+  }
+  const s = String(val ?? '');
+  // Treat unreplaced placeholders as empty
+  return (s.includes('{') || s.includes('%7B')) ? '' : s;
+}
+
+// Flatten raw query (may have arrays) → Record<string,string> for sig verification
+// Keeps original values (including macros) so HMAC matches what provider computed
+function flattenForSig(raw: Record<string, any>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    out[k] = Array.isArray(v) ? v[0] : String(v ?? '');
+  }
+  return out;
+}
+
 // ─── Streak helpers ───────────────────────────────────────────────────────────
 function getStreakMultiplier(streak: number): number {
   if (streak >= 30) return 3.0;
@@ -139,21 +166,26 @@ export async function processRetryQueue(): Promise<void> {
 
 // ─── PubScale Postback ────────────────────────────────────────────────────────
 export async function receivePubScalePostback(
-  params: Record<string, string>
+  raw: Record<string, any>
 ): Promise<string> {
-  logger.info('PubScale postback received', { user_id: params.user_id });
+  logger.info('PubScale postback received', { user_id: pickStr(raw.user_id) });
 
-  const userId = params.user_id;
-  // Support both old (coins/offer_id/sig) and new (value/c1/signature) param names
-  const coinsRaw = params.value || params.coins || '0';
-  const sig = params.sig || params.signature || '';
-  const offerId = params.c1 || params.offer_id || '';
-  const transactionId = params.transaction_id || params.token || `ps_${Date.now()}`;
+  // Signature verification uses flattened (but not macro-stripped) params
+  // Value extraction — pickStr safely handles arrays & unreplaced macros
+  const userId        = pickStr(raw.user_id);
+  const coinsRaw      = pickStr(raw.value) || pickStr(raw.coins) || '0';
+  const offerId       = pickStr(raw.offer_id) || pickStr(raw.c1) || '';
+  const transactionId = pickStr(raw.token) || `ps_${Date.now()}`;
+  const sig           = pickStr(raw.signature) || '';
 
-  // Verify signature using existing working method
-  const valid = await verifyPubscaleSignature(params, sig);
+  logger.info('PubScale postback params', { userId, coinsRaw, offerId, transactionId, sig: sig.slice(0, 8) + '...' });
+
+  // MD5(secret.user_id.int(value).token)
+  const valid = await verifyPubscaleSignature(userId, coinsRaw, transactionId, sig);
+
   if (!valid) {
-    await queueFailedPostback(params, 'invalid_signature', 'pubscale');
+    logger.warn('PubScale invalid signature', { userId, sig });
+    await queueFailedPostback(raw, 'invalid_signature', 'pubscale');
     return 'INVALID_SIGNATURE';
   }
 
@@ -219,16 +251,15 @@ export async function receivePubScalePostback(
 
 // ─── Torox Postback ───────────────────────────────────────────────────────────
 export async function receiveToroxPostback(
-  params: Record<string, string>
+  raw: Record<string, any>
 ): Promise<string> {
-  logger.info('Torox postback received', { user_id: params.user_id });
+  const userId        = pickStr(raw.user_id);
+  const coinsRaw      = pickStr(raw.reward) || pickStr(raw.coins) || '0';
+  const transactionId = pickStr(raw.transaction_id) || `tx_${Date.now()}`;
+  const sig           = pickStr(raw.sig) || pickStr(raw.security_token) || '';
+  const offerId       = pickStr(raw.offer_id) || '';
 
-  const userId = params.user_id;
-  const coinsRaw = params.reward || params.coins || '0';
-  const transactionId = params.transaction_id || `tx_${Date.now()}`;
-  const sig = params.sig || params.security_token || '';
-  const offerId = params.offer_id || '';
-
+  logger.info('Torox postback received', { user_id: userId });
   const valid = await verifyToroxSignature(userId, offerId, coinsRaw, sig);
   if (!valid) {
     await queueFailedPostback(params, 'invalid_signature', 'torox');
@@ -275,16 +306,15 @@ export async function receiveToroxPostback(
 
 // ─── AyeT Postback ────────────────────────────────────────────────────────────
 export async function receiveAyetPostback(
-  params: Record<string, string>
+  raw: Record<string, any>
 ): Promise<string> {
-  logger.info('AyeT postback received', { user_id: params.external_identifier || params.user_id });
+  const userId        = pickStr(raw.external_identifier) || pickStr(raw.user_id);
+  const coinsRaw      = pickStr(raw.amount) || pickStr(raw.coins) || '0';
+  const transactionId = pickStr(raw.id) || pickStr(raw.transaction_id) || `ay_${Date.now()}`;
+  const sig           = pickStr(raw.key) || pickStr(raw.signature) || '';
 
-  const userId = params.external_identifier || params.user_id;
-  const coinsRaw = params.amount || params.coins || '0';
-  const transactionId = String(params.id || params.transaction_id || `ay_${Date.now()}`);
-  const sig = params.key || params.signature || '';
-
-  const valid = await verifyAyetSignature(params, sig);
+  logger.info('AyeT postback received', { user_id: userId });
+  const valid = await verifyAyetSignature(flattenForSig(raw), sig);
   if (!valid) {
     await queueFailedPostback(params, 'invalid_signature', 'ayet');
     return 'error';
