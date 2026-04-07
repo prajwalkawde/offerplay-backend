@@ -179,7 +179,12 @@ export const getXoxodayProducts = async (
       query: 'plumProAPI.mutation.getVouchers',
       tag:   'plumProAPI',
       variables: {
-        filters:    { countryCodes: [countryCode] },
+        filters: {
+          countryCodes:          [countryCode],
+          excludeFilterValueId:  [],
+          includeFilterValueIds: [],
+          productCategories:     [],
+        },
         pagination: { pageNumber: 1, limit: 100 },
       },
     };
