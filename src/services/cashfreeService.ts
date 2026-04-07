@@ -186,9 +186,9 @@ export const transferToUPI = async (
     const headers = authHeadersV2();
     const body = {
       transfer_id:    orderId,
-      amount,
-      currency:       'INR',
-      transfer_mode:  'upi',
+      transfer_amount: amount,
+      currency:        'INR',
+      transfer_mode:   'upi',
       beneficiary_id: beneId,
       remarks:        `OfferPlay payout ${orderId}`.slice(0, 70),
     };
@@ -253,9 +253,9 @@ export const transferToBank = async (
     const headers = authHeadersV2();
     const body = {
       transfer_id:    orderId,
-      amount,
-      currency:       'INR',
-      transfer_mode:  resolvedMode,
+      transfer_amount: amount,
+      currency:        'INR',
+      transfer_mode:   resolvedMode,
       beneficiary_id: beneId,
       remarks:        `OfferPlay payout ${orderId}`.slice(0, 70),
     };
