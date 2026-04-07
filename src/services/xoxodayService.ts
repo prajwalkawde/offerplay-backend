@@ -17,59 +17,57 @@ function getCredentials() {
   return { clientId, secretId };
 }
 
-const XOXODAY_BASE = 'https://stagingstores.xoxoday.com/chef/v1';
+// Base URL from env — user's account is on api.xoxoday.com
+function getBase() {
+  return (process.env.XOXODAY_BASE_URL || 'https://api.xoxoday.com').replace(/\/$/, '') + '/chef/v1';
+}
 
 // ─── Get OAuth2 token ─────────────────────────────────────────────────────────
 const getXoxodayToken = async (): Promise<string> => {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
+  // ── Static access token from env (try first — valid until 2031)
+  const staticToken  = process.env.XOXODAY_ACCESS_TOKEN;
+  const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
+  if (staticToken && (!staticExpiry || Date.now() < staticExpiry)) {
+    cachedToken = staticToken;
+    tokenExpiry = staticExpiry || Date.now() + 365 * 24 * 60 * 60 * 1000;
+    logger.info('[Xoxoday] Using static access token from env');
+    return staticToken;
+  }
+
+  // ── Refresh token grant
   const { clientId, secretId } = getCredentials();
   const refreshToken = process.env.XOXODAY_REFRESH_TOKEN;
 
-  if (!refreshToken || !clientId || !secretId) {
-    logger.error('[Xoxoday] Missing XOXODAY_REFRESH_TOKEN, XOXODAY_CLIENT_ID, or XOXODAY_SECRET_ID in .env');
-    return '';
-  }
-
-  try {
-    logger.info('[Xoxoday] Getting token via refresh_token grant');
-    // Try both snake_case and camelCase field names
-    let res: any;
+  if (refreshToken && clientId && secretId) {
     try {
-      res = await axios.post(
-        `${XOXODAY_BASE}/oauth/token/user`,
+      logger.info('[Xoxoday] Getting token via refresh_token grant');
+      const res = await axios.post(
+        `${getBase()}/oauth/token/user`,
         { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: secretId },
         { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
       );
-    } catch {
-      res = await axios.post(
-        `${XOXODAY_BASE}/oauth/token/user`,
-        { grantType: 'refresh_token', refreshToken, clientId, clientSecret: secretId },
-        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
-      );
+      const token = res.data?.access_token;
+      if (token) {
+        cachedToken = token;
+        tokenExpiry = res.data?.access_token_expiry
+          ? parseInt(res.data.access_token_expiry, 10)
+          : Date.now() + 50 * 60 * 1000;
+        logger.info(`[Xoxoday] Token obtained via refresh, expires: ${new Date(tokenExpiry).toISOString()}`);
+        return token;
+      }
+      logger.warn(`[Xoxoday] refresh_token response had no access_token: ${JSON.stringify(res.data)?.slice(0, 200)}`);
+    } catch (err: any) {
+      logger.error(`[Xoxoday] refresh_token failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }
-
-    const token = res.data?.access_token;
-    if (token) {
-      cachedToken = token;
-      // Use expiry from response if available, else cache for 50 min
-      const expiryMs = res.data?.access_token_expiry
-        ? parseInt(res.data.access_token_expiry, 10)
-        : Date.now() + 50 * 60 * 1000;
-      tokenExpiry = expiryMs;
-      logger.info(`[Xoxoday] Token obtained, expires: ${new Date(expiryMs).toISOString()}`);
-      return token;
-    }
-
-    logger.warn(`[Xoxoday] Token response had no access_token: ${JSON.stringify(res.data)?.slice(0, 200)}`);
-  } catch (err: any) {
-    logger.error(`[Xoxoday] Token fetch failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
   }
 
+  logger.error('[Xoxoday] No valid token — check XOXODAY_ACCESS_TOKEN or XOXODAY_REFRESH_TOKEN in .env');
   return '';
 };
 
-const XOXODAY_API = `${XOXODAY_BASE}/oauth/api/`;
+const getApiUrl = () => `${getBase()}/oauth/api/`;
 
 function normalizeVoucher(v: any) {
   // valueDenominations is a comma-separated string e.g. "100,500,1000"
@@ -130,7 +128,7 @@ export const getXoxodayProducts = async (
     };
 
     try {
-      const res     = await axios.post(XOXODAY_API, body, { headers, timeout: 15000 });
+      const res     = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
       const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
 
       if (Array.isArray(vouchers) && vouchers.length > 0) {
@@ -186,7 +184,7 @@ export const placeXoxodayOrder = async (
     };
 
     try {
-      const res     = await axios.post(XOXODAY_API, body, { headers, timeout: 30000 });
+      const res     = await axios.post(getApiUrl(), body, { headers, timeout: 30000 });
       const orderData = res.data?.data?.placeOrder?.data;
       const voucher   = orderData?.vouchers?.[0] || {};
 
