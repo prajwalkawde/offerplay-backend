@@ -163,7 +163,7 @@ export const transferToUPI = async (
     const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
     const beneOk = await createOrGetBeneficiary(beneId, {
-      beneName:  sanitiseName(name),
+      name:  sanitiseName(name),
       vpa:       upiId.trim(),
       email,
       phone,
@@ -227,7 +227,7 @@ export const transferToBank = async (
     const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
     const beneOk = await createOrGetBeneficiary(beneId, {
-      beneName:      sanitiseName(accountName),
+      name:      sanitiseName(accountName),
       bankAccount:   accountNumber.trim(),
       ifsc:          ifscCode.trim().toUpperCase(),
       email,
