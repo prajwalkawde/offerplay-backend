@@ -197,5 +197,64 @@ export async function getLedger(
     prisma.transaction.count({ where }),
   ]);
 
-  return { transactions, total };
+  // Enrich REDEEM transactions with voucher details from RedemptionRequest (linked via refId)
+  const redeemRefIds = transactions
+    .filter(tx => tx.type.toString().toUpperCase().includes('REDEEM') && tx.refId)
+    .map(tx => tx.refId as string);
+
+  let redemptionMap: Record<string, any> = {};
+  if (redeemRefIds.length > 0) {
+    const redemptions = await prisma.redemptionRequest.findMany({
+      where: { id: { in: redeemRefIds } },
+      select: {
+        id: true,
+        voucherCode: true,
+        voucherLink: true,
+        productName: true,
+        customFieldValues: true,
+        status: true,
+        failureReason: true,
+        redeemUrl: true,
+        amountInr: true,
+        type: true,
+        mobileNumber: true,
+        operator: true,
+        gamePlayerId: true,
+        upiId: true,
+        accountNumber: true,
+      },
+    });
+    redemptionMap = Object.fromEntries(redemptions.map(r => [r.id, r]));
+  }
+
+  const enriched = transactions.map(tx => {
+    if (!tx.type.toString().toUpperCase().includes('REDEEM') || !tx.refId) return tx;
+    const r = redemptionMap[tx.refId];
+    if (!r) return tx;
+
+    const cfv = (r.customFieldValues as any) || {};
+    // Only expose voucherLink / redeemUrl when there is no direct code
+    const hasCode = !!r.voucherCode;
+    return {
+      ...tx,
+      voucherCode:        r.voucherCode        || undefined,
+      voucherPin:         cfv.pin              || undefined,
+      voucherValidity:    cfv.validity         || undefined,
+      voucherLink:        !hasCode ? (r.voucherLink || undefined) : undefined,
+      redeemUrl:          !hasCode ? (r.redeemUrl  || undefined) : undefined,
+      productName:        r.productName        || undefined,
+      redemptionStatus:   r.status             || undefined,
+      failureReason:      r.failureReason      || undefined,
+      amountInr:          r.amountInr          || undefined,
+      redemptionType:     r.type               || undefined,
+      mobileNumber:       r.mobileNumber       || undefined,
+      operator:           r.operator           || undefined,
+      gamePlayerId:       r.gamePlayerId        || undefined,
+      upiId:              r.upiId              || undefined,
+      accountNumber:      r.accountNumber      || undefined,
+      redemptionId:       r.id,
+    };
+  });
+
+  return { transactions: enriched, total };
 }
