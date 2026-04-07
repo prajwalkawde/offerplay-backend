@@ -165,6 +165,7 @@ export const transferToUPI = async (
       vpa:       upiId.trim(),
       email,
       phone,
+      address1:  'India',
     });
     if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
 
@@ -229,6 +230,7 @@ export const transferToBank = async (
       ifsc:          ifscCode.trim().toUpperCase(),
       email,
       phone,
+      address1:      'India',
     });
     if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
 
