@@ -91,7 +91,7 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
 
   // Check if beneficiary already exists
   try {
-    const res = await axios.get(`${base}/v1/beneficiary/${beneId}`, { headers, timeout: 15000 });
+    const res = await axios.get(`${base}/v1/getBeneficiary/${beneId}`, { headers, timeout: 15000 });
     if (!isCashfreeError(res.data)) {
       logger.info(`[Cashfree] Beneficiary ${beneId} already exists — reusing`);
       return true;
@@ -108,7 +108,7 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
   // Create beneficiary
   try {
     const res = await axios.post(
-      `${base}/v1/beneficiary`,
+      `${base}/v1/addBeneficiary`,
       { beneId, ...beneData },
       { headers, timeout: 15000 },
     );
@@ -177,7 +177,7 @@ export const transferToUPI = async (
       remarks:       `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res  = await axios.post(`${getBaseUrl()}/v1/transfers`, body, { headers, timeout: 30000 });
+    const res  = await axios.post(`${getBaseUrl()}/v1/requestTransfer`, body, { headers, timeout: 30000 });
     const data = res.data;
     logger.info(`[Cashfree] UPI transfer response: ${JSON.stringify(data)}`);
 
@@ -241,7 +241,7 @@ export const transferToBank = async (
       remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res    = await axios.post(`${getBaseUrl()}/v1/transfers`, body, { headers, timeout: 30000 });
+    const res    = await axios.post(`${getBaseUrl()}/v1/requestTransfer`, body, { headers, timeout: 30000 });
     const data   = res.data;
     const status = (data?.data?.status || data?.status || '').toUpperCase();
     const cfRef  = data?.data?.referenceId || data?.referenceId || orderId;
@@ -267,7 +267,7 @@ export const transferToBank = async (
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
     const headers = await authHeaders();
-    const res     = await axios.get(`${getBaseUrl()}/v1/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
+    const res     = await axios.get(`${getBaseUrl()}/v1/getTransferStatus?referenceId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
     return (res.data?.data?.status || res.data?.status || 'UNKNOWN').toUpperCase();
   } catch (err) {
