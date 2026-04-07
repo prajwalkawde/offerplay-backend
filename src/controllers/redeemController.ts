@@ -89,9 +89,9 @@ export async function getRedeemPackages(req: Request, res: Response): Promise<vo
 // ─── GET /redeem/gift-cards ────────────────────────────────────────────────────
 export async function getGiftCards(req: Request, res: Response): Promise<void> {
   try {
-    const country = String(req.query.country || 'IN');
+    const country  = req.query.country  ? String(req.query.country)  : undefined;
     const category = req.query.category ? String(req.query.category) : undefined;
-    const products = await getXoxodayProducts(country, category);
+    const products = await getXoxodayProducts({ country, category });
     success(res, { products, total: products.length });
   } catch (err) {
     logger.error('getGiftCards error:', err);
