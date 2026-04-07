@@ -10,8 +10,11 @@ const getV1BaseUrl = (): string =>
     ? 'https://api.cashfree.com/payout'
     : 'https://sandbox.cashfree.com/payout';
 
-// V2 transfers share the same base host as V1 (different path prefix only)
-const getV2BaseUrl = (): string => getV1BaseUrl();
+// V2 transfer endpoint — same base as V1 but path is just /transfers (no /v2/ prefix)
+const getTransfersUrl = (): string =>
+  env.CASHFREE_ENV === 'PROD'
+    ? 'https://api.cashfree.com/payout/transfers'
+    : 'https://sandbox.cashfree.com/payout/transfers';
 
 // ─── Token cache (V1 auth — used for beneficiary operations only) ─────────────
 let _cachedToken: string = '';
@@ -63,14 +66,13 @@ async function authHeadersV1() {
   };
 }
 
-// V2 headers — Bearer token + x-client-id + x-api-version
-async function authHeadersV2() {
-  const token = await getCashfreeToken();
+// V2 transfer headers — direct API key auth, no Bearer token
+function authHeadersV2() {
   return {
-    'Authorization': `Bearer ${token}`,
-    'x-client-id':   env.CASHFREE_APP_ID,
-    'x-api-version': '2023-08-01',
-    'Content-Type':  'application/json',
+    'x-client-id':     env.CASHFREE_APP_ID,
+    'x-client-secret': env.CASHFREE_SECRET_KEY,
+    'x-api-version':   '2024-01-01',
+    'Content-Type':    'application/json',
   };
 }
 
@@ -181,18 +183,18 @@ export const transferToUPI = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
 
-    const headers = await authHeadersV2();
+    const headers = authHeadersV2();
     const body = {
-      transfer_id:   orderId,
+      transfer_id:    orderId,
       amount,
-      currency:      'INR',
-      transfer_mode: 'upi',
+      currency:       'INR',
+      transfer_mode:  'upi',
       beneficiary_id: beneId,
-      remarks:       `OfferPlay payout ${orderId}`.slice(0, 70),
+      remarks:        `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
     logger.info(`[Cashfree] UPI transfer payload: ${JSON.stringify(body)}`);
-    const res  = await axios.post(`${getV2BaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res  = await axios.post(getTransfersUrl(), body, { headers, timeout: 30000 });
     const data = res.data;
     logger.info(`[Cashfree] UPI transfer response: ${JSON.stringify(data)}`);
 
@@ -248,7 +250,7 @@ export const transferToBank = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
 
-    const headers = await authHeadersV2();
+    const headers = authHeadersV2();
     const body = {
       transfer_id:    orderId,
       amount,
@@ -259,7 +261,7 @@ export const transferToBank = async (
     };
 
     logger.info(`[Cashfree] Bank transfer payload: ${JSON.stringify(body)}`);
-    const res    = await axios.post(`${getV2BaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res    = await axios.post(getTransfersUrl(), body, { headers, timeout: 30000 });
     const data   = res.data;
     const status = (data?.status || '').toUpperCase();
     const cfRef  = data?.transfer_id || data?.referenceId || orderId;
@@ -284,8 +286,8 @@ export const transferToBank = async (
 
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
-    const headers = await authHeadersV2();
-    const res     = await axios.get(`${getV2BaseUrl()}/v2/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
+    const headers = authHeadersV2();
+    const res     = await axios.get(`${getTransfersUrl()}?transferId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
     return (res.data?.status || 'UNKNOWN').toUpperCase();
   } catch (err) {
