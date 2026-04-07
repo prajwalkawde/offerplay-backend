@@ -26,22 +26,11 @@ const getXoxodayToken = async (): Promise<string> => {
   const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
   if (staticToken) {
     if (!staticExpiry || Date.now() < staticExpiry) {
-      // The dashboard token is a base64-wrapped JSON: { tokenContent: {...}, a_t: "<inner JWT>" }
-      // Extract the inner a_t JWT if present — that's the actual bearer token the API expects
-      let resolvedToken = staticToken;
-      try {
-        const decoded = JSON.parse(Buffer.from(staticToken, 'base64').toString('utf8'));
-        if (decoded?.a_t) {
-          resolvedToken = decoded.a_t;
-          logger.info('[Xoxoday] Extracted inner JWT (a_t) from dashboard token');
-        }
-      } catch {
-        // not base64 JSON — use as-is
-      }
-      cachedToken = resolvedToken;
+      // Use the outer dashboard token as-is — the API expects the full eyJ0b2t... value
+      cachedToken = staticToken;
       tokenExpiry = staticExpiry || Date.now() + 365 * 24 * 60 * 60 * 1000;
       logger.info('[Xoxoday] Using static access token from env');
-      return resolvedToken;
+      return staticToken;
     }
     logger.warn('[Xoxoday] Static access token is expired — falling back to OAuth');
   }
@@ -52,14 +41,14 @@ const getXoxodayToken = async (): Promise<string> => {
     try {
       logger.info('[Xoxoday] Trying refresh_token grant');
       const res = await axios.post(
-        'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-        new URLSearchParams({
+        'https://accounts.xoxoday.com/v1/oauth/token/user',
+        {
           grant_type:    'refresh_token',
           refresh_token: refreshToken,
           client_id:     process.env.XOXODAY_CLIENT_ID || process.env.XOXODAY_API_KEY || '',
           client_secret: process.env.XOXODAY_SECRET_ID || process.env.XOXODAY_API_SECRET || '',
-        }).toString(),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 },
+        },
+        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 10000 },
       );
       const token = res.data?.access_token || res.data?.data?.access_token;
       if (token) {
@@ -145,7 +134,7 @@ const getXoxodayToken = async (): Promise<string> => {
   return '';
 };
 
-const XOXODAY_API = 'https://accounts.xoxoday.com/chef/v1/oauth/api';
+const XOXODAY_API = 'https://accounts.xoxoday.com/v1/oauth/api/';
 
 function normalizeVoucher(v: any) {
   return {
@@ -186,9 +175,7 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
-    // Xoxoday Plum API — send token in both header and body
     const body = {
-      token,
       query: 'plumProAPI.mutation.getVouchers',
       tag:   'plumProAPI',
       variables: {
@@ -247,17 +234,16 @@ export const placeXoxodayOrder = async (
 
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     const body = {
-      token,
       query: 'plumProAPI.mutation.placeOrder',
       tag:   'plumProAPI',
       variables: {
-        productId,
-        quantity,
-        denomination:  parseFloat(denominationId) || denominationId,
-        email:         userEmail,
-        tag:           orderId,
-        poNumber:      orderId,
-        notifyReceiver: 1,
+        data: {
+          productId,
+          quantity:     String(quantity),
+          denomination: String(parseFloat(denominationId) || denominationId),
+          poNumber:     orderId,
+          email:        userEmail,
+        },
       },
     };
 
