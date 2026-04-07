@@ -124,8 +124,7 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
   // Create beneficiary
   try {
     const payload = { beneId, ...beneData };
-    logger.info(`[Cashfree] addBeneficiary payload: ${JSON.stringify(payload)}`);
-    const res = await axios.post(`${base}/v1/addBeneficiary`, payload, { headers, timeout: 15000 });
+const res = await axios.post(`${base}/v1/addBeneficiary`, payload, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) {
       if (String(res.data?.subCode) === '409') {
         logger.info(`[Cashfree] Beneficiary ${beneId} already exists (body 409) — continuing`);
