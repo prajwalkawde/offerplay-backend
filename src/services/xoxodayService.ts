@@ -33,16 +33,21 @@ const getXoxodayToken = async (): Promise<string> => {
 
   try {
     logger.info('[Xoxoday] Getting token via refresh_token grant');
-    const res = await axios.post(
-      `${XOXODAY_BASE}/oauth/token/user`,
-      {
-        grant_type:    'refresh_token',
-        refresh_token: refreshToken,
-        client_id:     clientId,
-        client_secret: secretId,
-      },
-      { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
-    );
+    // Try both snake_case and camelCase field names
+    let res: any;
+    try {
+      res = await axios.post(
+        `${XOXODAY_BASE}/oauth/token/user`,
+        { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: secretId },
+        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
+      );
+    } catch {
+      res = await axios.post(
+        `${XOXODAY_BASE}/oauth/token/user`,
+        { grantType: 'refresh_token', refreshToken, clientId, clientSecret: secretId },
+        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
+      );
+    }
 
     const token = res.data?.access_token;
     if (token) {
