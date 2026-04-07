@@ -121,7 +121,7 @@ export const getXoxodayProducts = async (
         const body = {
           query: 'plumProAPI.mutation.getVouchers',
           tag:   'plumProAPI',
-          variables: { data: { limit: 100, page } },
+          variables: { data: { limit: 100, page, filters: [{ key: 'country', value: countryCode }] } },
         };
         const res      = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
         const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
