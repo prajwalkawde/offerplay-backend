@@ -134,7 +134,7 @@ const getXoxodayToken = async (): Promise<string> => {
   return '';
 };
 
-const XOXODAY_API = 'https://accounts.xoxoday.com/v1/oauth/api/';
+const XOXODAY_API = 'https://accounts.xoxoday.com/chef/v1/oauth/api';
 
 function normalizeVoucher(v: any) {
   return {
