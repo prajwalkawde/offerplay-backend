@@ -392,9 +392,11 @@ import { success as apiSuccess, error as apiError } from '../utils/response';
 
 router.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) { apiError(res, 'No file uploaded', 400); return; }
-  const url = `/uploads/${req.file.filename}`;
-  const fullUrl = `${req.protocol}://${req.get('host')}${url}`;
-  apiSuccess(res, { url: fullUrl, filename: req.file.filename }, 'Uploaded!');
+  const relativePath = `/uploads/${req.file.filename}`;
+  // Use X-Forwarded-Proto to get the correct scheme when behind nginx proxy
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol;
+  const fullUrl = `${proto}://${req.get('host')}${relativePath}`;
+  apiSuccess(res, { url: fullUrl, relativePath, filename: req.file.filename }, 'Uploaded!');
 });
 
 export default router;
