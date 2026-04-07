@@ -4,17 +4,12 @@ import { logger } from '../utils/logger';
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
-// ─── Resolve credentials (support all env var name variants) ──────────────────
+// ─── Credentials ──────────────────────────────────────────────────────────────
 function getCredentials() {
-  const clientId =
-    process.env.XOXODAY_CLIENT_ID ||
-    process.env.XOXODAY_API_KEY    || '';
-
-  const secretId =
-    process.env.XOXODAY_SECRET_ID  ||
-    process.env.XOXODAY_API_SECRET || '';
-
-  return { clientId, secretId };
+  return {
+    clientId: process.env.XOXODAY_CLIENT_ID || process.env.XOXODAY_API_KEY    || '',
+    secretId: process.env.XOXODAY_SECRET_ID || process.env.XOXODAY_API_SECRET || '',
+  };
 }
 
 // stores.xoxoday.com = production Plum API server
@@ -22,11 +17,12 @@ function getBase() {
   return (process.env.XOXODAY_BASE_URL || 'https://stores.xoxoday.com').replace(/\/$/, '') + '/chef/v1';
 }
 
-// ─── Get OAuth2 token ─────────────────────────────────────────────────────────
+const getApiUrl = () => `${getBase()}/oauth/api/`;
+
+// ─── Token ────────────────────────────────────────────────────────────────────
 const getXoxodayToken = async (): Promise<string> => {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
-  // ── Static access token from env (try first — valid until 2031)
   const staticToken  = process.env.XOXODAY_ACCESS_TOKEN;
   const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
   if (staticToken && (!staticExpiry || Date.now() < staticExpiry)) {
@@ -36,7 +32,6 @@ const getXoxodayToken = async (): Promise<string> => {
     return staticToken;
   }
 
-  // ── Refresh token grant
   const { clientId, secretId } = getCredentials();
   const refreshToken = process.env.XOXODAY_REFRESH_TOKEN;
 
@@ -57,7 +52,7 @@ const getXoxodayToken = async (): Promise<string> => {
         logger.info(`[Xoxoday] Token obtained via refresh, expires: ${new Date(tokenExpiry).toISOString()}`);
         return token;
       }
-      logger.warn(`[Xoxoday] refresh_token response had no access_token: ${JSON.stringify(res.data)?.slice(0, 200)}`);
+      logger.warn(`[Xoxoday] refresh_token response missing access_token: ${JSON.stringify(res.data)?.slice(0, 200)}`);
     } catch (err: any) {
       logger.error(`[Xoxoday] refresh_token failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }
@@ -67,10 +62,91 @@ const getXoxodayToken = async (): Promise<string> => {
   return '';
 };
 
-const getApiUrl = () => `${getBase()}/oauth/api/`;
+// ─── Filters cache (TTL: 6 hours) ────────────────────────────────────────────
+interface FilterEntry { filterValue: string; filterValueCode: string; isoCode?: string }
+interface FilterGroup { filterGroupName: string; filterGroupCode: string; filters: FilterEntry[] }
 
+const filtersCache: Record<string, { data: FilterGroup[]; fetchedAt: number }> = {};
+const FILTERS_TTL = 6 * 60 * 60 * 1000;
+
+// ─── Get filters (countries, categories, currencies, etc.) ───────────────────
+// Uses plumProAPI.mutation.getFilters
+// filterGroupCode: 'country' | 'voucher_category' | 'product_category' | 'currency' | 'price'
+// Pass empty string to get ALL filter groups at once.
+export const getXoxodayFilters = async (filterGroupCode = ''): Promise<FilterGroup[]> => {
+  const cacheKey = filterGroupCode || '__all__';
+  const cached   = filtersCache[cacheKey];
+  if (cached && Date.now() - cached.fetchedAt < FILTERS_TTL) {
+    logger.info(`[Xoxoday] Returning cached filters (${cacheKey})`);
+    return cached.data;
+  }
+
+  const token = await getXoxodayToken();
+  if (!token) {
+    logger.warn('[Xoxoday] No token — cannot fetch filters');
+    return [];
+  }
+
+  try {
+    const body = {
+      query:     'plumProAPI.mutation.getFilters',
+      tag:       'plumProAPI',
+      variables: { data: { filterGroupCode } },
+    };
+    const res    = await axios.post(getApiUrl(), body, {
+      headers: {
+        Authorization:  `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept:         'application/json',
+      },
+      timeout: 15000,
+    });
+
+    const groups: FilterGroup[] = res.data?.data?.getFilters?.data || [];
+    if (groups.length > 0) {
+      filtersCache[cacheKey] = { data: groups, fetchedAt: Date.now() };
+      logger.info(`[Xoxoday] Fetched ${groups.length} filter group(s) for "${cacheKey}"`);
+    } else {
+      logger.warn(`[Xoxoday] getFilters returned empty for "${cacheKey}": ${JSON.stringify(res.data)?.slice(0, 300)}`);
+    }
+    return groups;
+  } catch (err: any) {
+    logger.error(`[Xoxoday] getFilters failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
+    return [];
+  }
+};
+
+// ─── Resolve ISO code → filterValueCode (e.g. "IN" → "india") ────────────────
+// Xoxoday expects filterValueCode (lowercase country name) NOT ISO codes.
+// Falls back to lowercase of the input if the filters API doesn't have it.
+async function resolveCountryFilterValue(isoOrCode: string): Promise<string> {
+  if (!isoOrCode || isoOrCode === 'ALL') return '';
+
+  // If it looks like it's already a filterValueCode (multi-char lowercase word), use as-is
+  if (isoOrCode.length > 2 && isoOrCode === isoOrCode.toLowerCase()) return isoOrCode;
+
+  try {
+    const groups = await getXoxodayFilters('country');
+    const group  = groups.find(g => g.filterGroupCode === 'country');
+    if (group) {
+      const entry = group.filters.find(
+        f => f.isoCode?.toUpperCase() === isoOrCode.toUpperCase() ||
+             f.filterValueCode?.toLowerCase() === isoOrCode.toLowerCase(),
+      );
+      if (entry) {
+        logger.info(`[Xoxoday] Resolved country ${isoOrCode} → filterValueCode="${entry.filterValueCode}"`);
+        return entry.filterValueCode;
+      }
+    }
+  } catch { /* ignore */ }
+
+  // fallback: send the value as-is (lowercased)
+  logger.warn(`[Xoxoday] Could not resolve country "${isoOrCode}" from filters API — sending as-is`);
+  return isoOrCode.toLowerCase();
+}
+
+// ─── Normalise raw voucher → app shape ────────────────────────────────────────
 function normalizeVoucher(v: any) {
-  // valueDenominations is a comma-separated string e.g. "100,500,1000"
   const denomValues: number[] = v.valueDenominations
     ? String(v.valueDenominations).split(',').map((d: string) => parseFloat(d.trim())).filter(Boolean)
     : [];
@@ -81,6 +157,7 @@ function normalizeVoucher(v: any) {
     description:  v.description || '',
     imageUrl:     v.imageUrl    || v.image || '',
     category:     v.categoryName || v.category || 'General',
+    currencyCode: v.currencyCode || 'INR',
     denominations: denomValues.map((val) => ({
       id:           String(val),
       value:        val,
@@ -94,32 +171,36 @@ function normalizeVoucher(v: any) {
   };
 }
 
-// ─── Fetch one pass of paginated vouchers from Xoxoday ───────────────────────
+// ─── Low-level paginated voucher fetch ───────────────────────────────────────
+// `apiFilters` must already use Xoxoday's filterValueCode format.
+// Valid filter keys (per docs): country, price, minPrice, maxPrice, currencyCode, productName
 async function fetchVouchers(
-  headers: Record<string, string>,
-  countryCode: string,   // pass 'ALL' to skip country filter
+  headers:    Record<string, string>,
+  apiFilters: Array<{ key: string; value: string }>,
 ): Promise<any[]> {
   const allVouchers: any[] = [];
-  const useFilter = countryCode && countryCode !== 'ALL';
 
   for (let page = 1; page <= 5; page++) {
     try {
       const variables: any = { data: { limit: 100, page } };
-      if (useFilter) {
-        variables.data.filters = [{ key: 'country', value: countryCode }];
+      if (apiFilters.length > 0) {
+        variables.data.filters = apiFilters;
       }
       const body = { query: 'plumProAPI.mutation.getVouchers', tag: 'plumProAPI', variables };
       const res  = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
 
       const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
-      if (!Array.isArray(vouchers) || vouchers.length === 0) break;
+      if (!Array.isArray(vouchers) || vouchers.length === 0) {
+        logger.info(`[Xoxoday] Page ${page}: 0 vouchers — stopping pagination`);
+        break;
+      }
 
       allVouchers.push(...vouchers);
-      logger.info(`[Xoxoday] Page ${page} (country=${countryCode}): ${vouchers.length} vouchers (total: ${allVouchers.length})`);
+      logger.info(`[Xoxoday] Page ${page} filters=${JSON.stringify(apiFilters)}: ${vouchers.length} vouchers (total: ${allVouchers.length})`);
 
       if (vouchers.length < 100) break;
     } catch (err: any) {
-      logger.warn(`[Xoxoday] getVouchers page ${page} (${countryCode}) failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
+      logger.warn(`[Xoxoday] getVouchers page ${page} failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
       break;
     }
   }
@@ -127,10 +208,19 @@ async function fetchVouchers(
 }
 
 // ─── Get products / vouchers ──────────────────────────────────────────────────
-export const getXoxodayProducts = async (
-  countryCode: string = 'IN',
-  _category?: string,
-): Promise<any[]> => {
+// Options:
+//   country      — ISO code ("IN") or filterValueCode ("india") or "ALL" / ""
+//   category     — voucher_category filterValueCode (e.g. "gaming") or ""
+//   currency     — currency code e.g. "INR", "USD"
+//   minPrice     — number
+//   maxPrice     — number
+export const getXoxodayProducts = async (options: {
+  country?:  string;
+  category?: string;
+  currency?: string;
+  minPrice?: number;
+  maxPrice?: number;
+} = {}): Promise<any[]> => {
   try {
     const token = await getXoxodayToken();
     if (!token) {
@@ -138,21 +228,45 @@ export const getXoxodayProducts = async (
       return getMockProducts();
     }
 
-    logger.info(`[Xoxoday] Fetching products for country=${countryCode}, token: ${token.slice(0, 30)}...`);
-
     const headers = {
       Authorization:  `Bearer ${token}`,
       'Content-Type': 'application/json',
       Accept:         'application/json',
     };
 
-    // 1st attempt: fetch with requested country (or no filter if ALL)
-    let allVouchers = await fetchVouchers(headers, countryCode);
+    // Build filters array using correct Xoxoday filterValueCode format
+    const apiFilters: Array<{ key: string; value: string }> = [];
 
-    // 2nd attempt: if specific country returned nothing, retry without filter
-    if (allVouchers.length === 0 && countryCode !== 'ALL') {
-      logger.warn(`[Xoxoday] No results for country=${countryCode} — retrying without country filter`);
-      allVouchers = await fetchVouchers(headers, 'ALL');
+    if (options.country && options.country !== 'ALL') {
+      const countryValue = await resolveCountryFilterValue(options.country);
+      if (countryValue) apiFilters.push({ key: 'country', value: countryValue });
+    }
+
+    if (options.category) {
+      apiFilters.push({ key: 'voucher_category', value: options.category });
+    }
+
+    if (options.currency) {
+      apiFilters.push({ key: 'currencyCode', value: options.currency });
+    }
+
+    if (options.minPrice !== undefined) {
+      apiFilters.push({ key: 'minPrice', value: String(options.minPrice) });
+    }
+
+    if (options.maxPrice !== undefined) {
+      apiFilters.push({ key: 'maxPrice', value: String(options.maxPrice) });
+    }
+
+    logger.info(`[Xoxoday] Fetching vouchers with filters: ${JSON.stringify(apiFilters)}`);
+
+    // 1st attempt: with requested filters
+    let allVouchers = await fetchVouchers(headers, apiFilters);
+
+    // 2nd attempt: if filters returned nothing and we had filters, retry without
+    if (allVouchers.length === 0 && apiFilters.length > 0) {
+      logger.warn(`[Xoxoday] No results with filters — retrying without filters`);
+      allVouchers = await fetchVouchers(headers, []);
     }
 
     if (allVouchers.length > 0) {
@@ -161,7 +275,7 @@ export const getXoxodayProducts = async (
       return allVouchers.map(normalizeVoucher);
     }
 
-    logger.warn('[Xoxoday] No vouchers found even without filter — returning mock');
+    logger.warn('[Xoxoday] No vouchers found even without filters — returning mock');
     return getMockProducts();
 
   } catch (err: any) {
@@ -172,12 +286,12 @@ export const getXoxodayProducts = async (
 
 // ─── Place order ──────────────────────────────────────────────────────────────
 export const placeXoxodayOrder = async (
-  productId:     string,
+  productId:      string,
   denominationId: string,
-  quantity:      number,
-  userId:        string,
-  userEmail:     string,
-  orderId:       string,
+  quantity:       number,
+  userId:         string,
+  userEmail:      string,
+  orderId:        string,
 ): Promise<{ success: boolean; voucherCode?: string; voucherLink?: string; error?: string }> => {
   try {
     const token = await getXoxodayToken();
@@ -203,15 +317,15 @@ export const placeXoxodayOrder = async (
     };
 
     try {
-      const res     = await axios.post(getApiUrl(), body, { headers, timeout: 30000 });
+      const res       = await axios.post(getApiUrl(), body, { headers, timeout: 30000 });
       const orderData = res.data?.data?.placeOrder?.data;
       const voucher   = orderData?.vouchers?.[0] || {};
 
       logger.info(`[Xoxoday] Order placed: ${JSON.stringify(res.data)?.slice(0, 300)}`);
       return {
         success:     true,
-        voucherCode: voucher.voucherCode || voucher.pin  || '',
-        voucherLink: voucher.link        || voucher.url  || '',
+        voucherCode: voucher.voucherCode || voucher.pin || '',
+        voucherLink: voucher.link        || voucher.url || '',
       };
     } catch (err: any) {
       logger.warn(`[Xoxoday] placeOrder failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
@@ -242,7 +356,6 @@ export const testXoxodayConnection = async (): Promise<{
     };
   }
 
-  // Reset cache so we always do a fresh test
   cachedToken = null;
   tokenExpiry = 0;
 
@@ -261,7 +374,7 @@ export const testXoxodayConnection = async (): Promise<{
     connected:        false,
     credentialsFound: true,
     tokenObtained:    false,
-    message:          'Credentials found but token request failed — check server logs for exact Xoxoday error response',
+    message:          'Credentials found but token request failed — check server logs',
   };
 };
 
@@ -269,7 +382,7 @@ export const testXoxodayConnection = async (): Promise<{
 const getMockProducts = (): any[] => [
   {
     id: 'amazon_in', name: 'Amazon Gift Card', description: 'Shop anything on Amazon India',
-    imageUrl: 'https://m.media-amazon.com/images/I/31lGPasq9wL.jpg', category: 'Shopping',
+    imageUrl: 'https://m.media-amazon.com/images/I/31lGPasq9wL.jpg', category: 'Shopping', currencyCode: 'INR',
     denominations: [
       { id: 'amz_100',  value: 100,  currencyCode: 'INR', discount: 0 },
       { id: 'amz_250',  value: 250,  currencyCode: 'INR', discount: 0 },
@@ -280,7 +393,7 @@ const getMockProducts = (): any[] => [
   },
   {
     id: 'flipkart_in', name: 'Flipkart Gift Card', description: 'Shop on Flipkart',
-    imageUrl: '', category: 'Shopping',
+    imageUrl: '', category: 'Shopping', currencyCode: 'INR',
     denominations: [
       { id: 'fk_100',  value: 100,  currencyCode: 'INR', discount: 0 },
       { id: 'fk_500',  value: 500,  currencyCode: 'INR', discount: 0 },
@@ -290,7 +403,7 @@ const getMockProducts = (): any[] => [
   },
   {
     id: 'paytm_in', name: 'Paytm Wallet', description: 'Add money to Paytm wallet',
-    imageUrl: '', category: 'Wallet',
+    imageUrl: '', category: 'Wallet', currencyCode: 'INR',
     denominations: [
       { id: 'ptm_100', value: 100, currencyCode: 'INR', discount: 0 },
       { id: 'ptm_500', value: 500, currencyCode: 'INR', discount: 0 },
@@ -299,7 +412,7 @@ const getMockProducts = (): any[] => [
   },
   {
     id: 'freefire_in', name: 'Free Fire Diamonds', description: 'Top up Free Fire diamonds',
-    imageUrl: '', category: 'Gaming',
+    imageUrl: '', category: 'Gaming', currencyCode: 'INR',
     denominations: [
       { id: 'ff_100', value: 80,  currencyCode: 'INR', discount: 0 },
       { id: 'ff_310', value: 250, currencyCode: 'INR', discount: 0 },
@@ -309,7 +422,7 @@ const getMockProducts = (): any[] => [
   },
   {
     id: 'bgmi_in', name: 'BGMI Unknown Cash', description: 'Buy BGMI UC Credits',
-    imageUrl: '', category: 'Gaming',
+    imageUrl: '', category: 'Gaming', currencyCode: 'INR',
     denominations: [
       { id: 'bgmi_60',  value: 75,  currencyCode: 'INR', discount: 0 },
       { id: 'bgmi_325', value: 380, currencyCode: 'INR', discount: 0 },
