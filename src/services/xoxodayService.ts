@@ -114,31 +114,39 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
-    const body = {
-      query: 'plumProAPI.mutation.getVouchers',
-      tag:   'plumProAPI',
-      variables: {
-        data: {
-          limit: 100,
-          page:  1,
-        },
-      },
-    };
+    // Fetch up to 5 pages (500 vouchers total) to get all products
+    const allVouchers: any[] = [];
+    for (let page = 1; page <= 5; page++) {
+      try {
+        const body = {
+          query: 'plumProAPI.mutation.getVouchers',
+          tag:   'plumProAPI',
+          variables: { data: { limit: 100, page } },
+        };
+        const res      = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
+        const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
 
-    try {
-      const res     = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
-      const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
+        if (!Array.isArray(vouchers) || vouchers.length === 0) break;
+        allVouchers.push(...vouchers);
+        logger.info(`[Xoxoday] Page ${page}: ${vouchers.length} vouchers (total: ${allVouchers.length})`);
 
-      if (Array.isArray(vouchers) && vouchers.length > 0) {
-        logger.info(`[Xoxoday] Got ${vouchers.length} vouchers`);
-        return vouchers.map(normalizeVoucher);
+        // If we got less than 100, no more pages
+        if (vouchers.length < 100) break;
+
+      } catch (err: any) {
+        logger.warn(`[Xoxoday] getVouchers page ${page} failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
+        break;
       }
-
-      logger.warn(`[Xoxoday] getVouchers returned empty: ${JSON.stringify(res.data)?.slice(0, 300)}`);
-
-    } catch (err: any) {
-      logger.warn(`[Xoxoday] getVouchers failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }
+
+    if (allVouchers.length > 0) {
+      // Log product names to help admin identify available cards
+      const names = allVouchers.map((v: any) => v.name || v.productName).filter(Boolean);
+      logger.info(`[Xoxoday] Available products: ${names.slice(0, 30).join(', ')}`);
+      return allVouchers.map(normalizeVoucher);
+    }
+
+    logger.warn('[Xoxoday] No vouchers found');
 
     logger.warn('[Xoxoday] Product fetch failed — returning mock');
     return getMockProducts();
