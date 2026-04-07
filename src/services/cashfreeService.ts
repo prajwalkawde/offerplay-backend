@@ -107,9 +107,11 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
 
   // Create beneficiary
   try {
+    const payload = { beneId, ...beneData };
+    logger.info(`[Cashfree] addBeneficiary payload: ${JSON.stringify(payload)}`);
     const res = await axios.post(
       `${base}/v1/addBeneficiary`,
-      { beneId, ...beneData },
+      payload,
       { headers, timeout: 15000 },
     );
     if (isCashfreeError(res.data)) {
