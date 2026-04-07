@@ -17,125 +17,54 @@ function getCredentials() {
   return { clientId, secretId };
 }
 
+const XOXODAY_BASE = 'https://stagingstores.xoxoday.com/chef/v1';
+
 // ─── Get OAuth2 token ─────────────────────────────────────────────────────────
 const getXoxodayToken = async (): Promise<string> => {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
-  // ── Use static access token from env if available (fastest, no OAuth round-trip)
-  const staticToken = process.env.XOXODAY_ACCESS_TOKEN;
-  const staticExpiry = parseInt(process.env.XOXODAY_ACCESS_TOKEN_EXPIRY || '0', 10);
-  if (staticToken) {
-    if (!staticExpiry || Date.now() < staticExpiry) {
-      // Use the outer dashboard token as-is — the API expects the full eyJ0b2t... value
-      cachedToken = staticToken;
-      tokenExpiry = staticExpiry || Date.now() + 365 * 24 * 60 * 60 * 1000;
-      logger.info('[Xoxoday] Using static access token from env');
-      return staticToken;
-    }
-    logger.warn('[Xoxoday] Static access token is expired — falling back to OAuth');
-  }
-
-  // ── Try refresh_token grant if available
-  const refreshToken = process.env.XOXODAY_REFRESH_TOKEN;
-  if (refreshToken) {
-    try {
-      logger.info('[Xoxoday] Trying refresh_token grant');
-      const res = await axios.post(
-        'https://accounts.xoxoday.com/v1/oauth/token/user',
-        {
-          grant_type:    'refresh_token',
-          refresh_token: refreshToken,
-          client_id:     process.env.XOXODAY_CLIENT_ID || process.env.XOXODAY_API_KEY || '',
-          client_secret: process.env.XOXODAY_SECRET_ID || process.env.XOXODAY_API_SECRET || '',
-        },
-        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 10000 },
-      );
-      const token = res.data?.access_token || res.data?.data?.access_token;
-      if (token) {
-        cachedToken = token;
-        tokenExpiry = Date.now() + 50 * 60 * 1000;
-        logger.info('[Xoxoday] Token obtained via refresh_token');
-        return token;
-      }
-    } catch (err: any) {
-      logger.warn(`[Xoxoday] refresh_token grant failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
-    }
-  }
-
   const { clientId, secretId } = getCredentials();
+  const refreshToken = process.env.XOXODAY_REFRESH_TOKEN;
 
-  if (!clientId || !secretId) {
-    logger.error('[Xoxoday] Missing credentials — set XOXODAY_CLIENT_ID and XOXODAY_SECRET_ID in .env');
+  if (!refreshToken || !clientId || !secretId) {
+    logger.error('[Xoxoday] Missing XOXODAY_REFRESH_TOKEN, XOXODAY_CLIENT_ID, or XOXODAY_SECRET_ID in .env');
     return '';
   }
 
-  // Try all known Xoxoday token endpoint variants
-  const attempts = [
-    // Chef API — form-encoded (OAuth2 standard)
-    {
-      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials' }).toString(),
-      contentType: 'application/x-www-form-urlencoded',
-    },
-    // Chef API — form-encoded with scope
-    {
-      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        new URLSearchParams({ client_id: clientId, client_secret: secretId, grant_type: 'client_credentials', scope: 'plum' }).toString(),
-      contentType: 'application/x-www-form-urlencoded',
-    },
-    // Chef API — Basic auth header + form body (RFC 6749 variant)
-    {
-      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
-      contentType: 'application/x-www-form-urlencoded',
-      authHeader:  `Basic ${Buffer.from(`${clientId}:${secretId}`).toString('base64')}`,
-    },
-    // Chef API — JSON with clientId/secretId camelCase (Gitbook variant)
-    {
-      url:         'https://accounts.xoxoday.com/chef/v1/oauth/token/company',
-      data:        { clientId, secretId, grant_type: 'client_credentials' },
-      contentType: 'application/json',
-    },
-  ];
+  try {
+    logger.info('[Xoxoday] Getting token via refresh_token grant');
+    const res = await axios.post(
+      `${XOXODAY_BASE}/oauth/token/user`,
+      {
+        grant_type:    'refresh_token',
+        refresh_token: refreshToken,
+        client_id:     clientId,
+        client_secret: secretId,
+      },
+      { headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, timeout: 15000 },
+    );
 
-  for (const attempt of attempts) {
-    try {
-      logger.info(`[Xoxoday] Trying token: ${attempt.url} (${attempt.contentType})`);
-
-      const headers: Record<string, string> = { 'Content-Type': attempt.contentType, Accept: 'application/json' };
-      if ((attempt as any).authHeader) headers['Authorization'] = (attempt as any).authHeader;
-
-      const res = await axios.post(attempt.url, attempt.data, { headers, timeout: 10000 });
-
-      const token =
-        res.data?.access_token ||
-        res.data?.token         ||
-        res.data?.data?.access_token ||
-        res.data?.data?.token;
-
-      if (token) {
-        cachedToken  = token;
-        tokenExpiry  = Date.now() + 50 * 60 * 1000; // 50 min
-        logger.info('[Xoxoday] Token obtained successfully');
-        return token;
-      }
-
-      // Got 200 but no token field
-      logger.warn('[Xoxoday] 200 but no token in response:', JSON.stringify(res.data));
-
-    } catch (err: any) {
-      const status  = err.response?.status;
-      const errData = err.response?.data;
-      logger.warn(`[Xoxoday] Auth attempt failed (${status}): ${JSON.stringify(errData) ?? err.message}`);
+    const token = res.data?.access_token;
+    if (token) {
+      cachedToken = token;
+      // Use expiry from response if available, else cache for 50 min
+      const expiryMs = res.data?.access_token_expiry
+        ? parseInt(res.data.access_token_expiry, 10)
+        : Date.now() + 50 * 60 * 1000;
+      tokenExpiry = expiryMs;
+      logger.info(`[Xoxoday] Token obtained, expires: ${new Date(expiryMs).toISOString()}`);
+      return token;
     }
+
+    logger.warn(`[Xoxoday] Token response had no access_token: ${JSON.stringify(res.data)?.slice(0, 200)}`);
+  } catch (err: any) {
+    logger.error(`[Xoxoday] Token fetch failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
   }
 
-  logger.error('[Xoxoday] All token attempts failed');
   return '';
 };
 
-// Test account tokens use stagingstores; production tokens use stores
-const XOXODAY_API = 'https://stagingstores.xoxoday.com/chef/v1/oauth/api/';
+const XOXODAY_API = `${XOXODAY_BASE}/oauth/api/`;
 
 function normalizeVoucher(v: any) {
   // valueDenominations is a comma-separated string e.g. "100,500,1000"
