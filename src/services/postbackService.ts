@@ -197,7 +197,7 @@ export async function receivePubScalePostback(
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
-    await queueFailedPostback(params, 'user_not_found', 'pubscale');
+    await queueFailedPostback(raw, 'user_not_found', 'pubscale');
     return 'USER_NOT_FOUND';
   }
 
@@ -220,7 +220,7 @@ export async function receivePubScalePostback(
         },
       }),
       prisma.offerwallLog.create({
-        data: { userId, provider: 'pubscale', offerId: transactionId, coinsAwarded: finalCoins, rawData: params },
+        data: { userId, provider: 'pubscale', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
       }),
       prisma.notification.create({
         data: {
@@ -244,7 +244,7 @@ export async function receivePubScalePostback(
     return 'OK';
   } catch (err) {
     logger.error('PubScale postback processing failed:', { message: (err as Error).message });
-    await queueFailedPostback(params, 'processing_error', 'pubscale');
+    await queueFailedPostback(raw, 'processing_error', 'pubscale');
     return 'ERROR';
   }
 }
@@ -262,7 +262,7 @@ export async function receiveToroxPostback(
   logger.info('Torox postback received', { user_id: userId });
   const valid = await verifyToroxSignature(userId, offerId, coinsRaw, sig);
   if (!valid) {
-    await queueFailedPostback(params, 'invalid_signature', 'torox');
+    await queueFailedPostback(raw, 'invalid_signature', 'torox');
     return 'INVALID';
   }
 
@@ -273,7 +273,7 @@ export async function receiveToroxPostback(
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
-    await queueFailedPostback(params, 'user_not_found', 'torox');
+    await queueFailedPostback(raw, 'user_not_found', 'torox');
     return 'ERROR';
   }
 
@@ -295,7 +295,7 @@ export async function receiveToroxPostback(
       },
     }),
     prisma.offerwallLog.create({
-      data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: finalCoins, rawData: params },
+      data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
     }),
   ]);
 
@@ -316,7 +316,7 @@ export async function receiveAyetPostback(
   logger.info('AyeT postback received', { user_id: userId });
   const valid = await verifyAyetSignature(flattenForSig(raw), sig);
   if (!valid) {
-    await queueFailedPostback(params, 'invalid_signature', 'ayet');
+    await queueFailedPostback(raw, 'invalid_signature', 'ayet');
     return 'error';
   }
 
@@ -327,7 +327,7 @@ export async function receiveAyetPostback(
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
-    await queueFailedPostback(params, 'user_not_found', 'ayet');
+    await queueFailedPostback(raw, 'user_not_found', 'ayet');
     return 'error';
   }
 
@@ -349,7 +349,7 @@ export async function receiveAyetPostback(
       },
     }),
     prisma.offerwallLog.create({
-      data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: finalCoins, rawData: params },
+      data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
     }),
   ]);
 

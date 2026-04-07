@@ -16,7 +16,7 @@ export async function pubscaleCallback(req: Request, res: Response): Promise<voi
     return;
   }
 
-  const valid = await verifyPubscaleSignature(query, sig);
+  const valid = await verifyPubscaleSignature(user_id, coins, query.token || '', sig);
   if (!valid) {
     logger.warn('Pubscale invalid signature', { query });
     res.status(403).send('Invalid signature');
