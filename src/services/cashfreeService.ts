@@ -248,7 +248,7 @@ export const transferToBank = async (
         beneficiary_phone: phone,
         beneficiary_instrument_details: {
           bank_account_number: accountNumber.trim(),
-          ifsc:                ifscCode.trim().toUpperCase(),
+          bank_ifsc:           ifscCode.trim().toUpperCase(),
         },
       },
     };
