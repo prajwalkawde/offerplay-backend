@@ -182,9 +182,11 @@ export const transferToUPI = async (
       remarks:         `OfferPlay payout ${orderId}`.slice(0, 70),
       beneficiary_details: {
         beneficiary_name:  sanitiseName(name),
-        beneficiary_vpa:   upiId.trim(),
         beneficiary_email: email,
         beneficiary_phone: phone,
+        beneficiary_instrument_details: {
+          vpa: upiId.trim(),
+        },
       },
     };
 
@@ -242,11 +244,13 @@ export const transferToBank = async (
       transfer_mode:   resolvedMode,
       remarks:         `OfferPlay payout ${orderId}`.slice(0, 70),
       beneficiary_details: {
-        beneficiary_name:           sanitiseName(accountName),
-        beneficiary_account_number: accountNumber.trim(),
-        beneficiary_ifsc:           ifscCode.trim().toUpperCase(),
-        beneficiary_email:          email,
-        beneficiary_phone:          phone,
+        beneficiary_name:  sanitiseName(accountName),
+        beneficiary_email: email,
+        beneficiary_phone: phone,
+        beneficiary_instrument_details: {
+          account_number: accountNumber.trim(),
+          ifsc:           ifscCode.trim().toUpperCase(),
+        },
       },
     };
 
