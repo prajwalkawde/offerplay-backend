@@ -2,11 +2,19 @@ import axios, { AxiosError } from 'axios';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
-// ─── Base URL ─────────────────────────────────────────────────────────────────
-const getBaseUrl = (): string =>
+// ─── Base URLs ────────────────────────────────────────────────────────────────
+// Auth (V1 token endpoint) lives on sandbox.cashfree.com/payout
+// V2 Payout endpoints (beneficiary, transfers) live on payout-gamma (sandbox)
+//   or payout.cashfree.com (prod)
+const getAuthBaseUrl = (): string =>
   env.CASHFREE_ENV === 'PROD'
     ? 'https://api.cashfree.com/payout'
     : 'https://sandbox.cashfree.com/payout';
+
+const getBaseUrl = (): string =>
+  env.CASHFREE_ENV === 'PROD'
+    ? 'https://payout.cashfree.com'
+    : 'https://payout-gamma.cashfree.com';
 
 // ─── Token cache ──────────────────────────────────────────────────────────────
 // Cashfree Payout V2 requires a Bearer token obtained via POST /v2/authorize.
@@ -18,9 +26,9 @@ async function getCashfreeToken(): Promise<string> {
   if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
 
   try {
-    // V1 authorize is the correct endpoint for Cashfree Payout (V2 authorize doesn't exist)
+    // V1 authorize endpoint — only available on sandbox.cashfree.com/payout (not payout-gamma)
     const res = await axios.post(
-      `${getBaseUrl()}/v1/authorize`,
+      `${getAuthBaseUrl()}/v1/authorize`,
       {},
       {
         headers: {
