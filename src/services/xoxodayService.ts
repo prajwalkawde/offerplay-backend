@@ -292,12 +292,19 @@ export const placeXoxodayOrder = async (
   userId:         string,
   userEmail:      string,
   orderId:        string,
-): Promise<{ success: boolean; voucherCode?: string; voucherLink?: string; error?: string }> => {
+): Promise<{
+  success:     boolean;
+  voucherCode?: string;  // primary redemption code
+  voucherPin?:  string;  // PIN (some cards need code + PIN)
+  voucherLink?: string;  // fallback URL — only set when there is NO direct code
+  validity?:    string;  // expiry date string from Xoxoday
+  error?:       string;
+}> => {
   try {
     const token = await getXoxodayToken();
 
     if (!token) {
-      return { success: true, voucherCode: `TEST${orderId.slice(-6).toUpperCase()}`, voucherLink: 'https://xoxoday.com/redeem' };
+      return { success: true, voucherCode: `TEST${orderId.slice(-6).toUpperCase()}` };
     }
 
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -321,12 +328,16 @@ export const placeXoxodayOrder = async (
       const orderData = res.data?.data?.placeOrder?.data;
       const voucher   = orderData?.vouchers?.[0] || {};
 
-      logger.info(`[Xoxoday] Order placed: ${JSON.stringify(res.data)?.slice(0, 300)}`);
-      return {
-        success:     true,
-        voucherCode: voucher.voucherCode || voucher.pin || '',
-        voucherLink: voucher.link        || voucher.url || '',
-      };
+      logger.info(`[Xoxoday] Order placed. voucher fields: ${JSON.stringify(Object.keys(voucher))}`);
+      logger.info(`[Xoxoday] Full voucher: ${JSON.stringify(voucher)}`);
+
+      const code     = voucher.voucherCode || '';
+      const pin      = voucher.pin || '';
+      const validity = voucher.validity   || voucher.expiryDate || voucher.expiry || '';
+      // Only expose the plum.gift link when there is no direct code (email-delivered cards)
+      const link     = !code ? (voucher.link || voucher.url || '') : '';
+
+      return { success: true, voucherCode: code, voucherPin: pin, voucherLink: link, validity };
     } catch (err: any) {
       logger.warn(`[Xoxoday] placeOrder failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
     }

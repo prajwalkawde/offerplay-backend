@@ -215,15 +215,20 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
         productId, denominationId || '', 1,
         userId, user.email || `${userId}@offerplay.in`, orderId
       );
+      // Store pin + validity in customFieldValues (no migration needed)
+      const xoxoMeta: Record<string, string> = {};
+      if (result.voucherPin)  xoxoMeta.pin      = result.voucherPin;
+      if (result.validity)    xoxoMeta.validity  = result.validity;
       await prisma.redemptionRequest.update({
         where: { id: redemption.id },
         data: {
           xoxodayOrderId: orderId,
-          voucherCode: result.voucherCode,
-          voucherLink: result.voucherLink,
-          status: result.success ? 'completed' : 'failed',
-          failureReason: result.error,
-          processedAt: result.success ? new Date() : null,
+          voucherCode:    result.voucherCode,
+          voucherLink:    result.voucherLink,   // only set when no direct code
+          status:         result.success ? 'completed' : 'failed',
+          failureReason:  result.error,
+          processedAt:    result.success ? new Date() : null,
+          ...(Object.keys(xoxoMeta).length > 0 ? { customFieldValues: xoxoMeta } : {}),
         },
       });
     } else {
@@ -260,7 +265,9 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
       type, coinsRedeemed: coinsToRedeem, amountInr,
       status: 'completed',
       voucherCode: result.voucherCode,
+      voucherPin:  result.voucherPin,
       voucherLink: result.voucherLink,
+      validity:    result.validity,
       referenceId: result.referenceId,
     }, 'Redemption successful!');
   } catch (err) {
@@ -508,7 +515,7 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
     if (redemption.status === 'completed') { error(res, 'Already completed', 400); return; }
 
     const orderId = `OP_MANUAL_${id.slice(0, 8)}_${Date.now()}`;
-    let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherLink?: string; error?: string } = { success: false };
+    let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (redemption.type === 'UPI' && redemption.upiId) {
       result = await transferToUPI(orderId, redemption.upiId, redemption.amountInr, redemption.user?.name || 'User', redemption.userId);
@@ -533,17 +540,21 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
 
     if (!result.success) { error(res, result.error || 'Payment failed', 400); return; }
 
+    const xoxoMetaApproval: Record<string, string> = {};
+    if (result.voucherPin) xoxoMetaApproval.pin     = result.voucherPin;
+    if (result.validity)   xoxoMetaApproval.validity = result.validity;
     await prisma.$transaction([
       prisma.redemptionRequest.update({
         where: { id },
         data: {
           status: 'completed',
           cashfreeOrderId: orderId,
-          cashfreeRefId: result.referenceId,
-          voucherCode: result.voucherCode,
-          voucherLink: result.voucherLink,
-          failureReason: note || null,
-          processedAt: new Date(),
+          cashfreeRefId:   result.referenceId,
+          voucherCode:     result.voucherCode,
+          voucherLink:     result.voucherLink,
+          failureReason:   note || null,
+          processedAt:     new Date(),
+          ...(Object.keys(xoxoMetaApproval).length > 0 ? { customFieldValues: xoxoMetaApproval } : {}),
         },
       }),
       prisma.notification.create({
