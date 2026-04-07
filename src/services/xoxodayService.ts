@@ -114,15 +114,13 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
-    // Per docs: variables.data with filters as array of {key,value}
     const body = {
       query: 'plumProAPI.mutation.getVouchers',
       tag:   'plumProAPI',
       variables: {
         data: {
-          limit:   100,
-          page:    1,
-          filters: [{ key: 'country', value: countryCode }],
+          limit: 100,
+          page:  1,
         },
       },
     };
