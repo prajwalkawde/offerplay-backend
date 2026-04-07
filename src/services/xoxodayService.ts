@@ -17,9 +17,9 @@ function getCredentials() {
   return { clientId, secretId };
 }
 
-// Base URL from env — user's account is on api.xoxoday.com
+// stores.xoxoday.com = production Plum API server
 function getBase() {
-  return (process.env.XOXODAY_BASE_URL || 'https://api.xoxoday.com').replace(/\/$/, '') + '/chef/v1';
+  return (process.env.XOXODAY_BASE_URL || 'https://stores.xoxoday.com').replace(/\/$/, '') + '/chef/v1';
 }
 
 // ─── Get OAuth2 token ─────────────────────────────────────────────────────────
