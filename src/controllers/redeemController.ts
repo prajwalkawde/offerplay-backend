@@ -184,7 +184,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
     ]);
 
     // Process by type
-    let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherLink?: string; error?: string } = { success: false };
+    let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (type === 'UPI' && upiId) {
       result = await transferToUPI(orderId, upiId, amountInr, user.name || 'User', userId);
