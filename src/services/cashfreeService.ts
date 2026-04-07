@@ -2,12 +2,18 @@ import axios, { AxiosError } from 'axios';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
-// ─── Base URL ─────────────────────────────────────────────────────────────────
-// All Cashfree Payout V1 endpoints (auth + beneficiary + transfers) share one base.
+// ─── Base URLs ────────────────────────────────────────────────────────────────
+// V1 auth + beneficiary:  api.cashfree.com/payout   (/v1/authorize, /v1/addBeneficiary …)
+// V2 transfers:           api.cashfree.com           (/v2/transfers)  — no /payout/ prefix
 const getBaseUrl = (): string =>
   env.CASHFREE_ENV === 'PROD'
     ? 'https://api.cashfree.com/payout'
     : 'https://sandbox.cashfree.com/payout';
+
+const getV2BaseUrl = (): string =>
+  env.CASHFREE_ENV === 'PROD'
+    ? 'https://api.cashfree.com'
+    : 'https://sandbox.cashfree.com';
 
 // ─── Token cache ──────────────────────────────────────────────────────────────
 let _cachedToken: string = '';
@@ -191,7 +197,7 @@ export const transferToUPI = async (
       remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res  = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res  = await axios.post(`${getV2BaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
     const data = res.data;
     logger.info(`[Cashfree] UPI transfer response: ${JSON.stringify(data)}`);
 
@@ -257,7 +263,7 @@ export const transferToBank = async (
       remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res    = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res    = await axios.post(`${getV2BaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
     const data   = res.data;
     const status = (data?.status || '').toUpperCase();
     const cfRef  = data?.transferid || orderId;
@@ -283,7 +289,7 @@ export const transferToBank = async (
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
     const headers = await authHeadersV2();
-    const res     = await axios.get(`${getBaseUrl()}/v2/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
+    const res     = await axios.get(`${getV2BaseUrl()}/v2/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
     return (res.data?.status || 'UNKNOWN').toUpperCase();
   } catch (err) {
