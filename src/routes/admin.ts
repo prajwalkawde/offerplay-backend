@@ -341,7 +341,10 @@ router.get('/xoxoday/test-connection', async (_req, res) => {
 
 router.get('/xoxoday/products', async (req, res) => {
   try {
-    const products = await getXoxodayProducts('IN');
+    const country = typeof req.query.country === 'string' && req.query.country.trim()
+      ? req.query.country.trim().toUpperCase()
+      : 'IN';
+    const products = await getXoxodayProducts(country);
     res.json({
       success: true,
       data: { products, total: products.length, isMock: !process.env.XOXODAY_CLIENT_ID },
