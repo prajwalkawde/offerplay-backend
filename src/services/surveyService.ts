@@ -110,47 +110,76 @@ export const getCPXSurveyWallUrl = (userId: string, userEmail?: string): string 
 };
 
 // ─── CPX postback handler ─────────────────────────────────────────────────────
+// CPX params: user_id={ext_user_id}, amount_local={amount_local}, amount_usd={amount_usd},
+//             trans_id={trans_id}, status={status} (1=completed, 2=reversed), hash={hash}
 export const handleCPXPostback = async (params: any): Promise<string> => {
   logger.info('CPX Research postback received', params);
 
-  const {
-    ext_user_id: userId,
-    transaction_id: transactionId,
-    payout,
-    status,
-    hash,
-  } = params;
+  // Support both param name variants
+  const userId      = String(params.user_id || params.ext_user_id || '');
+  const transactionId = String(params.trans_id || params.transaction_id || '');
+  const amountLocal = parseFloat(params.amount_local || '0');
+  const amountUsd   = parseFloat(params.amount_usd || params.payout || '0');
+  const status      = String(params.status || '');
+  const hash        = String(params.hash || '');
 
-  // Verify hash: md5(transaction_id + "-" + secure_hash)
-  const expectedHash = crypto
-    .createHash('md5')
-    .update(`${transactionId}-${env.CPX_SECURE_HASH}`)
-    .digest('hex');
-
-  if (hash && hash !== expectedHash) {
-    logger.warn('CPX invalid hash', { hash, expectedHash });
+  if (!userId || !transactionId) {
+    logger.warn('CPX postback missing user_id or trans_id', { userId, transactionId });
     return '1';
   }
 
-  if (status !== '1' && status !== 1) {
-    logger.info('CPX survey not completed, status:', status);
+  // Handle reversal (status=2): remove coins previously awarded
+  if (status === '2') {
+    logger.info('CPX reversal received', { transactionId });
+    const existing = await prisma.offerwallLog.findFirst({
+      where: { offerId: transactionId, provider: 'cpx' },
+    });
+    if (existing) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { coinBalance: { decrement: existing.coinsAwarded } },
+      }).catch(() => {});
+      await prisma.offerwallLog.update({
+        where: { id: existing.id },
+        data: { rawData: { ...(existing.rawData as object), reversed: true } },
+      }).catch(() => {});
+      logger.info('CPX reversal processed', { transactionId, coinsRemoved: existing.coinsAwarded });
+    }
     return '1';
+  }
+
+  // Only process status=1 (completed)
+  if (status !== '1') {
+    logger.info('CPX non-completed status, ignoring', { status, transactionId });
+    return '1';
+  }
+
+  // Verify hash: md5(trans_id + "-" + secure_hash)
+  if (hash) {
+    const expectedHash = crypto
+      .createHash('md5')
+      .update(`${transactionId}-${env.CPX_SECURE_HASH}`)
+      .digest('hex');
+    if (hash !== expectedHash) {
+      logger.warn('CPX invalid hash', { hash, expectedHash, transactionId });
+      return '1';
+    }
   }
 
   const existing = await prisma.offerwallLog.findFirst({
-    where: { offerId: String(transactionId), provider: 'cpx' },
+    where: { offerId: transactionId, provider: 'cpx' },
   });
-  if (existing) return '1';
+  if (existing) { logger.info('CPX duplicate postback', { transactionId }); return '1'; }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
-    logger.warn('CPX user not found:', userId);
+    logger.warn('CPX user not found:', { userId });
     return '1';
   }
 
-  const payoutUsd = parseFloat(payout || '0');
-  const coins = Math.round(payoutUsd * 1000);
-  if (coins <= 0) return '1';
+  // Use amount_local if set (already in coins), else convert USD → coins (×1000)
+  const coins = amountLocal > 0 ? Math.round(amountLocal) : Math.round(amountUsd * 1000);
+  if (coins <= 0) { logger.warn('CPX coins=0', { userId, amountLocal, amountUsd }); return '1'; }
 
   const streak = await prisma.userStreak.findUnique({ where: { userId } });
   const multiplier = streak?.multiplier || 1.0;
@@ -167,7 +196,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
           userId,
           type: TransactionType.EARN_SURVEY,
           amount: finalCoins,
-          refId: String(transactionId),
+          refId: transactionId,
           description: `CPX Survey completed${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
         },
       });
@@ -175,7 +204,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
         data: {
           userId,
           provider: 'cpx',
-          offerId: String(transactionId),
+          offerId: transactionId,
           coinsAwarded: finalCoins,
           rawData: params,
         },
@@ -183,7 +212,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
       await tx.notification.create({
         data: {
           userId,
-          title: 'Survey Completed!',
+          title: 'Survey Completed! 🪙',
           body: `You earned ${finalCoins} coins from a survey!${multiplier > 1 ? ` (${multiplier}x streak bonus)` : ''}`,
           type: 'COIN_EARNED',
         },
