@@ -2,33 +2,23 @@ import axios, { AxiosError } from 'axios';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
-// ─── Base URLs ────────────────────────────────────────────────────────────────
-// Auth (V1 token endpoint) lives on sandbox.cashfree.com/payout
-// V2 Payout endpoints (beneficiary, transfers) live on payout-gamma (sandbox)
-//   or payout.cashfree.com (prod)
-const getAuthBaseUrl = (): string =>
+// ─── Base URL ─────────────────────────────────────────────────────────────────
+// All Cashfree Payout V1 endpoints (auth + beneficiary + transfers) share one base.
+const getBaseUrl = (): string =>
   env.CASHFREE_ENV === 'PROD'
     ? 'https://api.cashfree.com/payout'
     : 'https://sandbox.cashfree.com/payout';
 
-const getBaseUrl = (): string =>
-  env.CASHFREE_ENV === 'PROD'
-    ? 'https://payout.cashfree.com'
-    : 'https://payout-gamma.cashfree.com';
-
 // ─── Token cache ──────────────────────────────────────────────────────────────
-// Cashfree Payout V2 requires a Bearer token obtained via POST /v2/authorize.
-// Tokens are valid for ~30 minutes; we cache and refresh automatically.
-let _cachedToken:  string = '';
-let _tokenExpiry:  number = 0;
+let _cachedToken: string = '';
+let _tokenExpiry: number = 0;
 
 async function getCashfreeToken(): Promise<string> {
   if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
 
   try {
-    // V1 authorize endpoint — only available on sandbox.cashfree.com/payout (not payout-gamma)
     const res = await axios.post(
-      `${getAuthBaseUrl()}/v1/authorize`,
+      `${getBaseUrl()}/v1/authorize`,
       {},
       {
         headers: {
@@ -40,7 +30,6 @@ async function getCashfreeToken(): Promise<string> {
       },
     );
 
-    // Success body: { status: "SUCCESS", subCode: "200", data: { token, expiry } }
     const body = res.data;
     if (body?.status !== 'SUCCESS' || !body?.data?.token) {
       logger.error(`[Cashfree] Auth failed: ${JSON.stringify(body)}`);
@@ -48,10 +37,9 @@ async function getCashfreeToken(): Promise<string> {
     }
 
     _cachedToken = body.data.token as string;
-    // expiry comes as Unix seconds; subtract 60s buffer
     _tokenExpiry = body.data.expiry
       ? (parseInt(body.data.expiry, 10) - 60) * 1000
-      : Date.now() + 25 * 60 * 1000;   // fallback: 25 min
+      : Date.now() + 25 * 60 * 1000;
 
     logger.info(`[Cashfree] Token obtained, expires at ${new Date(_tokenExpiry).toISOString()}`);
     return _cachedToken;
@@ -62,20 +50,16 @@ async function getCashfreeToken(): Promise<string> {
   }
 }
 
-// Headers for all authenticated V2 Payout calls
-// V2 endpoints need Bearer token AND x-client-id alongside it
+// Headers for authenticated V1 Payout calls
 async function authHeaders() {
   const token = await getCashfreeToken();
   return {
     'Authorization': `Bearer ${token}`,
-    'x-client-id':   env.CASHFREE_APP_ID,
-    'x-api-version': '2024-01-01',
     'Content-Type':  'application/json',
   };
 }
 
 // ─── Response validation ──────────────────────────────────────────────────────
-// Cashfree returns HTTP 200 even for auth errors — must check body.status
 function isCashfreeError(data: any): boolean {
   return data?.status === 'ERROR' || (data?.subCode && parseInt(data.subCode, 10) >= 400);
 }
@@ -105,14 +89,13 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
   const base    = getBaseUrl();
   const headers = await authHeaders();
 
-  // Check if beneficiary exists — must also validate body (HTTP 200 ≠ success)
+  // Check if beneficiary already exists
   try {
-    const res = await axios.get(`${base}/v2/beneficiary/${beneId}`, { headers, timeout: 15000 });
+    const res = await axios.get(`${base}/v1/beneficiary/${beneId}`, { headers, timeout: 15000 });
     if (!isCashfreeError(res.data)) {
       logger.info(`[Cashfree] Beneficiary ${beneId} already exists — reusing`);
       return true;
     }
-    // Body-level error (e.g. 404-in-body or auth error) — fall through to create
     logger.info(`[Cashfree] Beneficiary check returned error body: ${JSON.stringify(res.data)}`);
   } catch (err) {
     const status = (err as AxiosError)?.response?.status;
@@ -125,12 +108,11 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
   // Create beneficiary
   try {
     const res = await axios.post(
-      `${base}/v2/beneficiary`,
-      { beneficiary_id: beneId, ...beneData },
+      `${base}/v1/beneficiary`,
+      { beneId, ...beneData },
       { headers, timeout: 15000 },
     );
     if (isCashfreeError(res.data)) {
-      // 409 equivalent in body = already exists
       if (String(res.data?.subCode) === '409') {
         logger.info(`[Cashfree] Beneficiary ${beneId} already exists (body 409) — continuing`);
         return true;
@@ -179,24 +161,23 @@ export const transferToUPI = async (
     const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
     const beneOk = await createOrGetBeneficiary(beneId, {
-      beneficiary_name:  sanitiseName(name),
-      vpa:               upiId.trim(),
-      beneficiary_email: email,
-      beneficiary_phone: phone,
+      beneName:  sanitiseName(name),
+      vpa:       upiId.trim(),
+      email,
+      phone,
     });
     if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
 
     const headers = await authHeaders();
     const body = {
-      transfer_id:       orderId,
-      transfer_amount:   amount,
-      transfer_currency: 'INR',
-      transfer_mode:     'upi',
-      beneficiary_id:    beneId,
-      remarks:           `OfferPlay payout ${orderId}`.slice(0, 70),
+      beneId,
+      amount:        amount.toFixed(2),
+      transferId:    orderId,
+      transferMode:  'upi',
+      remarks:       `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res  = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res  = await axios.post(`${getBaseUrl()}/v1/transfers`, body, { headers, timeout: 30000 });
     const data = res.data;
     logger.info(`[Cashfree] UPI transfer response: ${JSON.stringify(data)}`);
 
@@ -205,12 +186,12 @@ export const transferToUPI = async (
     }
 
     const status = (data?.data?.status || data?.status || '').toUpperCase();
-    const cfRef  = data?.data?.cf_transfer_id || data?.cf_transfer_id || orderId;
+    const cfRef  = data?.data?.referenceId || data?.referenceId || orderId;
 
     if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY'].includes(status)) {
       return { success: true, referenceId: String(cfRef) };
     }
-    return { success: false, error: data?.data?.status_description || data?.message || `Status: ${status}` };
+    return { success: false, error: data?.data?.reason || data?.message || `Status: ${status}` };
 
   } catch (err: unknown) {
     const e   = err as AxiosError<{ message?: string }>;
@@ -243,28 +224,27 @@ export const transferToBank = async (
     const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
     const beneOk = await createOrGetBeneficiary(beneId, {
-      beneficiary_name:    sanitiseName(accountName),
-      bank_account_number: accountNumber.trim(),
-      bank_ifsc:           ifscCode.trim().toUpperCase(),
-      beneficiary_email:   email,
-      beneficiary_phone:   phone,
+      beneName:      sanitiseName(accountName),
+      bankAccount:   accountNumber.trim(),
+      ifsc:          ifscCode.trim().toUpperCase(),
+      email,
+      phone,
     });
     if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
 
     const headers = await authHeaders();
     const body = {
-      transfer_id:       orderId,
-      transfer_amount:   amount,
-      transfer_currency: 'INR',
-      transfer_mode:     resolvedMode,
-      beneficiary_id:    beneId,
-      remarks:           `OfferPlay payout ${orderId}`.slice(0, 70),
+      beneId,
+      amount:       amount.toFixed(2),
+      transferId:   orderId,
+      transferMode: resolvedMode,
+      remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res    = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
+    const res    = await axios.post(`${getBaseUrl()}/v1/transfers`, body, { headers, timeout: 30000 });
     const data   = res.data;
     const status = (data?.data?.status || data?.status || '').toUpperCase();
-    const cfRef  = data?.data?.cf_transfer_id || data?.cf_transfer_id || orderId;
+    const cfRef  = data?.data?.referenceId || data?.referenceId || orderId;
 
     logger.info(`[Cashfree] Bank (${resolvedMode}) response: ${JSON.stringify(data)}`);
 
@@ -274,7 +254,7 @@ export const transferToBank = async (
     if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY'].includes(status)) {
       return { success: true, referenceId: String(cfRef) };
     }
-    return { success: false, error: data?.data?.status_description || data?.message || `Status: ${status}` };
+    return { success: false, error: data?.data?.reason || data?.message || `Status: ${status}` };
 
   } catch (err: unknown) {
     const e   = err as AxiosError<{ message?: string }>;
@@ -287,7 +267,7 @@ export const transferToBank = async (
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
     const headers = await authHeaders();
-    const res     = await axios.get(`${getBaseUrl()}/v2/transfers/${transferId}`, { headers, timeout: 15000 });
+    const res     = await axios.get(`${getBaseUrl()}/v1/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
     return (res.data?.data?.status || res.data?.status || 'UNKNOWN').toUpperCase();
   } catch (err) {
