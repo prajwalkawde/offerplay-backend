@@ -59,6 +59,16 @@ async function authHeaders() {
   };
 }
 
+// V2 transfer endpoints also require X-Client-Id alongside Bearer token
+async function authHeadersV2() {
+  const token = await getCashfreeToken();
+  return {
+    'Authorization': `Bearer ${token}`,
+    'X-Client-Id':   env.CASHFREE_APP_ID,
+    'Content-Type':  'application/json',
+  };
+}
+
 // ─── Response validation ──────────────────────────────────────────────────────
 function isCashfreeError(data: any): boolean {
   return data?.status === 'ERROR' || (data?.subCode && parseInt(data.subCode, 10) >= 400);
@@ -171,16 +181,17 @@ export const transferToUPI = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
 
-    const headers = await authHeaders();
+    const headers = await authHeadersV2();
     const body = {
       beneId,
-      amount:        amount.toFixed(2),
-      transferId:    orderId,
-      transferMode:  'upi',
-      remarks:       `OfferPlay payout ${orderId}`.slice(0, 70),
+      amount,
+      transferid:   orderId,
+      transferMode: 'upi',
+      currency:     'INR',
+      remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res  = await axios.post(`${getBaseUrl()}/v1/requestTransfer`, body, { headers, timeout: 30000 });
+    const res  = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
     const data = res.data;
     logger.info(`[Cashfree] UPI transfer response: ${JSON.stringify(data)}`);
 
@@ -188,13 +199,13 @@ export const transferToUPI = async (
       return { success: false, error: data?.message || `Cashfree error ${data?.subCode}` };
     }
 
-    const status = (data?.data?.status || data?.status || '').toUpperCase();
-    const cfRef  = data?.data?.referenceId || data?.referenceId || orderId;
+    const status = (data?.status || '').toUpperCase();
+    const cfRef  = data?.transferid || orderId;
 
-    if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY'].includes(status)) {
+    if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY', 'VALIDATION_PENDING', 'APPROVAL_PENDING'].includes(status)) {
       return { success: true, referenceId: String(cfRef) };
     }
-    return { success: false, error: data?.data?.reason || data?.message || `Status: ${status}` };
+    return { success: false, error: data?.status_description || data?.message || `Status: ${status}` };
 
   } catch (err: unknown) {
     const e   = err as AxiosError<{ message?: string }>;
@@ -236,29 +247,30 @@ export const transferToBank = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
 
-    const headers = await authHeaders();
+    const headers = await authHeadersV2();
     const body = {
       beneId,
-      amount:       amount.toFixed(2),
-      transferId:   orderId,
+      amount,
+      transferid:   orderId,
       transferMode: resolvedMode,
+      currency:     'INR',
       remarks:      `OfferPlay payout ${orderId}`.slice(0, 70),
     };
 
-    const res    = await axios.post(`${getBaseUrl()}/v1/requestTransfer`, body, { headers, timeout: 30000 });
+    const res    = await axios.post(`${getBaseUrl()}/v2/transfers`, body, { headers, timeout: 30000 });
     const data   = res.data;
-    const status = (data?.data?.status || data?.status || '').toUpperCase();
-    const cfRef  = data?.data?.referenceId || data?.referenceId || orderId;
+    const status = (data?.status || '').toUpperCase();
+    const cfRef  = data?.transferid || orderId;
 
     logger.info(`[Cashfree] Bank (${resolvedMode}) response: ${JSON.stringify(data)}`);
 
     if (isCashfreeError(data)) {
       return { success: false, error: data?.message || `Cashfree error ${data?.subCode}` };
     }
-    if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY'].includes(status)) {
+    if (['RECEIVED', 'QUEUED', 'SUCCESS', 'COMPLETED', 'SENT_TO_BENEFICIARY', 'VALIDATION_PENDING', 'APPROVAL_PENDING'].includes(status)) {
       return { success: true, referenceId: String(cfRef) };
     }
-    return { success: false, error: data?.data?.reason || data?.message || `Status: ${status}` };
+    return { success: false, error: data?.status_description || data?.message || `Status: ${status}` };
 
   } catch (err: unknown) {
     const e   = err as AxiosError<{ message?: string }>;
@@ -270,10 +282,10 @@ export const transferToBank = async (
 
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
-    const headers = await authHeaders();
-    const res     = await axios.get(`${getBaseUrl()}/v1/getTransferStatus?referenceId=${transferId}`, { headers, timeout: 15000 });
+    const headers = await authHeadersV2();
+    const res     = await axios.get(`${getBaseUrl()}/v2/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
-    return (res.data?.data?.status || res.data?.status || 'UNKNOWN').toUpperCase();
+    return (res.data?.status || 'UNKNOWN').toUpperCase();
   } catch (err) {
     logger.warn(`[Cashfree] checkTransferStatus failed: ${(err as AxiosError)?.response?.status}`);
     return 'UNKNOWN';
