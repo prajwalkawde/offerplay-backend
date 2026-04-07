@@ -134,24 +134,31 @@ const getXoxodayToken = async (): Promise<string> => {
   return '';
 };
 
-const XOXODAY_API = 'https://accounts.xoxoday.com/chef/v1/oauth/api';
+// Test account tokens use stagingstores; production tokens use stores
+const XOXODAY_API = 'https://stagingstores.xoxoday.com/chef/v1/oauth/api/';
 
 function normalizeVoucher(v: any) {
+  // valueDenominations is a comma-separated string e.g. "100,500,1000"
+  const denomValues: number[] = v.valueDenominations
+    ? String(v.valueDenominations).split(',').map((d: string) => parseFloat(d.trim())).filter(Boolean)
+    : [];
+
   return {
-    id:           String(v.productId || v.id || v.voucherId || v.code || ''),
-    name:         v.productName     || v.name  || v.title       || 'Unknown',
-    description:  v.productDescription || v.description || '',
-    imageUrl:     v.imageUrl        || v.image || v.logo         || v.thumbnail || '',
-    category:     v.categoryName    || v.category || 'General',
-    denominations: (v.denominations || v.valueDenominations || v.prices || []).map((d: any) => ({
-      id:           String(d.id || d.denominationId || d.voucherId || d.value || ''),
-      value:        parseFloat(d.price || d.value || d.amount || d.faceValue || 0),
-      currencyCode: d.currencyCode || d.currency || 'INR',
-      discount:     d.discount     || d.discountPercentage || 0,
+    id:           String(v.productId || v.id || ''),
+    name:         v.name        || v.productName || 'Unknown',
+    description:  v.description || '',
+    imageUrl:     v.imageUrl    || v.image || '',
+    category:     v.categoryName || v.category || 'General',
+    denominations: denomValues.map((val) => ({
+      id:           String(val),
+      value:        val,
+      currencyCode: v.currencyCode || 'INR',
+      discount:     v.discount || 0,
     })),
-    minValue: v.minValue || v.minimumValue || 50,
-    maxValue: v.maxValue || v.maximumValue || 10000,
-    isActive: v.isActive !== false && v.status !== 'inactive',
+    minValue:  v.minValue || 50,
+    maxValue:  v.maxValue || 10000,
+    valueType: v.valueType || 'fixed_denomination',
+    isActive:  true,
   };
 }
 
@@ -175,38 +182,29 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
+    // Per docs: variables.data with filters as array of {key,value}
     const body = {
       query: 'plumProAPI.mutation.getVouchers',
       tag:   'plumProAPI',
       variables: {
-        filters: {
-          countryCodes:          [countryCode],
-          excludeFilterValueId:  [],
-          includeFilterValueIds: [],
-          productCategories:     [],
+        data: {
+          limit:   100,
+          page:    1,
+          filters: [{ key: 'country', value: countryCode }],
         },
-        pagination: { pageNumber: 1, limit: 100 },
       },
     };
 
     try {
-      const res  = await axios.post(XOXODAY_API, body, { headers, timeout: 15000 });
-      const data = res.data;
-
-      // Response can be nested in data.data.getVouchers or data.data or data directly
-      const vouchers: any[] =
-        data?.data?.getVouchers?.data  ||
-        data?.data?.vouchers           ||
-        data?.data                     ||
-        data?.vouchers                 ||
-        [];
+      const res     = await axios.post(XOXODAY_API, body, { headers, timeout: 15000 });
+      const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
 
       if (Array.isArray(vouchers) && vouchers.length > 0) {
         logger.info(`[Xoxoday] Got ${vouchers.length} vouchers`);
         return vouchers.map(normalizeVoucher);
       }
 
-      logger.warn(`[Xoxoday] getVouchers returned empty: ${JSON.stringify(data)?.slice(0, 300)}`);
+      logger.warn(`[Xoxoday] getVouchers returned empty: ${JSON.stringify(res.data)?.slice(0, 300)}`);
 
     } catch (err: any) {
       logger.warn(`[Xoxoday] getVouchers failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
@@ -243,25 +241,26 @@ export const placeXoxodayOrder = async (
       tag:   'plumProAPI',
       variables: {
         data: {
-          productId,
-          quantity:     String(quantity),
-          denomination: String(parseFloat(denominationId) || denominationId),
-          poNumber:     orderId,
-          email:        userEmail,
+          productId:           parseInt(productId, 10) || productId,
+          quantity,
+          denomination:        parseFloat(denominationId) || 0,
+          poNumber:            orderId,
+          email:               userEmail,
+          notifyReceiverEmail: 1,
         },
       },
     };
 
     try {
       const res     = await axios.post(XOXODAY_API, body, { headers, timeout: 30000 });
-      const order   = res.data?.data?.placeOrder || res.data?.data || res.data;
-      const voucher = order?.vouchers?.[0] || order?.items?.[0] || order?.data?.[0] || order || {};
+      const orderData = res.data?.data?.placeOrder?.data;
+      const voucher   = orderData?.vouchers?.[0] || {};
 
-      logger.info(`[Xoxoday] Order placed: ${JSON.stringify(res.data)?.slice(0, 200)}`);
+      logger.info(`[Xoxoday] Order placed: ${JSON.stringify(res.data)?.slice(0, 300)}`);
       return {
         success:     true,
-        voucherCode: voucher.code        || voucher.voucherCode || voucher.pin          || '',
-        voucherLink: voucher.link        || voucher.url         || voucher.redemptionUrl || '',
+        voucherCode: voucher.voucherCode || voucher.pin  || '',
+        voucherLink: voucher.link        || voucher.url  || '',
       };
     } catch (err: any) {
       logger.warn(`[Xoxoday] placeOrder failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
