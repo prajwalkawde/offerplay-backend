@@ -392,7 +392,8 @@ export async function getTransactions(req: Request, res: Response): Promise<void
       prisma.transaction.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, type: true, amount: true, description: true, createdAt: true, status: true },
+        // Include refId so we can join RedemptionRequest for voucher details
+        select: { id: true, type: true, amount: true, description: true, createdAt: true, status: true, refId: true },
       }),
       prisma.ticketTransaction.findMany({
         where: { userId },
@@ -401,15 +402,70 @@ export async function getTransactions(req: Request, res: Response): Promise<void
       }),
     ]);
 
+    // Enrich REDEEM coin transactions with voucher details from RedemptionRequest
+    const redeemRefIds = coinTxs
+      .filter(tx => tx.type.toString().includes('REDEEM') && tx.refId)
+      .map(tx => tx.refId as string);
+
+    let redemptionMap: Record<string, any> = {};
+    if (redeemRefIds.length > 0) {
+      const redemptions = await prisma.redemptionRequest.findMany({
+        where: { id: { in: redeemRefIds } },
+        select: {
+          id: true,
+          voucherCode: true,
+          voucherLink: true,
+          redeemUrl: true,
+          productName: true,
+          customFieldValues: true,
+          status: true,
+          failureReason: true,
+          amountInr: true,
+          type: true,
+          mobileNumber: true,
+          operator: true,
+          gamePlayerId: true,
+          upiId: true,
+          accountNumber: true,
+        },
+      });
+      redemptionMap = Object.fromEntries(redemptions.map(r => [r.id, r]));
+    }
+
+    const coinNormalised = coinTxs.map(tx => {
+      const base = { ...tx, currency: 'coin' as const };
+      if (!tx.type.toString().includes('REDEEM') || !tx.refId) return base;
+      const r = redemptionMap[tx.refId];
+      if (!r) return base;
+      const cfv = (r.customFieldValues as any) || {};
+      const rawCode = r.voucherCode || '';
+      const isUrl   = rawCode.startsWith('http');
+      return {
+        ...base,
+        voucherCode:      isUrl ? '' : rawCode,
+        voucherPin:       cfv.pin      || undefined,
+        voucherValidity:  cfv.validity || undefined,
+        voucherLink:      isUrl ? rawCode : (r.voucherLink || undefined),
+        redeemUrl:        isUrl ? rawCode : (r.redeemUrl   || undefined),
+        productName:      r.productName    || undefined,
+        redemptionStatus: r.status         || undefined,
+        failureReason:    r.failureReason  || undefined,
+        amountInr:        r.amountInr      || undefined,
+        redemptionType:   r.type           || undefined,
+        mobileNumber:     r.mobileNumber   || undefined,
+        operator:         r.operator       || undefined,
+        gamePlayerId:     r.gamePlayerId   || undefined,
+        upiId:            r.upiId          || undefined,
+        accountNumber:    r.accountNumber  || undefined,
+        redemptionId:     r.id,
+      };
+    });
+
     // Normalise ticket records to match coin tx shape, tag with currency
     const ticketNormalised = ticketTxs.map(t => ({
       ...t,
       status: 'completed',
       currency: 'ticket' as const,
-    }));
-    const coinNormalised = coinTxs.map(t => ({
-      ...t,
-      currency: 'coin' as const,
     }));
 
     // Merge and sort by date descending, then paginate
