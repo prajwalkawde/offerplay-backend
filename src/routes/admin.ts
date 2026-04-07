@@ -341,13 +341,14 @@ router.get('/xoxoday/test-connection', async (_req, res) => {
 
 router.get('/xoxoday/products', async (req, res) => {
   try {
-    const country = typeof req.query.country === 'string' && req.query.country.trim()
-      ? req.query.country.trim().toUpperCase()
-      : 'IN';
+    const raw     = typeof req.query.country === 'string' ? req.query.country.trim().toUpperCase() : '';
+    const country = raw || 'ALL';          // default = all countries (no filter)
     const products = await getXoxodayProducts(country);
+    const MOCK_IDS = new Set(['amazon_in', 'flipkart_in', 'paytm_in', 'freefire_in', 'bgmi_in']);
+    const isMock   = products.length > 0 && products.every(p => MOCK_IDS.has(p.id));
     res.json({
       success: true,
-      data: { products, total: products.length, isMock: !process.env.XOXODAY_CLIENT_ID },
+      data: { products, total: products.length, countryRequested: country, isMock },
     });
   } catch (err: unknown) {
     res.status(500).json({ success: false, message: (err as Error).message });

@@ -94,6 +94,38 @@ function normalizeVoucher(v: any) {
   };
 }
 
+// ─── Fetch one pass of paginated vouchers from Xoxoday ───────────────────────
+async function fetchVouchers(
+  headers: Record<string, string>,
+  countryCode: string,   // pass 'ALL' to skip country filter
+): Promise<any[]> {
+  const allVouchers: any[] = [];
+  const useFilter = countryCode && countryCode !== 'ALL';
+
+  for (let page = 1; page <= 5; page++) {
+    try {
+      const variables: any = { data: { limit: 100, page } };
+      if (useFilter) {
+        variables.data.filters = [{ key: 'country', value: countryCode }];
+      }
+      const body = { query: 'plumProAPI.mutation.getVouchers', tag: 'plumProAPI', variables };
+      const res  = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
+
+      const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
+      if (!Array.isArray(vouchers) || vouchers.length === 0) break;
+
+      allVouchers.push(...vouchers);
+      logger.info(`[Xoxoday] Page ${page} (country=${countryCode}): ${vouchers.length} vouchers (total: ${allVouchers.length})`);
+
+      if (vouchers.length < 100) break;
+    } catch (err: any) {
+      logger.warn(`[Xoxoday] getVouchers page ${page} (${countryCode}) failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
+      break;
+    }
+  }
+  return allVouchers;
+}
+
 // ─── Get products / vouchers ──────────────────────────────────────────────────
 export const getXoxodayProducts = async (
   countryCode: string = 'IN',
@@ -106,7 +138,7 @@ export const getXoxodayProducts = async (
       return getMockProducts();
     }
 
-    logger.info(`[Xoxoday] Token preview: ${token.slice(0, 30)}...`);
+    logger.info(`[Xoxoday] Fetching products for country=${countryCode}, token: ${token.slice(0, 30)}...`);
 
     const headers = {
       Authorization:  `Bearer ${token}`,
@@ -114,41 +146,22 @@ export const getXoxodayProducts = async (
       Accept:         'application/json',
     };
 
-    // Fetch up to 5 pages (500 vouchers total) to get all products
-    const allVouchers: any[] = [];
-    for (let page = 1; page <= 5; page++) {
-      try {
-        const body = {
-          query: 'plumProAPI.mutation.getVouchers',
-          tag:   'plumProAPI',
-          variables: { data: { limit: 100, page, filters: [{ key: 'country', value: countryCode }] } },
-        };
-        const res      = await axios.post(getApiUrl(), body, { headers, timeout: 15000 });
-        const vouchers: any[] = res.data?.data?.getVouchers?.data || [];
+    // 1st attempt: fetch with requested country (or no filter if ALL)
+    let allVouchers = await fetchVouchers(headers, countryCode);
 
-        if (!Array.isArray(vouchers) || vouchers.length === 0) break;
-        allVouchers.push(...vouchers);
-        logger.info(`[Xoxoday] Page ${page}: ${vouchers.length} vouchers (total: ${allVouchers.length})`);
-
-        // If we got less than 100, no more pages
-        if (vouchers.length < 100) break;
-
-      } catch (err: any) {
-        logger.warn(`[Xoxoday] getVouchers page ${page} failed (${err.response?.status}): ${JSON.stringify(err.response?.data) ?? err.message}`);
-        break;
-      }
+    // 2nd attempt: if specific country returned nothing, retry without filter
+    if (allVouchers.length === 0 && countryCode !== 'ALL') {
+      logger.warn(`[Xoxoday] No results for country=${countryCode} — retrying without country filter`);
+      allVouchers = await fetchVouchers(headers, 'ALL');
     }
 
     if (allVouchers.length > 0) {
-      // Log product names to help admin identify available cards
       const names = allVouchers.map((v: any) => v.name || v.productName).filter(Boolean);
-      logger.info(`[Xoxoday] Available products: ${names.slice(0, 30).join(', ')}`);
+      logger.info(`[Xoxoday] Returning ${allVouchers.length} real products. Sample: ${names.slice(0, 15).join(', ')}`);
       return allVouchers.map(normalizeVoucher);
     }
 
-    logger.warn('[Xoxoday] No vouchers found');
-
-    logger.warn('[Xoxoday] Product fetch failed — returning mock');
+    logger.warn('[Xoxoday] No vouchers found even without filter — returning mock');
     return getMockProducts();
 
   } catch (err: any) {
