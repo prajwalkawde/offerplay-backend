@@ -170,27 +170,22 @@ export const transferToUPI = async (
       return { success: true, referenceId: `MOCK_UPI_${orderId}` };
     }
 
-    const beneId = makeBeneId('OP_UPI', userId, upiId);
-    const phone  = sanitisePhone(userPhone);
-    const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
-
-    const beneOk = await createOrGetBeneficiary(beneId, {
-      name:     sanitiseName(name),
-      vpa:      upiId.trim(),
-      email,
-      phone,
-      address1: 'India',
-    });
-    if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
+    const phone = sanitisePhone(userPhone);
+    const email = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
     const headers = authHeadersV2();
     const body = {
-      transfer_id:    orderId,
+      transfer_id:     orderId,
       transfer_amount: amount,
       currency:        'INR',
       transfer_mode:   'upi',
-      beneficiary_id: beneId,
-      remarks:        `OfferPlay payout ${orderId}`.slice(0, 70),
+      remarks:         `OfferPlay payout ${orderId}`.slice(0, 70),
+      beneficiary_details: {
+        beneficiary_name:  sanitiseName(name),
+        beneficiary_vpa:   upiId.trim(),
+        beneficiary_email: email,
+        beneficiary_phone: phone,
+      },
     };
 
     logger.info(`[Cashfree] UPI transfer payload: ${JSON.stringify(body)}`);
@@ -236,28 +231,23 @@ export const transferToBank = async (
     }
 
     const resolvedMode = amount >= 200000 ? 'rtgs' : transferMode;
-    const beneId = makeBeneId('OP_BANK', userId, accountNumber);
     const phone  = sanitisePhone(userPhone);
     const email  = userEmail?.includes('@') ? userEmail : `user${userId.slice(0, 6)}@offerplay.in`;
 
-    const beneOk = await createOrGetBeneficiary(beneId, {
-      name:        sanitiseName(accountName),
-      bankAccount: accountNumber.trim(),
-      ifsc:        ifscCode.trim().toUpperCase(),
-      email,
-      phone,
-      address1:    'India',
-    });
-    if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
-
     const headers = authHeadersV2();
     const body = {
-      transfer_id:    orderId,
+      transfer_id:     orderId,
       transfer_amount: amount,
       currency:        'INR',
       transfer_mode:   resolvedMode,
-      beneficiary_id: beneId,
-      remarks:        `OfferPlay payout ${orderId}`.slice(0, 70),
+      remarks:         `OfferPlay payout ${orderId}`.slice(0, 70),
+      beneficiary_details: {
+        beneficiary_name:           sanitiseName(accountName),
+        beneficiary_account_number: accountNumber.trim(),
+        beneficiary_ifsc:           ifscCode.trim().toUpperCase(),
+        beneficiary_email:          email,
+        beneficiary_phone:          phone,
+      },
     };
 
     logger.info(`[Cashfree] Bank transfer payload: ${JSON.stringify(body)}`);
