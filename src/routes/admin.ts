@@ -43,7 +43,7 @@ import {
   getAdminRedemptions, getAdminPackages,
   upsertRedeemPackage, deleteRedeemPackage,
   manualProcessRedemption, getRedemptionDetails, approveRedemption,
-  updateRedemptionStatus,
+  updateRedemptionStatus, rejectRedemption,
 } from '../controllers/redeemController';
 import { getXoxodayProducts, getXoxodayFilters, testXoxodayConnection } from '../services/xoxodayService';
 import {
@@ -385,6 +385,7 @@ router.get('/xoxoday/products', async (req, res) => {
 // ─── Redemption detail + approve ──────────────────────────────────────────────
 router.get('/redemptions/:id', getRedemptionDetails);
 router.post('/redemptions/:id/approve', approveRedemption);
+router.post('/redemptions/:id/reject', rejectRedemption);
 
 // ─── File Upload ───────────────────────────────────────────────────────────────
 import { success as apiSuccess, error as apiError } from '../utils/response';

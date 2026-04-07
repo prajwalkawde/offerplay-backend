@@ -5,6 +5,7 @@ import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { transferToUPI, transferToBank } from '../services/cashfreeService';
 import { getXoxodayProducts, placeXoxodayOrder } from '../services/xoxodayService';
+import { checkRedemptionFraud } from '../services/fraudDetectionService';
 
 export { getXoxodayProducts };
 
@@ -106,7 +107,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
     const {
       type, coinsToRedeem,
       upiId,
-      accountNumber, ifscCode, accountName, bankName,
+      accountNumber, ifscCode, accountName, bankName, transferMode,
       productId, productName, denominationId,
       mobileNumber, operator,
       gameId, gamePlayerId,
@@ -116,6 +117,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
       type: string; coinsToRedeem: number;
       upiId?: string;
       accountNumber?: string; ifscCode?: string; accountName?: string; bankName?: string;
+      transferMode?: 'imps' | 'neft' | 'rtgs';
       productId?: string; productName?: string; denominationId?: string;
       mobileNumber?: string; operator?: string;
       gameId?: string; gamePlayerId?: string;
@@ -130,64 +132,131 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { coinBalance: true, name: true, email: true },
+      select: { coinBalance: true, name: true, email: true, phone: true },
     });
     if (!user) { error(res, 'User not found', 404); return; }
-    if (user.coinBalance < coinsToRedeem) { error(res, 'Insufficient coins', 400); return; }
+
+    // ── Security: For Xoxoday products, resolve authoritative values from DB ──
+    // Never trust client-supplied coinsToRedeem or denominationId for gift cards.
+    // A malicious user could send coinsToRedeem:1 with denominationId:"1000" to
+    // obtain a ₹1000 voucher for 1 coin. We override with package DB values.
+    let resolvedCoins       = coinsToRedeem;
+    let resolvedAmountInr:  number | null = null;   // set from package — overrides coin-rate calc
+    let resolvedDenomination = denominationId || '';
+    let pkgRedeemUrl: string | null = null;
+
+    const isXoxodayType = ['GIFT_CARD', 'GAME_CREDIT', 'RECHARGE', 'VOUCHER'].includes(type);
+
+    if (packageId) {
+      const pkg = await prisma.redeemPackage.findUnique({
+        where: { id: packageId, isActive: true },
+        select: { coinsRequired: true, amountInr: true, redeemUrl: true },
+      });
+      if (!pkg) {
+        error(res, 'Invalid or inactive package', 400);
+        return;
+      }
+      pkgRedeemUrl = pkg.redeemUrl || null;
+      // Always use package's authoritative coin count and INR amount —
+      // prevents both under-paying (wrong coinsToRedeem) and mis-priced UPI/bank transfers
+      resolvedCoins     = pkg.coinsRequired;
+      resolvedAmountInr = pkg.amountInr;
+      if (isXoxodayType) {
+        resolvedDenomination = pkg.amountInr.toString();
+      }
+    } else if (isXoxodayType) {
+      // No packageId for a Xoxoday product — validate denomination matches coins
+      const coinRate2 = await prisma.coinConversionRate.findFirst({ where: { countryCode: 'IN' } });
+      const rate2     = coinRate2?.coinsPerUnit || 100;
+      const expected  = coinsToRedeem / rate2;
+      const requested = parseFloat(denominationId || '0');
+      if (Math.abs(requested - expected) > 1) {
+        error(res, 'Denomination does not match coins redeemed', 400);
+        return;
+      }
+    }
+
+    if (user.coinBalance < resolvedCoins) { error(res, 'Insufficient coins', 400); return; }
 
     const coinRate = await prisma.coinConversionRate.findFirst({ where: { countryCode: 'IN' } });
     const coinsPerUnit = coinRate?.coinsPerUnit || 100;
-    const amountInr = coinsToRedeem / coinsPerUnit;
+    // Use package amountInr if available; fall back to coin-rate calculation
+    const amountInr = resolvedAmountInr ?? (resolvedCoins / coinsPerUnit);
 
     const orderId = `OP_${userId.slice(0, 6)}_${Date.now()}`;
-
-    // Look up package for redeemUrl and other metadata
-    let pkgRedeemUrl: string | null = null;
-    if (packageId) {
-      const pkg = await prisma.redeemPackage.findUnique({
-        where: { id: packageId },
-        select: { redeemUrl: true },
-      });
-      pkgRedeemUrl = pkg?.redeemUrl || null;
-    }
 
     const redemption = await prisma.redemptionRequest.create({
       data: {
         userId, type, status: 'processing',
-        coinsRedeemed: coinsToRedeem, amountInr,
+        coinsRedeemed: resolvedCoins, amountInr,
         upiId, accountNumber, ifscCode, accountName, bankName,
         productId, productName, denominationId,
         mobileNumber, operator, gameId, gamePlayerId,
-        ...(customFieldValues ? { customFieldValues } : {}),
+        // Merge customFieldValues with transferMode so approveRedemption can reuse it
+        customFieldValues: {
+          ...(customFieldValues || {}),
+          ...(transferMode ? { transferMode } : {}),
+        },
         ...(pkgRedeemUrl ? { redeemUrl: pkgRedeemUrl } : {}),
       },
     });
 
     // Admin notification log for new redemption
-    logger.info(`[REDEMPTION] New request #${redemption.id} | user=${userId} | type=${type} | coins=${coinsToRedeem} | ₹${amountInr.toFixed(2)}`);
+    logger.info(`[REDEMPTION] New request #${redemption.id} | user=${userId} | type=${type} | coins=${resolvedCoins} | ₹${amountInr.toFixed(2)}`);
 
     // Deduct coins immediately
     await prisma.$transaction([
       prisma.user.update({
         where: { id: userId },
-        data: { coinBalance: { decrement: coinsToRedeem } },
+        data: { coinBalance: { decrement: resolvedCoins } },
       }),
       prisma.transaction.create({
         data: {
           userId,
           type: redeemTransactionType(type),
-          amount: coinsToRedeem,
+          amount: resolvedCoins,
           refId: redemption.id,
           description: `Redemption: ${type} — ₹${amountInr.toFixed(2)}`,
         },
       }),
     ]);
 
+    // ── Fraud detection gate ──────────────────────────────────────────────────
+    // Run before any payment API is called. Suspicious requests are held as
+    // 'pending' for admin review — coins are already deducted (held in escrow).
+    const fraudResult = await checkRedemptionFraud(userId, resolvedCoins, amountInr);
+
+    if (fraudResult.requiresReview) {
+      const fraudMeta: Record<string, string> = {
+        fraudScore:     String(fraudResult.score),
+        fraudRiskLevel: fraudResult.riskLevel,
+        fraudSignals:   fraudResult.signals.map(s => s.code).join(','),
+        fraudDetails:   JSON.stringify(fraudResult.signals),
+      };
+      await prisma.redemptionRequest.update({
+        where: { id: redemption.id },
+        data: {
+          status: 'pending',
+          adminNote: `[AUTO-HOLD] Risk score ${fraudResult.score}/100 (${fraudResult.riskLevel.toUpperCase()}) — ${fraudResult.signals.map(s => s.code).join(', ')}`,
+          customFieldValues: fraudMeta,
+        },
+      });
+      logger.warn(`[FraudGate] HELD redemption ${redemption.id} | user=${userId} | score=${fraudResult.score} | signals=${fraudMeta.fraudSignals}`);
+      // Tell user it's under review (no mention of fraud — just processing)
+      success(res, {
+        redemptionId: redemption.id,
+        status:       'pending',
+        coinsRedeemed: resolvedCoins,
+        amountInr,
+      }, 'Your redemption is being reviewed. We\'ll process it within 24 hours.');
+      return;
+    }
+
     // Process by type
     let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (type === 'UPI' && upiId) {
-      result = await transferToUPI(orderId, upiId, amountInr, user.name || 'User', userId);
+      result = await transferToUPI(orderId, upiId, amountInr, user.name || 'User', userId, user.phone || undefined, user.email || undefined);
       await prisma.redemptionRequest.update({
         where: { id: redemption.id },
         data: {
@@ -199,7 +268,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
         },
       });
     } else if (type === 'BANK' && accountNumber) {
-      result = await transferToBank(orderId, accountNumber, ifscCode || '', accountName || '', amountInr, userId);
+      result = await transferToBank(orderId, accountNumber, ifscCode || '', accountName || '', amountInr, userId, transferMode || 'imps', user.phone || undefined, user.email || undefined);
       await prisma.redemptionRequest.update({
         where: { id: redemption.id },
         data: {
@@ -212,7 +281,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
       });
     } else if ((type === 'GIFT_CARD' || type === 'GAME_CREDIT' || type === 'RECHARGE' || type === 'VOUCHER') && productId) {
       result = await placeXoxodayOrder(
-        productId, denominationId || '', 1,
+        productId, resolvedDenomination, 1,
         userId, user.email || `${userId}@offerplay.in`, orderId
       );
       // Store pin + validity in customFieldValues (no migration needed)
@@ -242,7 +311,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
 
     // Refund coins on failure
     if (!result.success) {
-      await prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: coinsToRedeem } } });
+      await prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: resolvedCoins } } });
       await prisma.redemptionRequest.update({ where: { id: redemption.id }, data: { status: 'refunded' } });
       error(res, result.error || 'Redemption failed. Coins refunded.', 400);
       return;
@@ -262,7 +331,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
 
     success(res, {
       redemptionId: redemption.id,
-      type, coinsRedeemed: coinsToRedeem, amountInr,
+      type, coinsRedeemed: resolvedCoins, amountInr,
       status: 'completed',
       voucherCode: result.voucherCode,
       voucherPin:  result.voucherPin,
@@ -452,48 +521,54 @@ export async function getRedemptionDetails(req: Request, res: Response): Promise
       }),
     ]);
 
-    // Fraud score
     const accountAgeDays = Math.floor(
       (Date.now() - new Date(redemption.user?.createdAt || Date.now()).getTime()) / 86400000
     );
-    const [todayRedemptions, totalRedemptions, offerwallAgg] = await Promise.all([
+    const [todayRedemptions, totalRedemptions] = await Promise.all([
       prisma.redemptionRequest.count({
         where: { userId: redemption.userId, createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) } },
       }),
       prisma.redemptionRequest.count({ where: { userId: redemption.userId } }),
-      prisma.transaction.aggregate({
-        where: { userId: redemption.userId, type: { in: [TransactionType.EARN_OFFERWALL, TransactionType.EARN_TASK, TransactionType.EARN_SURVEY] }, amount: { gt: 0 } },
-        _sum: { amount: true },
-      }),
     ]);
 
-    const totalEarned = earnedAgg._sum.amount || 0;
+    const totalEarned   = earnedAgg._sum.amount || 0;
     const totalRedeemed = Math.abs(redeemedAgg._sum.amount || 0);
-    const offerwallEarnings = offerwallAgg._sum.amount || 0;
 
-    let fraudScore = 0;
-    if (accountAgeDays < 1)    fraudScore += 40;
-    else if (accountAgeDays < 7) fraudScore += 20;
-    if (todayRedemptions > 5)  fraudScore += 30;
-    else if (todayRedemptions > 3) fraudScore += 15;
-    if (!offerwallEarnings)    fraudScore += 25;
-    if (totalRedeemed > totalEarned * 0.9) fraudScore += 15;
-    fraudScore = Math.min(fraudScore, 100);
+    // Use stored fraud data if this was auto-held, otherwise compute live
+    const cfv = (redemption.customFieldValues as Record<string, string> | null) || {};
+    let fraudScore    = cfv.fraudScore    ? parseInt(cfv.fraudScore, 10) : undefined;
+    let fraudSignals: Array<{ code: string; weight: number; description: string }> | undefined;
+    let fraudRiskLevel: string | undefined = cfv.fraudRiskLevel;
+
+    if (cfv.fraudDetails) {
+      try { fraudSignals = JSON.parse(cfv.fraudDetails); } catch (_) { /* ignore */ }
+    }
+
+    // If no stored fraud data (old record or non-held), compute a live score
+    if (fraudScore === undefined) {
+      const { checkRedemptionFraud: liveCheck } = await import('../services/fraudDetectionService');
+      const live = await liveCheck(redemption.userId, redemption.coinsRedeemed, redemption.amountInr);
+      fraudScore    = live.score;
+      fraudSignals  = live.signals;
+      fraudRiskLevel = live.riskLevel;
+    }
 
     success(res, {
       redemption,
       userStats: {
         totalEarned,
         totalRedeemed,
-        currentBalance: redemption.user?.coinBalance || 0,
-        totalTransactions: totalAgg._count.id,
+        currentBalance:       redemption.user?.coinBalance || 0,
+        totalTransactions:    totalAgg._count.id,
         accountAgeDays,
         todayRedemptions,
-        offerwallEarnings,
+        offerwallEarnings:    0,  // kept for UI compat
         totalRedemptionCount: totalRedemptions,
       },
       transactions,
       fraudScore,
+      fraudRiskLevel,
+      fraudSignals,
     });
   } catch (err) {
     logger.error('getRedemptionDetails error:', err);
@@ -518,9 +593,11 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
     let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (redemption.type === 'UPI' && redemption.upiId) {
-      result = await transferToUPI(orderId, redemption.upiId, redemption.amountInr, redemption.user?.name || 'User', redemption.userId);
+      result = await transferToUPI(orderId, redemption.upiId, redemption.amountInr, redemption.user?.name || 'User', redemption.userId, redemption.user?.phone || undefined, redemption.user?.email || undefined);
     } else if (redemption.type === 'BANK' && redemption.accountNumber) {
-      result = await transferToBank(orderId, redemption.accountNumber, redemption.ifscCode || '', redemption.accountName || '', redemption.amountInr, redemption.userId);
+      const cfv = (redemption.customFieldValues as Record<string, string> | null) || {};
+      const savedMode = (cfv.transferMode as 'imps' | 'neft' | 'rtgs') || 'imps';
+      result = await transferToBank(orderId, redemption.accountNumber, redemption.ifscCode || '', redemption.accountName || '', redemption.amountInr, redemption.userId, savedMode, redemption.user?.phone || undefined, redemption.user?.email || undefined);
     } else if (['GIFT_CARD', 'GAME_CREDIT', 'RECHARGE', 'VOUCHER'].includes(redemption.type)) {
       if (redemption.productId) {
         result = await placeXoxodayOrder(
@@ -667,4 +744,63 @@ export async function listOptions(_req: Request, res: Response): Promise<void> {
 
 export async function redemptionHistory(req: Request, res: Response): Promise<void> {
   return getRedemptionHistory(req, res);
+}
+
+// ─── Admin: Reject a redemption ───────────────────────────────────────────────
+// refundCoins=true  → coins returned to user (default for fraud holds)
+// refundCoins=false → coins forfeited (use for confirmed fraud / abuse)
+export async function rejectRedemption(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params as { id: string };
+    const { reason, refundCoins = true } = req.body as { reason?: string; refundCoins?: boolean };
+
+    const redemption = await prisma.redemptionRequest.findUnique({ where: { id } });
+    if (!redemption) { error(res, 'Not found', 404); return; }
+    if (redemption.status === 'completed') { error(res, 'Cannot reject a completed redemption', 400); return; }
+    if (redemption.status === 'failed')    { error(res, 'Already rejected', 400); return; }
+
+    const rejectReason = reason || (refundCoins ? 'Redemption rejected — coins refunded' : 'Redemption rejected — coins forfeited');
+
+    await prisma.$transaction([
+      prisma.redemptionRequest.update({
+        where: { id },
+        data: {
+          status:           'failed',
+          failureReason:    rejectReason,
+          processedAt:      new Date(),
+          processedByAdmin: 'Admin',
+        },
+      }),
+      prisma.notification.create({
+        data: {
+          userId: redemption.userId,
+          title:  '❌ Redemption Rejected',
+          body:   rejectReason,
+          type:   'REDEMPTION',
+        },
+      }),
+      ...(refundCoins ? [
+        prisma.user.update({
+          where: { id: redemption.userId },
+          data:  { coinBalance: { increment: redemption.coinsRedeemed } },
+        }),
+        prisma.transaction.create({
+          data: {
+            userId:      redemption.userId,
+            type:        TransactionType.REFUND,
+            amount:      redemption.coinsRedeemed,
+            refId:       id,
+            description: `Refund: ${rejectReason}`,
+          },
+        }),
+      ] : []),
+    ]);
+
+    logger.info(`[RejectRedemption] id=${id} | userId=${redemption.userId} | refundCoins=${refundCoins} | coins=${redemption.coinsRedeemed} | reason=${rejectReason}`);
+    success(res, { refundCoins, coinsReturned: refundCoins ? redemption.coinsRedeemed : 0 },
+      refundCoins ? 'Redemption rejected and coins refunded' : 'Redemption rejected — coins forfeited');
+  } catch (err) {
+    logger.error('rejectRedemption error:', err);
+    error(res, 'Failed to reject', 500);
+  }
 }
