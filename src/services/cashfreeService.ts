@@ -80,7 +80,7 @@ function sanitisePhone(phone?: string | null): string {
 
 function sanitiseName(name?: string | null): string {
   const clean = (name || 'OfferPlay User').replace(/[^a-zA-Z\s]/g, '').trim();
-  return clean.length >= 2 ? clean.slice(0, 100) : 'OfferPlay User';
+  return clean.length >= 5 ? clean.slice(0, 100) : 'OfferPlay User';
 }
 
 // ─── Beneficiary ──────────────────────────────────────────────────────────────

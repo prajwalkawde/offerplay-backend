@@ -256,7 +256,7 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
     let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (type === 'UPI' && upiId) {
-      result = await transferToUPI(orderId, upiId, amountInr, user.name || 'User', userId, user.phone || undefined, user.email || undefined);
+      result = await transferToUPI(orderId, upiId, amountInr, user.name || 'OfferPlay User', userId, user.phone || undefined, user.email || undefined);
       await prisma.redemptionRequest.update({
         where: { id: redemption.id },
         data: {
@@ -593,7 +593,7 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
     let result: { success: boolean; referenceId?: string; voucherCode?: string; voucherPin?: string; voucherLink?: string; validity?: string; error?: string } = { success: false };
 
     if (redemption.type === 'UPI' && redemption.upiId) {
-      result = await transferToUPI(orderId, redemption.upiId, redemption.amountInr, redemption.user?.name || 'User', redemption.userId, redemption.user?.phone || undefined, redemption.user?.email || undefined);
+      result = await transferToUPI(orderId, redemption.upiId, redemption.amountInr, redemption.user?.name || 'OfferPlay User', redemption.userId, redemption.user?.phone || undefined, redemption.user?.email || undefined);
     } else if (redemption.type === 'BANK' && redemption.accountNumber) {
       const cfv = (redemption.customFieldValues as Record<string, string> | null) || {};
       const savedMode = (cfv.transferMode as 'imps' | 'neft' | 'rtgs') || 'imps';
