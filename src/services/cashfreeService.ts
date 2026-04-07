@@ -65,13 +65,14 @@ async function authHeadersV1() {
   };
 }
 
-// V2 headers — direct API key auth (no Bearer token)
-function authHeadersV2() {
+// V2 headers — Bearer token + x-client-id + x-api-version
+async function authHeadersV2() {
+  const token = await getCashfreeToken();
   return {
-    'x-client-id':     env.CASHFREE_APP_ID,
-    'x-client-secret': env.CASHFREE_SECRET_KEY,
-    'x-api-version':   '2023-08-01',
-    'Content-Type':    'application/json',
+    'Authorization': `Bearer ${token}`,
+    'x-client-id':   env.CASHFREE_APP_ID,
+    'x-api-version': '2023-08-01',
+    'Content-Type':  'application/json',
   };
 }
 
@@ -182,7 +183,7 @@ export const transferToUPI = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register UPI beneficiary' };
 
-    const headers = authHeadersV2();
+    const headers = await authHeadersV2();
     const body = {
       transfer_id:   orderId,
       amount,
@@ -249,7 +250,7 @@ export const transferToBank = async (
     });
     if (!beneOk) return { success: false, error: 'Could not register bank beneficiary' };
 
-    const headers = authHeadersV2();
+    const headers = await authHeadersV2();
     const body = {
       transfer_id:    orderId,
       amount,
@@ -285,7 +286,7 @@ export const transferToBank = async (
 
 export const checkTransferStatus = async (transferId: string): Promise<string> => {
   try {
-    const headers = authHeadersV2();
+    const headers = await authHeadersV2();
     const res     = await axios.get(`${getV2BaseUrl()}/v2/transfers?transferId=${transferId}`, { headers, timeout: 15000 });
     if (isCashfreeError(res.data)) return 'UNKNOWN';
     return (res.data?.status || 'UNKNOWN').toUpperCase();
