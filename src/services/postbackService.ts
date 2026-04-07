@@ -274,33 +274,48 @@ export async function receiveToroxPostback(
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     await queueFailedPostback(raw, 'user_not_found', 'torox');
-    return 'ERROR';
+    return 'OK';
   }
 
   const coins = Math.round(parseFloat(coinsRaw));
-  if (coins <= 0) return 'OK';
+  if (coins <= 0) { logger.warn('Torox coins=0, skipping', { userId, coinsRaw }); return 'OK'; }
 
   const multiplier = await getMultiplier(userId);
   const finalCoins = Math.round(coins * multiplier);
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
-    prisma.transaction.create({
-      data: {
-        userId,
-        type: TransactionType.EARN_OFFERWALL,
-        amount: finalCoins,
-        refId: transactionId,
-        description: `Torox offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
-      },
-    }),
-    prisma.offerwallLog.create({
-      data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
-    }),
-  ]);
-
-  if (offerId) await updateCompletionStats('torox', offerId);
-  await updateStreak(userId);
+  try {
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
+      prisma.transaction.create({
+        data: {
+          userId,
+          type: TransactionType.EARN_OFFERWALL,
+          amount: finalCoins,
+          refId: transactionId,
+          description: `Torox offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+        },
+      }),
+      prisma.offerwallLog.create({
+        data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
+      }),
+      prisma.notification.create({
+        data: {
+          userId,
+          title: 'Coins Earned! 🪙',
+          body: multiplier > 1
+            ? `🔥 ${finalCoins} coins earned! (${multiplier}x streak bonus)`
+            : `You earned ${finalCoins} coins from completing an offer!`,
+          type: 'COIN_EARNED',
+        },
+      }),
+    ]);
+    if (offerId) await updateCompletionStats('torox', offerId);
+    await updateStreak(userId);
+    logger.info('Torox coins credited', { userId, finalCoins, multiplier });
+  } catch (err) {
+    logger.error('Torox postback processing failed:', { message: (err as Error).message });
+    await queueFailedPostback(raw, 'processing_error', 'torox');
+  }
   return 'OK';
 }
 
@@ -316,7 +331,7 @@ export async function receiveAyetPostback(
 
   logger.info('AyeT postback received', { userId, coinsRaw, transactionId });
 
-  if (!userId) { logger.warn('AyeT postback missing userId'); return 'error'; }
+  if (!userId) { logger.warn('AyeT postback missing userId'); return '1'; }
 
   // Skip chargebacks (transaction_id prefixed with "r-")
   if (transactionId.startsWith('r-')) {
@@ -327,36 +342,51 @@ export async function receiveAyetPostback(
   const exists = await prisma.offerwallLog.findFirst({
     where: { offerId: transactionId, provider: 'ayet' },
   });
-  if (exists) return 'OK';
+  if (exists) { logger.info('AyeT duplicate postback', { transactionId }); return '1'; }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     await queueFailedPostback(raw, 'user_not_found', 'ayet');
-    return 'error';
+    return '1';
   }
 
   const coins = Math.round(parseFloat(coinsRaw));
-  if (coins <= 0) return 'OK';
+  if (coins <= 0) { logger.warn('AyeT coins=0, skipping', { userId, coinsRaw }); return '1'; }
 
   const multiplier = await getMultiplier(userId);
   const finalCoins = Math.round(coins * multiplier);
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
-    prisma.transaction.create({
-      data: {
-        userId,
-        type: TransactionType.EARN_OFFERWALL,
-        amount: finalCoins,
-        refId: transactionId,
-        description: `AyeT offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
-      },
-    }),
-    prisma.offerwallLog.create({
-      data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
-    }),
-  ]);
-
-  await updateStreak(userId);
-  return 'OK';
+  try {
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
+      prisma.transaction.create({
+        data: {
+          userId,
+          type: TransactionType.EARN_OFFERWALL,
+          amount: finalCoins,
+          refId: transactionId,
+          description: `AyeT offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+        },
+      }),
+      prisma.offerwallLog.create({
+        data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
+      }),
+      prisma.notification.create({
+        data: {
+          userId,
+          title: 'Coins Earned! 🪙',
+          body: multiplier > 1
+            ? `🔥 ${finalCoins} coins earned! (${multiplier}x streak bonus)`
+            : `You earned ${finalCoins} coins from completing an offer!`,
+          type: 'COIN_EARNED',
+        },
+      }),
+    ]);
+    await updateStreak(userId);
+    logger.info('AyeT coins credited', { userId, finalCoins, multiplier });
+  } catch (err) {
+    logger.error('AyeT postback processing failed:', { message: (err as Error).message });
+    await queueFailedPostback(raw, 'processing_error', 'ayet');
+  }
+  return '1';
 }

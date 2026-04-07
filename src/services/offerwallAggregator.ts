@@ -233,37 +233,52 @@ async function fetchAyetOffers(userId: string, _gaid: string, ip: string): Promi
 
     const result: any[] = [];
     for (const o of response.data?.offers || []) {
-      const coins = Math.round(o.payout || 0);
-      const events: any[] = (o.cpe_instructions || []).map((step: any, idx: number) => ({
-        eventId: step.event_name || String(idx),
-        eventName: cleanHtml(step.name || ''),
-        callToAction: cleanHtml(step.name || ''),
-        instructions: '',
-        coins: Math.round(step.payout || 0),
-        payoutUsd: 0,
-        order: idx + 1,
-        click: o.tracking_link || '',
-        status: step.completed ? 'completed' : 'pending',
-        completed: Boolean(step.completed),
-      }));
+      // Skip iOS-only offers
+      const platform = (o.platform || o.os || '').toLowerCase();
+      if (platform && platform !== 'android' && platform !== 'both' && platform !== 'all') continue;
+
+      const totalCoins = Math.round(o.payout || 0);
+      const steps: any[] = o.cpe_instructions || [];
+      const totalStepCoins = steps.reduce((sum: number, s: any) => sum + (s.payout || 0), 0);
+
+      // Distribute coins across steps proportionally if step payouts are 0
+      const events: any[] = steps.map((step: any, idx: number) => {
+        const stepCoins = step.payout
+          ? Math.round(step.payout)
+          : (steps.length > 0 ? Math.round(totalCoins / steps.length) : totalCoins);
+        return {
+          eventId: step.event_name || String(o.id) + '_' + idx,
+          eventName: cleanHtml(step.name || `Step ${idx + 1}`),
+          callToAction: cleanHtml(step.name || `Step ${idx + 1}`),
+          instructions: cleanHtml(step.instructions || ''),
+          coins: stepCoins,
+          payoutUsd: 0,
+          order: idx + 1,
+          click: o.tracking_link || '',
+          status: step.completed ? 'completed' : 'pending',
+          completed: Boolean(step.completed),
+        };
+      });
 
       if (events.length === 0) {
         events.push({
-          eventId: '', eventName: o.name || '', callToAction: 'Complete Offer',
-          instructions: '', coins, payoutUsd: 0, order: 1,
+          eventId: String(o.id || ''), eventName: o.name || '', callToAction: 'Complete Offer',
+          instructions: '', coins: totalCoins, payoutUsd: 0, order: 1,
           click: o.tracking_link || '', status: 'pending', completed: false,
         });
       }
+
+      if (!o.tracking_link) continue;
 
       result.push({
         provider: 'ayet',
         offerId: String(o.id || ''),
         name: o.name || '',
-        desc: o.name || '',
+        desc: cleanHtml(o.description || o.name || ''),
         icon: o.icon || '',
-        category: 'GAMING',
+        category: events.length > 1 ? 'GAMING' : 'APP',
         offType: events.length > 1 ? 'CPE' : 'CPI',
-        coins,
+        coins: totalCoins,
         payoutUsd: 0,
         click: o.tracking_link || '',
         events,
@@ -282,12 +297,12 @@ async function fetchAyetOffers(userId: string, _gaid: string, ip: string): Promi
 // ─── Torox Provider ───────────────────────────────────────────────────────────
 async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promise<any[]> {
   try {
-    if (!env.TOROX_API_KEY || !env.TOROX_PUB_ID) return [];
+    if (!env.TOROX_API_KEY || !env.TOROX_APP_ID) return [];
 
     const response = await axios.get('https://api.torox.io/api/v1/offers', {
       params: {
         api_key: env.TOROX_API_KEY,
-        app_id: env.TOROX_PUB_ID,
+        app_id: env.TOROX_APP_ID,
         uid: userId,
         device_id: gaid || 'unknown',
         ip,
@@ -297,7 +312,9 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promi
     });
 
     const data = response.data;
-    const raw: any[] = data.data || data.offers || data.result || (Array.isArray(data) ? data : []);
+    logger.info('Torox API raw response keys:', Object.keys(data || {}));
+    const raw: any[] = data.data || data.offers || data.result || data.list || (Array.isArray(data) ? data : []);
+    logger.info(`Torox: raw offer count=${raw.length}`);
 
     const result: any[] = [];
     for (const o of raw) {
