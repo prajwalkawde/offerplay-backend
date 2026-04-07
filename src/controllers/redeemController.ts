@@ -239,7 +239,10 @@ export async function requestRedemption(req: Request, res: Response): Promise<vo
         data: {
           status: 'pending',
           adminNote: `[AUTO-HOLD] Risk score ${fraudResult.score}/100 (${fraudResult.riskLevel.toUpperCase()}) — ${fraudResult.signals.map(s => s.code).join(', ')}`,
-          customFieldValues: fraudMeta,
+          customFieldValues: {
+            ...(redemption.customFieldValues as Record<string, string> || {}),
+            ...fraudMeta,
+          },
         },
       });
       logger.warn(`[FraudGate] HELD redemption ${redemption.id} | user=${userId} | score=${fraudResult.score} | signals=${fraudMeta.fraudSignals}`);
