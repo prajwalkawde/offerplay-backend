@@ -12,8 +12,8 @@ const getBaseUrl = (): string =>
 
 const getV2BaseUrl = (): string =>
   env.CASHFREE_ENV === 'PROD'
-    ? 'https://api.cashfree.com'
-    : 'https://sandbox.cashfree.com';
+    ? 'https://payout.cashfree.com'
+    : 'https://payout-gamma.cashfree.com';
 
 // ─── Token cache ──────────────────────────────────────────────────────────────
 let _cachedToken: string = '';
