@@ -55,10 +55,12 @@ async function getCashfreeToken(): Promise<string> {
 }
 
 // Headers for all authenticated V2 Payout calls
+// V2 endpoints need Bearer token AND x-client-id alongside it
 async function authHeaders() {
   const token = await getCashfreeToken();
   return {
     'Authorization': `Bearer ${token}`,
+    'x-client-id':   env.CASHFREE_APP_ID,
     'x-api-version': '2024-01-01',
     'Content-Type':  'application/json',
   };
@@ -97,7 +99,7 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
 
   // Check if beneficiary exists — must also validate body (HTTP 200 ≠ success)
   try {
-    const res = await axios.get(`${base}/beneficiary/${beneId}`, { headers, timeout: 15000 });
+    const res = await axios.get(`${base}/v2/beneficiary/${beneId}`, { headers, timeout: 15000 });
     if (!isCashfreeError(res.data)) {
       logger.info(`[Cashfree] Beneficiary ${beneId} already exists — reusing`);
       return true;
@@ -115,7 +117,7 @@ async function createOrGetBeneficiary(beneId: string, beneData: Record<string, s
   // Create beneficiary
   try {
     const res = await axios.post(
-      `${base}/beneficiary`,
+      `${base}/v2/beneficiary`,
       { beneficiary_id: beneId, ...beneData },
       { headers, timeout: 15000 },
     );
