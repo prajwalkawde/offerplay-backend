@@ -260,7 +260,7 @@ export async function receiveToroxPostback(
   const offerId       = pickStr(raw.offer_id) || '';
 
   logger.info('Torox postback received', { userId, coinsRaw, transactionId, offerId, sig: sig.slice(0,8) });
-  const valid = await verifyToroxSignature(userId, offerId, coinsRaw, sig);
+  const valid = await verifyToroxSignature(offerId, userId, sig);
   if (!valid) {
     // Log but don't block — Torox sig format unconfirmed, use idempotency as safety net
     logger.warn('Torox sig mismatch (continuing anyway)', { userId, sig: sig.slice(0,8) });
