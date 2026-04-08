@@ -34,13 +34,13 @@ export async function verifyPubscaleSignature(
 }
 
 export async function verifyToroxSignature(
-  userId: string,
   offerId: string,
-  coins: string,
+  userId: string,
   sig: string
 ): Promise<boolean> {
-  const data = `${userId}${offerId}${coins}`;
-  const expected = hmacSha256(env.TOROX_SECRET, data);
+  // Torox sig = md5(oid + "-" + user_id + "-" + APP_KEY)
+  const data = `${offerId}-${userId}-${env.TOROX_SECRET}`;
+  const expected = md5(data);
   return timingSafeEqual(expected, sig);
 }
 

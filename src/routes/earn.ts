@@ -67,6 +67,25 @@ router.get('/surveys', authMiddleware, getSurveys);
 router.get('/surveys/wall-url', authMiddleware, getSurveyWallUrl);
 router.get('/surveys/history', authMiddleware, getSurveyHistory);
 
+// ─── Torox wall URL (S2S session — token never sent to client) ────────────────
+router.get('/torox/wall-url', authMiddleware, async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const axios = (await import('axios')).default;
+    const { env } = await import('../config/env');
+    const resp = await axios.post(
+      `https://api.wall.torox.io/partner/session?placement_id=${env.TOROX_APP_ID}&token=${env.TOROX_API_KEY}`,
+      { player: { uid: userId } },
+      { timeout: 10000 },
+    );
+    const wallUrl: string = resp.data?.wall_url;
+    if (!wallUrl) throw new Error('No wall_url in response');
+    return success(res, { url: wallUrl });
+  } catch (err: any) {
+    return error(res, err.message || 'Failed to get Torox wall URL', 500);
+  }
+});
+
 // ─── Redeem (also mounted here for mobile app compatibility) ──────────────────
 router.get('/redeem/packages', getRedeemPackages);
 router.get('/redeem/gift-cards', authMiddleware, getGiftCards);

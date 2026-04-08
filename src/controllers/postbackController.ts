@@ -40,16 +40,17 @@ export async function pubscaleCallback(req: Request, res: Response): Promise<voi
 }
 
 export async function toroxCallback(req: Request, res: Response): Promise<void> {
-  const { user_id, offer_id, coins, sig } = req.query as Record<string, string>;
+  // Torox params: user_id, oid (offer id), amount, sig
+  const { user_id, oid, amount, sig } = req.query as Record<string, string>;
 
-  if (!user_id || !offer_id || !coins || !sig) {
+  if (!user_id || !oid || !amount || !sig) {
     res.status(400).send('Bad Request');
     return;
   }
 
-  const valid = await verifyToroxSignature(user_id, offer_id, coins, sig);
+  const valid = await verifyToroxSignature(oid, user_id, sig);
   if (!valid) {
-    logger.warn('Torox invalid signature', { user_id, offer_id });
+    logger.warn('Torox invalid signature', { user_id, oid });
     res.status(403).send('Invalid signature');
     return;
   }
@@ -57,13 +58,13 @@ export async function toroxCallback(req: Request, res: Response): Promise<void> 
   try {
     const result = await processPostback({
       userId: user_id,
-      offerId: offer_id,
-      coins: parseInt(coins, 10),
+      offerId: oid,
+      coins: Math.round(parseFloat(amount)),
       provider: 'torox',
       rawData: req.query as Record<string, string>,
     });
 
-    res.status(200).send(result.duplicate ? '2' : '1');
+    res.status(200).send(result.duplicate ? '1' : '1'); // Torox expects "1" for success
   } catch (err) {
     logger.error('Torox postback error', { err });
     res.status(500).send('0');
