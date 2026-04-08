@@ -21,12 +21,16 @@ export async function verifyPubscaleSignature(
   sig: string
 ): Promise<boolean> {
   // PubScale signature = MD5(secret_key + "." + user_id + "." + int(value) + "." + token)
+  // Try offerwall secret first (app_id 96743799), then API secret (app_id 27035898)
   const intValue = Math.trunc(parseFloat(value) || 0);
-  const template = `${env.PUBSCALE_SECRET}.${userId}.${intValue}.${token}`;
-  const expected = md5(template);
-  logger.info(`[PubScale] Sig template: ${env.PUBSCALE_SECRET.slice(0,4)}***.${userId}.${intValue}.${token.slice(0,8)}***`);
-  logger.info(`[PubScale] Expected: ${expected} | Received: ${sig}`);
-  return timingSafeEqual(expected, sig);
+  const secrets = [env.PUBSCALE_OFFERWALL_SECRET, env.PUBSCALE_SECRET].filter(Boolean);
+  for (const secret of secrets) {
+    const template = `${secret}.${userId}.${intValue}.${token}`;
+    const expected = md5(template);
+    logger.info(`[PubScale] Trying secret ${secret.slice(0,4)}***: expected=${expected} received=${sig}`);
+    if (timingSafeEqual(expected, sig)) return true;
+  }
+  return false;
 }
 
 export async function verifyToroxSignature(
