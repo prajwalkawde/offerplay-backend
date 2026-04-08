@@ -254,12 +254,12 @@ export async function receiveToroxPostback(
   raw: Record<string, any>
 ): Promise<string> {
   const userId        = pickStr(raw.user_id);
-  const coinsRaw      = pickStr(raw.reward) || pickStr(raw.coins) || '0';
-  const transactionId = pickStr(raw.transaction_id) || `tx_${Date.now()}`;
+  const coinsRaw      = pickStr(raw.amount) || pickStr(raw.reward) || pickStr(raw.coins) || '0';
+  const offerId       = pickStr(raw.oid) || pickStr(raw.offer_id) || '';
+  const transactionId = pickStr(raw.id) || pickStr(raw.transaction_id) || `tx_${Date.now()}`;
   const sig           = pickStr(raw.sig) || pickStr(raw.security_token) || '';
-  const offerId       = pickStr(raw.offer_id) || '';
 
-  logger.info('Torox postback received', { userId, coinsRaw, transactionId, offerId, sig: sig.slice(0,8) });
+  logger.info('Torox postback received', { userId, coinsRaw, offerId, transactionId, sig: sig.slice(0,8) });
   const valid = await verifyToroxSignature(offerId, userId, sig);
   if (!valid) {
     // Log but don't block — Torox sig format unconfirmed, use idempotency as safety net

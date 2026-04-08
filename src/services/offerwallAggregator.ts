@@ -299,39 +299,59 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promi
   try {
     if (!env.TOROX_API_KEY || !env.TOROX_APP_ID) return [];
 
-    const response = await axios.get('https://api.torox.io/api/v1/offers', {
+    // New Torox API: GET /partner/campaigns
+    const response = await axios.get('https://torox.io/partner/campaigns', {
       params: {
-        api_key: env.TOROX_API_KEY,
-        app_id: env.TOROX_APP_ID,
-        uid: userId,
-        device_id: gaid || 'unknown',
-        ip,
-        os: 'android',
+        source_id: env.TOROX_APP_ID,
+        token: env.TOROX_API_KEY,
+        goals: 'all',
       },
       timeout: 15000,
     });
 
     const data = response.data;
     logger.info('Torox API raw response keys:', Object.keys(data || {}));
-    const raw: any[] = data.data || data.offers || data.result || data.list || (Array.isArray(data) ? data : []);
-    logger.info(`Torox: raw offer count=${raw.length}`);
+    const raw: any[] = data.data || data.campaigns || data.offers || data.result || (Array.isArray(data) ? data : []);
+    logger.info(`Torox: raw campaign count=${raw.length}`);
 
     const result: any[] = [];
     for (const o of raw) {
+      const campaignId = String(o.campaign_id || o.id || '');
       const name = o.name || o.title || '';
-      const coins = Math.round(o.coins || o.payout || o.reward || 0);
-      const clickUrl = o.click || o.tracking_url || o.click_url || o.url || o.redirect_url || '';
-      if (!name || !clickUrl) continue;
+      if (!name || !campaignId) continue;
 
-      const events: any[] = (o.events || o.tasks || o.goals || []).map((ev: any) => ({
-        eventId: String(ev.event_id || ev.id || ''),
-        eventName: ev.event_name || ev.name || '',
-        callToAction: ev.call_to_action || ev.event_name || ev.name || '',
+      const payout = o.payout || o.revenue || o.reward || 0;
+      const coins = Math.round(parseFloat(String(payout)) * 100); // $1 = 100 coins
+
+      // Generate per-user click URL via Torox API
+      let clickUrl = '';
+      try {
+        const clickResp = await axios.get('https://torox.io/partner/user/click', {
+          params: {
+            source_id: env.TOROX_APP_ID,
+            token: env.TOROX_API_KEY,
+            uid: userId,
+            geo: 'IN',
+            campaign_id: campaignId,
+          },
+          timeout: 5000,
+        });
+        clickUrl = clickResp.data?.click_url || clickResp.data?.url || '';
+      } catch {
+        // fallback to iframe URL
+        clickUrl = `https://torox.io/ifr/show/${env.TOROX_PUB_ID}/${userId}/${env.TOROX_APP_ID}`;
+      }
+
+      const goals: any[] = o.goals || o.events || o.tasks || [];
+      const events: any[] = goals.map((ev: any, i: number) => ({
+        eventId: String(ev.goal_id || ev.id || i),
+        eventName: ev.goal_name || ev.name || '',
+        callToAction: ev.goal_name || ev.name || 'Complete',
         instructions: cleanHtml(ev.instructions || ''),
-        coins: Math.round(ev.coins || ev.payout || ev.reward || 0),
-        payoutUsd: parseFloat(ev.payout_usd || '0'),
-        order: parseInt(ev.order || '1'),
-        click: ev.click || ev.tracking_url || ev.url || clickUrl,
+        coins: Math.round(parseFloat(String(ev.payout || ev.revenue || 0)) * 100),
+        payoutUsd: parseFloat(String(ev.payout || 0)),
+        order: i + 1,
+        click: clickUrl,
         status: 'pending',
         completed: false,
       }));
@@ -339,28 +359,28 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promi
       if (events.length === 0) {
         events.push({
           eventId: '', eventName: name, callToAction: 'Complete Offer',
-          instructions: o.desc || o.description || '', coins, payoutUsd: 0,
+          instructions: o.description || '', coins, payoutUsd: parseFloat(String(payout)),
           order: 1, click: clickUrl, status: 'pending', completed: false,
         });
       }
 
       result.push({
         provider: 'torox',
-        offerId: String(o.offer_id || o.id || ''),
+        offerId: campaignId,
         name,
-        desc: o.desc || o.description || name,
+        desc: o.description || o.desc || name,
         icon: o.icon || o.image || o.icon_url || '',
         category: 'APP',
         offType: events.length > 1 ? 'CPE' : 'CPI',
         coins,
-        payoutUsd: parseFloat(o.payout_usd || '0'),
+        payoutUsd: parseFloat(String(payout)),
         click: clickUrl,
         events,
         os: 'android',
       });
     }
 
-    logger.info(`Torox: ${result.length} offers fetched`);
+    logger.info(`Torox: ${result.length} offers built`);
     return result;
   } catch (err) {
     logger.error('Torox fetch error:', { message: (err as Error).message });
