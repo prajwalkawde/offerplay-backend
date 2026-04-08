@@ -15,6 +15,7 @@ import {
   enhanceOffer,
   getTransactions,
   getReferral,
+  getSurveyHistory,
 } from '../controllers/earnController';
 import {
   getStreakData,
@@ -64,6 +65,7 @@ router.get('/streak', authMiddleware, getStreak);
 router.post('/offers/enhance', authMiddleware, enhanceOffer);
 router.get('/surveys', authMiddleware, getSurveys);
 router.get('/surveys/wall-url', authMiddleware, getSurveyWallUrl);
+router.get('/surveys/history', authMiddleware, getSurveyHistory);
 
 // ─── Redeem (also mounted here for mobile app compatibility) ──────────────────
 router.get('/redeem/packages', getRedeemPackages);

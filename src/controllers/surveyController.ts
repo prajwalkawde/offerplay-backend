@@ -9,11 +9,11 @@ export async function getSurveys(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true },
+      select: { email: true, name: true },
     });
     const rawIp = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || req.ip || '';
     const realIp = rawIp.split(',')[0].trim();
-    const surveys = await getCPXSurveys(userId, user?.email ?? undefined, realIp);
+    const surveys = await getCPXSurveys(userId, user?.email ?? undefined, realIp, user?.name ?? undefined);
     success(res, { total: surveys.length, surveys });
   } catch (err) {
     logger.error('getSurveys error:', err);
@@ -26,9 +26,9 @@ export async function getSurveyWallUrl(req: Request, res: Response): Promise<voi
     const userId = req.userId!;
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true },
+      select: { email: true, name: true },
     });
-    const url = getCPXSurveyWallUrl(userId, user?.email ?? undefined);
+    const url = getCPXSurveyWallUrl(userId, user?.email ?? undefined, user?.name ?? undefined);
     success(res, { url });
   } catch (err) {
     error(res, 'Failed to get survey wall URL', 500);

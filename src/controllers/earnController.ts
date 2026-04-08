@@ -379,6 +379,22 @@ Return ONLY this JSON, no other text:
   }
 }
 
+// ─── GET /api/earn/surveys/history ───────────────────────────────────────────
+export async function getSurveyHistory(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const surveys = await prisma.transaction.findMany({
+      where: { userId, type: 'EARN_SURVEY' },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: { id: true, amount: true, description: true, createdAt: true, refId: true },
+    });
+    success(res, surveys);
+  } catch (err) {
+    error(res, 'Failed to get survey history', 500);
+  }
+}
+
 // ─── GET /api/earn/transactions ──────────────────────────────────────────────
 export async function getTransactions(req: Request, res: Response): Promise<void> {
   try {

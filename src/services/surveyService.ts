@@ -12,6 +12,7 @@ export const getCPXSurveys = async (
   userId: string,
   userEmail?: string,
   userIp?: string,
+  username?: string,
 ): Promise<any[]> => {
   try {
     if (!env.CPX_APP_ID) return getMockSurveys();
@@ -33,8 +34,10 @@ export const getCPXSurveys = async (
           ext_user_id: userId,
           secure_hash: hash,
           output_method: 'api',
+          username: username || '',
           email: userEmail || '',
           subid_1: userId,
+          subid_2: '',
           ip_user: userIp || '',
         },
         timeout: 10000,
@@ -90,7 +93,7 @@ const getRandomColor = (id: any): string => {
 };
 
 // ─── Survey wall URL ──────────────────────────────────────────────────────────
-export const getCPXSurveyWallUrl = (userId: string, userEmail?: string): string => {
+export const getCPXSurveyWallUrl = (userId: string, userEmail?: string, username?: string): string => {
   if (!env.CPX_APP_ID) return '';
 
   const hash = crypto
@@ -102,8 +105,10 @@ export const getCPXSurveyWallUrl = (userId: string, userEmail?: string): string 
     app_id: env.CPX_APP_ID,
     ext_user_id: userId,
     secure_hash: hash,
+    username: username || '',
     email: userEmail || '',
     subid_1: userId,
+    subid_2: '',
   });
 
   return `https://offers.cpx-research.com/index.php?${params.toString()}`;
