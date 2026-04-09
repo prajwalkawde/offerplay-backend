@@ -208,14 +208,96 @@ export async function updateIPLContest(req: Request, res: Response): Promise<voi
 export async function deleteIPLContest(req: Request, res: Response): Promise<void> {
   const { contestId } = req.params as { contestId: string };
 
-  const entryCount = await prisma.iplContestEntry.count({ where: { contestId } });
-  if (entryCount > 0) {
-    error(res, 'Cannot delete a contest that already has participants', 400);
-    return;
+  const contest = await prisma.iplContest.findUnique({
+    where: { id: contestId },
+    include: {
+      entries: { select: { userId: true, coinsDeducted: true } },
+      match: { select: { team1: true, team2: true } },
+    },
+  });
+
+  if (!contest) { error(res, 'Contest not found', 404); return; }
+
+  const entries = contest.entries;
+  const refundedUserIds: string[] = [];
+
+  // Refund participants
+  if (entries.length > 0) {
+    await prisma.$transaction(async (tx) => {
+      for (const entry of entries) {
+        if (contest.entryType === 'COINS' && entry.coinsDeducted > 0) {
+          // Refund coins
+          await tx.user.update({
+            where: { id: entry.userId },
+            data: { coinBalance: { increment: entry.coinsDeducted } },
+          });
+          await tx.transaction.create({
+            data: {
+              userId: entry.userId,
+              type: 'REFUND' as any,
+              coins: entry.coinsDeducted,
+              description: `Refund: ${contest.name} cancelled`,
+            },
+          });
+        } else if (contest.entryType === 'TICKET' && contest.ticketCost > 0) {
+          // Refund ticket
+          await tx.user.update({
+            where: { id: entry.userId },
+            data: { ticketBalance: { increment: contest.ticketCost } },
+          });
+        }
+        refundedUserIds.push(entry.userId);
+      }
+    });
   }
 
+  // Delete entries then contest
+  await prisma.iplContestEntry.deleteMany({ where: { contestId } });
   await prisma.iplContest.delete({ where: { id: contestId } });
-  success(res, null, 'Contest deleted');
+
+  // Send cancellation notification
+  if (refundedUserIds.length > 0) {
+    const { sendBulkNotification } = await import('../services/notificationService');
+    const refundMsg = contest.entryType === 'COINS'
+      ? ` Your entry fee has been refunded.`
+      : contest.entryType === 'TICKET'
+      ? ` Your ticket has been refunded.`
+      : '';
+    await sendBulkNotification(
+      refundedUserIds,
+      '❌ Contest Cancelled',
+      `${contest.match.team1} vs ${contest.match.team2} — "${contest.name}" has been cancelled.${refundMsg}`,
+      'CONTEST_CANCELLED'
+    ).catch(() => {});
+  }
+
+  logger.info(`IPL contest cancelled: ${contest.name} (${contestId}), refunded ${refundedUserIds.length} participants`);
+  success(res, { refundedCount: refundedUserIds.length }, `Contest cancelled. ${refundedUserIds.length} participants refunded.`);
+}
+
+// ─── Delete all questions for a match ─────────────────────────────────────────
+export async function deleteMatchAllQuestions(req: Request, res: Response): Promise<void> {
+  const { matchId } = req.params as { matchId: string };
+  const { language } = req.query as { language?: string };
+
+  const where: any = { matchId };
+  if (language) where.language = language;
+
+  // Only delete questions not linked to predictions
+  const questions = await prisma.iplQuestion.findMany({ where, select: { id: true } });
+  const qIds = questions.map(q => q.id);
+  if (qIds.length === 0) { success(res, { deleted: 0 }, 'No questions to delete'); return; }
+
+  const linked = await prisma.iplPrediction.findMany({
+    where: { questionId: { in: qIds } },
+    select: { questionId: true },
+  });
+  const linkedSet = new Set(linked.map(p => p.questionId));
+  const deletable = qIds.filter(id => !linkedSet.has(id));
+
+  const result = await prisma.iplQuestion.deleteMany({ where: { id: { in: deletable } } });
+  const skipped = qIds.length - deletable.length;
+  success(res, { deleted: result.count, skipped }, `Deleted ${result.count} questions${skipped > 0 ? `, skipped ${skipped} (linked to predictions)` : ''}`);
 }
 
 // ─── Publish contest ───────────────────────────────────────────────────────────

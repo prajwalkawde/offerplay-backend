@@ -27,6 +27,7 @@ import {
   generateIPLQuestions, getIPLAnalytics, deleteAdminIPLMatch,
   fetchIPLSchedule,
   syncTeamLogos,
+  deleteMatchAllQuestions,
 } from '../controllers/iplAdminController';
 import {
   listOfferwallOffers, blacklistOffer, whitelistOffer, getQualityReport,
@@ -128,6 +129,7 @@ router.get('/ipl/match/:id/questions', getMatchQuestions);
 router.get('/ipl/matches/:id/questions', getMatchQuestions);
 router.put('/ipl/match/:id/questions', updateMatchQuestions);
 router.delete('/ipl/questions/:qid', deleteIplQuestion);
+router.delete('/ipl/matches/:matchId/questions', deleteMatchAllQuestions);
 router.post('/ipl/matches/:matchId/save-questions', saveEditedQuestions);
 
 // IPL — Contest lifecycle
