@@ -448,4 +448,24 @@ const getMockProducts = (): any[] => [
     ],
     minValue: 75, maxValue: 5000, isActive: true,
   },
+  {
+    id: 'googleplay_in', name: 'Google Play Redeem Code', description: 'Redeem on Google Play Store',
+    imageUrl: '', category: 'Gaming', currencyCode: 'INR',
+    denominations: [
+      { id: 'gp_100',  value: 100,  currencyCode: 'INR', discount: 0 },
+      { id: 'gp_250',  value: 250,  currencyCode: 'INR', discount: 0 },
+      { id: 'gp_500',  value: 500,  currencyCode: 'INR', discount: 0 },
+      { id: 'gp_1000', value: 1000, currencyCode: 'INR', discount: 0 },
+    ],
+    minValue: 100, maxValue: 5000, isActive: true,
+  },
+  {
+    id: 'myntra_in', name: 'Myntra Gift Card', description: 'Shop fashion on Myntra',
+    imageUrl: '', category: 'Shopping', currencyCode: 'INR',
+    denominations: [
+      { id: 'myn_500',  value: 500,  currencyCode: 'INR', discount: 0 },
+      { id: 'myn_1000', value: 1000, currencyCode: 'INR', discount: 0 },
+    ],
+    minValue: 500, maxValue: 5000, isActive: true,
+  },
 ];

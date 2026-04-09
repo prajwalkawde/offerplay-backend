@@ -1,6 +1,52 @@
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 
+// ─── OneSignal REST API push ──────────────────────────────────────────────────
+async function pushViaOneSignal(
+  playerIds: string[],
+  title: string,
+  body: string,
+  type: string,
+): Promise<void> {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+  if (!appId || !apiKey) {
+    logger.warn('[OneSignal] ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY not set — skipping push');
+    return;
+  }
+  if (playerIds.length === 0) return;
+
+  const axios = (await import('axios')).default;
+
+  // OneSignal allows max 2000 player IDs per request
+  for (let i = 0; i < playerIds.length; i += 2000) {
+    const batch = playerIds.slice(i, i + 2000);
+    try {
+      await axios.post(
+        'https://onesignal.com/api/v1/notifications',
+        {
+          app_id: appId,
+          include_player_ids: batch,
+          headings: { en: title },
+          contents: { en: body },
+          data: { type },
+          priority: 10,
+        },
+        {
+          headers: {
+            Authorization: `Key ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        },
+      );
+      logger.info(`[OneSignal] Pushed to ${batch.length} devices (batch ${Math.floor(i / 2000) + 1})`);
+    } catch (err: any) {
+      logger.error(`[OneSignal] Push batch failed: ${err.response?.data?.errors ?? err.message}`);
+    }
+  }
+}
+
 export async function createNotification(
   userId: string,
   title: string,
@@ -8,37 +54,6 @@ export async function createNotification(
   type: string
 ): Promise<void> {
   await prisma.notification.create({ data: { userId, title, body, type } });
-}
-
-export async function sendPushNotification(
-  fcmToken: string,
-  title: string,
-  body: string,
-  data?: Record<string, string>
-): Promise<void> {
-  // FCM push via HTTP v1 API
-  try {
-    const { env } = await import('../config/env');
-    if (!env.FCM_SERVER_KEY || env.FCM_SERVER_KEY === 'your-fcm-key') return;
-
-    const axios = (await import('axios')).default;
-    await axios.post(
-      'https://fcm.googleapis.com/fcm/send',
-      {
-        to: fcmToken,
-        notification: { title, body },
-        data: data ?? {},
-      },
-      {
-        headers: {
-          Authorization: `key=${env.FCM_SERVER_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-  } catch (err) {
-    logger.error('FCM push failed', { err });
-  }
 }
 
 export async function getUserNotifications(
@@ -78,33 +93,25 @@ export async function sendBulkNotification(
 ): Promise<void> {
   if (userIds.length === 0) return;
 
+  // 1. Save in-app notifications
   await prisma.notification.createMany({
     data: userIds.map(userId => ({ userId, title, body, type })),
     skipDuplicates: true,
   }).catch(() => {});
 
+  // 2. Fetch OneSignal player IDs for these users
   const users = await prisma.user.findMany({
-    where: { id: { in: userIds }, fcmToken: { not: null } },
-    select: { fcmToken: true },
+    where: { id: { in: userIds }, oneSignalPlayerId: { not: null } },
+    select: { oneSignalPlayerId: true },
   });
 
-  const tokens = users.map(u => u.fcmToken).filter(Boolean) as string[];
-  if (tokens.length === 0) return;
-
-  try {
-    const admin = require('firebase-admin') as typeof import('firebase-admin');
-    for (let i = 0; i < tokens.length; i += 500) {
-      await admin.messaging().sendEachForMulticast({
-        tokens: tokens.slice(i, i + 500),
-        notification: { title, body },
-        data: { type },
-        android: { priority: 'high', notification: { sound: 'default', channelId: 'offerplay_main' } },
-      });
-    }
-    logger.info(`sendBulkNotification: pushed to ${tokens.length} devices`);
-  } catch (err) {
-    logger.error('Bulk push failed:', err);
+  const playerIds = users.map(u => u.oneSignalPlayerId).filter(Boolean) as string[];
+  if (playerIds.length === 0) {
+    logger.warn(`sendBulkNotification: no OneSignal IDs found for ${userIds.length} users`);
+    return;
   }
+
+  await pushViaOneSignal(playerIds, title, body, type);
 }
 
 export async function sendToAll(
@@ -114,21 +121,31 @@ export async function sendToAll(
 ): Promise<void> {
   const users = await prisma.user.findMany({
     where: { status: 'ACTIVE' },
-    select: { id: true, fcmToken: true },
+    select: { id: true, oneSignalPlayerId: true },
     take: 10000,
   });
 
-  // Write DB notifications in bulk via createMany
+  // 1. Write DB notifications in bulk
   await prisma.notification.createMany({
     data: users.map(u => ({ userId: u.id, title, body, type })),
     skipDuplicates: true,
   });
 
-  // Best-effort FCM push to users who have a token
-  const tokenUsers = users.filter(u => u.fcmToken);
-  await Promise.allSettled(
-    tokenUsers.map(u => sendPushNotification(u.fcmToken!, title, body, { type }))
-  );
+  // 2. Push to all users with a OneSignal player ID
+  const playerIds = users.map(u => u.oneSignalPlayerId).filter(Boolean) as string[];
+  if (playerIds.length > 0) {
+    await pushViaOneSignal(playerIds, title, body, type);
+  }
 
   logger.info(`sendToAll: notified ${users.length} users — type=${type}`);
+}
+
+// Legacy single-token FCM — kept for any callers that still use it
+export async function sendPushNotification(
+  fcmToken: string,
+  title: string,
+  body: string,
+  _data?: Record<string, string>
+): Promise<void> {
+  logger.warn('sendPushNotification (FCM) called but app uses OneSignal — token ignored');
 }

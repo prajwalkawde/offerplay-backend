@@ -374,7 +374,7 @@ router.get('/xoxoday/products', async (req, res) => {
     };
 
     const products = await getXoxodayProducts(options);
-    const MOCK_IDS = new Set(['amazon_in', 'flipkart_in', 'paytm_in', 'freefire_in', 'bgmi_in']);
+    const MOCK_IDS = new Set(['amazon_in', 'flipkart_in', 'paytm_in', 'freefire_in', 'bgmi_in', 'googleplay_in', 'myntra_in']);
     const isMock   = products.length > 0 && products.every((p: any) => MOCK_IDS.has(p.id));
 
     res.json({

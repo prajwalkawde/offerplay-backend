@@ -24,13 +24,10 @@ export const sendOneSignalNotification = async (
         headings: { en: title },
         contents: { en: body },
         data: data ?? {},
-        android_channel_id: 'offerplay_main',
-        android_accent_color: 'FF7B2FBE',
-        small_icon: 'ic_notification',
       },
       {
         headers: {
-          Authorization: `Basic ${env.ONESIGNAL_REST_API_KEY}`,
+          Authorization: `Key ${env.ONESIGNAL_REST_API_KEY}`,
           'Content-Type': 'application/json',
         },
       }

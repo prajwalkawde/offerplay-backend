@@ -666,55 +666,81 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
     data: { contestStatus: 'completed' },
   });
 
-  // Step 4: Send push notifications to all participants
+  // Step 4: Send personalized push + in-app notifications to all participants
   try {
     const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
-    const allParticipantIds = [...new Set(
-      contests.flatMap(c => c.entries.map(e => e.userId))
-    )];
+    const { sendBulkNotification } = await import('../services/notificationService');
 
-    if (allParticipantIds.length > 0 && match) {
-      // Collect all rankings across contests for notification text
-      const allRankings: Record<string, number> = {};
-      for (const contest of contests) {
-        const userIds = contest.entries.map(e => e.userId);
-        const predictions = await prisma.iplPrediction.findMany({
-          where: { matchId, userId: { in: userIds } },
-        });
-        const updatedQuestions = await prisma.iplQuestion.findMany({ where: { matchId } });
-        const scores: Record<string, number> = {};
-        for (const e of contest.entries) scores[e.userId] = 0;
-        for (const pred of predictions) {
-          const q = updatedQuestions.find(x => x.id === pred.questionId);
-          if (q?.correctAnswer && pred.answer === q.correctAnswer) {
-            scores[pred.userId] = (scores[pred.userId] ?? 0) + q.points;
-          }
+    // Build best rank per user across all contests in this match
+    const bestRank: Record<string, number> = {};
+    const coinsWon: Record<string, number> = {};
+    for (const contest of contests) {
+      for (const entry of contest.entries) {
+        const rank = entry.rank ?? 999;
+        if (bestRank[entry.userId] === undefined || rank < bestRank[entry.userId]) {
+          bestRank[entry.userId] = rank;
         }
-        Object.entries(scores)
-          .sort(([, a], [, b]) => b - a)
-          .forEach(([uid], i) => { allRankings[uid] = Math.min(allRankings[uid] ?? 999, i + 1); });
+        coinsWon[entry.userId] = (coinsWon[entry.userId] ?? 0) + (entry.coinsWon ?? 0);
+      }
+    }
+
+    if (match) {
+      const matchLabel = `${match.team1} vs ${match.team2}`;
+
+      // Group users: rank 1 (champion), rank 2-3 (podium), rank 4-10 (winners), rest (participants)
+      const rank1Users:    string[] = [];
+      const podiumUsers:   string[] = [];
+      const winnerUsers:   string[] = [];
+      const otherUsers:    string[] = [];
+
+      for (const [userId, rank] of Object.entries(bestRank)) {
+        if (rank === 1)         rank1Users.push(userId);
+        else if (rank <= 3)     podiumUsers.push(userId);
+        else if (rank <= 10)    winnerUsers.push(userId);
+        else                    otherUsers.push(userId);
       }
 
-      await prisma.notification.createMany({
-        data: allParticipantIds.map(userId => {
-          const rank = allRankings[userId];
-          const isWinner = rank !== undefined && rank <= 10;
-          return {
-            userId,
-            title: `🏏 ${match.team1} vs ${match.team2} Results!`,
-            body: isWinner
-              ? `🎉 You won! Rank #${rank}. Coins credited to your account!`
-              : `${winner} won the match! Check your results in the app.`,
-            type: 'IPL_RESULT',
-          };
-        }),
-        skipDuplicates: true,
-      });
+      // 🥇 Rank 1
+      if (rank1Users.length > 0) {
+        await sendBulkNotification(
+          rank1Users,
+          `🏆 You're the CHAMPION! ${matchLabel}`,
+          `🥇 Rank #1 — ${(coinsWon[rank1Users[0]] ?? 0).toLocaleString()} coins credited! Collect your prize.`,
+          'IPL_RESULT',
+        );
+      }
+      // 🥈🥉 Rank 2-3
+      for (const userId of podiumUsers) {
+        await sendBulkNotification(
+          [userId],
+          `🎉 Podium Finish! ${matchLabel}`,
+          `🏅 Rank #${bestRank[userId]} — ${(coinsWon[userId] ?? 0).toLocaleString()} coins credited to your wallet!`,
+          'IPL_RESULT',
+        );
+      }
+      // Top 10 winners
+      if (winnerUsers.length > 0) {
+        await sendBulkNotification(
+          winnerUsers,
+          `🎊 You Won! ${matchLabel}`,
+          `You finished in the Top 10! Coins credited. Tap to see your results.`,
+          'IPL_RESULT',
+        );
+      }
+      // Everyone else — just the result
+      if (otherUsers.length > 0) {
+        await sendBulkNotification(
+          otherUsers,
+          `🏏 Match Result: ${matchLabel}`,
+          `${winner} won the match! Check your rank & leaderboard in the app.`,
+          'IPL_RESULT',
+        );
+      }
 
-      logger.info(`processIPLResults: sent ${allParticipantIds.length} result notifications`);
+      logger.info(`processIPLResults: notifications — rank1=${rank1Users.length}, podium=${podiumUsers.length}, winners=${winnerUsers.length}, others=${otherUsers.length}`);
     }
   } catch (notifErr) {
-    logger.warn('Notification sending failed:', notifErr);
+    logger.warn('Result notification failed (non-critical):', notifErr);
   }
 
   logger.info(`processIPLResults: match ${matchId}, ${contests.length} contests, ${totalWinners} winners, ${totalCoinsDistributed} coins`);

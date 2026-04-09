@@ -24,7 +24,34 @@ router.get('/me/onesignal-debug', async (req: Request, res: Response) => {
     where: { id: req.userId! },
     select: { id: true, name: true, phone: true, oneSignalPlayerId: true },
   });
-  return success(res, user);
+  const hasApiKey = !!(process.env.ONESIGNAL_REST_API_KEY);
+  const hasAppId  = !!(process.env.ONESIGNAL_APP_ID);
+  return success(res, {
+    user,
+    config: { hasAppId, hasApiKey },
+    status: user?.oneSignalPlayerId
+      ? (hasApiKey ? 'ready' : 'player_id_saved_but_no_api_key')
+      : 'no_player_id_registered',
+  });
+});
+
+// Test: send a push notification to yourself
+router.post('/me/onesignal-test', async (req: Request, res: Response) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId! },
+    select: { id: true, oneSignalPlayerId: true },
+  });
+  if (!user?.oneSignalPlayerId) {
+    return error(res, 'No OneSignal player ID registered for this user', 400);
+  }
+  const { sendBulkNotification } = await import('../services/notificationService');
+  await sendBulkNotification(
+    [user.id],
+    '🔔 Test Notification',
+    'OneSignal push is working!',
+    'TEST',
+  );
+  return success(res, { playerId: user.oneSignalPlayerId }, 'Test notification sent');
 });
 
 router.post('/me/onesignal-token', async (req: Request, res: Response) => {

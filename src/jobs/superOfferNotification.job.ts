@@ -49,7 +49,7 @@ async function sendOneSignalNotification(uid: string, title: string, body: strin
       ONESIGNAL_API,
       {
         app_id: env.ONESIGNAL_APP_ID,
-        filters: [{ field: 'tag', key: 'uid', relation: '=', value: uid }],
+        include_external_user_ids: [uid],
         headings: { en: title },
         contents: { en: body },
         data: { type: 'super_offer_ready' },
@@ -57,7 +57,7 @@ async function sendOneSignalNotification(uid: string, title: string, body: strin
       {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Basic ${env.ONESIGNAL_REST_API_KEY}`,
+          Authorization: `Key ${env.ONESIGNAL_REST_API_KEY}`,
         },
         timeout: 10000,
       }

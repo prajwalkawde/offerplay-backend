@@ -217,7 +217,13 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
     }
 
     // Block joining after registration deadline (all times compared in UTC)
-    if (contest.regCloseTime && new Date() > new Date(contest.regCloseTime)) {
+    // Fall back to match start time if no explicit regCloseTime is set
+    const deadline =
+      contest.regCloseTime ||
+      contest.match.regCloseTime ||
+      contest.match.registrationCloseTime ||
+      contest.match.matchDate;
+    if (deadline && new Date() > new Date(deadline)) {
       error(res, 'Registration is closed for this contest', 400); return;
     }
 
@@ -425,13 +431,29 @@ export async function savePredictions(req: Request, res: Response): Promise<void
     // Verify user joined this contest
     const entry = await prisma.iplContestEntry.findFirst({
       where: { userId, contestId },
-      include: { contest: { select: { matchId: true, questionsLockAt: true } } },
+      include: {
+        contest: {
+          select: {
+            matchId: true, questionsLockAt: true, regCloseTime: true,
+            match: { select: { matchDate: true, registrationCloseTime: true, regCloseTime: true, status: true } },
+          },
+        },
+      },
     });
     if (!entry) { error(res, 'Join the contest first', 400); return; }
 
-    // Server-side lock check
-    if (entry.contest.questionsLockAt && entry.contest.questionsLockAt <= new Date()) {
+    // Server-side lock check — use questionsLockAt, then fall back to match start time
+    const lockTime =
+      entry.contest.questionsLockAt ||
+      entry.contest.regCloseTime ||
+      entry.contest.match.regCloseTime ||
+      entry.contest.match.registrationCloseTime ||
+      entry.contest.match.matchDate;
+    if (lockTime && new Date() >= new Date(lockTime)) {
       error(res, 'Predictions are locked for this contest', 400); return;
+    }
+    if (entry.contest.match.status === 'LIVE' || entry.contest.match.status === 'completed') {
+      error(res, 'Predictions are locked — match has started', 400); return;
     }
 
     const matchId = entry.contest.matchId;
