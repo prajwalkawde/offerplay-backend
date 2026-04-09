@@ -1040,7 +1040,7 @@ const IPL_2026_SCHEDULE = [
 //   If neither is provided, defaults to today onwards.
 export async function fetchIPLSchedule(req: Request, res: Response): Promise<void> {
   try {
-    const { fromDate, toDate } = req.body as { fromDate?: string; toDate?: string };
+    const { fromDate, toDate } = (req.body || {}) as { fromDate?: string; toDate?: string };
 
     // ── Build date window ────────────────────────────────────────────────────
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
