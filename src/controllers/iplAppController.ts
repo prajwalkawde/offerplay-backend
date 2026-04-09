@@ -404,9 +404,14 @@ export async function savePredictions(req: Request, res: Response): Promise<void
     // Verify user joined this contest
     const entry = await prisma.iplContestEntry.findFirst({
       where: { userId, contestId },
-      include: { contest: { select: { matchId: true } } },
+      include: { contest: { select: { matchId: true, questionsLockAt: true } } },
     });
     if (!entry) { error(res, 'Join the contest first', 400); return; }
+
+    // Server-side lock check
+    if (entry.contest.questionsLockAt && entry.contest.questionsLockAt <= new Date()) {
+      error(res, 'Predictions are locked for this contest', 400); return;
+    }
 
     const matchId = entry.contest.matchId;
 

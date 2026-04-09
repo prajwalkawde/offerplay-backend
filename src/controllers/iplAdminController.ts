@@ -276,21 +276,28 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     prisma.iplQuestion.findMany({ where: { matchId: contest.matchId } }),
   ]);
 
-  // Score each user
+  // Score each user — compare answer to correctAnswer directly
   const userScores: Record<string, number> = {};
   for (const entry of contest.entries) userScores[entry.userId] = 0;
 
   for (const pred of predictions) {
-    if (!pred.isCorrect) continue;
     const question = questions.find(q => q.id === pred.questionId);
-    if (question) userScores[pred.userId] = (userScores[pred.userId] ?? 0) + question.points;
+    if (!question?.correctAnswer) continue;
+    if (pred.answer === question.correctAnswer) {
+      userScores[pred.userId] = (userScores[pred.userId] ?? 0) + question.points;
+    }
   }
 
   const rankings = Object.entries(userScores)
     .sort(([, a], [, b]) => b - a)
     .map(([userId, score], i) => ({ userId, score, rank: i + 1 }));
 
-  const prizeTiers = (contest.prizeTiers as unknown as PrizeTier[]) || [];
+  // Use prizeTiersConfig (new) → prizeTiers (old) → fallback
+  const prizeTiers = (
+    (contest.prizeTiersConfig as unknown as PrizeTier[])?.length > 0
+      ? (contest.prizeTiersConfig as unknown as PrizeTier[])
+      : (contest.prizeTiers as unknown as PrizeTier[])
+  ) || [];
   const hasPrizeTiers = prizeTiers.length > 0;
 
   const totalPool = contest.entries.length * contest.entryFee;
