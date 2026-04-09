@@ -1130,3 +1130,58 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
     error(res, 'Failed to fetch schedule', 500);
   }
 }
+
+// ─── Team name → logo URL mapping (official IPL CDN) ─────────────────────────
+const TEAM_LOGO_MAP: Record<string, string> = {
+  'mumbai indians':               'https://scores.iplt20.com/ipl/teamlogos/MI.png',
+  'chennai super kings':          'https://scores.iplt20.com/ipl/teamlogos/CSK.png',
+  'royal challengers bangalore':  'https://scores.iplt20.com/ipl/teamlogos/RCB.png',
+  'royal challengers bengaluru':  'https://scores.iplt20.com/ipl/teamlogos/RCB.png',
+  'kolkata knight riders':        'https://scores.iplt20.com/ipl/teamlogos/KKR.png',
+  'sunrisers hyderabad':          'https://scores.iplt20.com/ipl/teamlogos/SRH.png',
+  'delhi capitals':               'https://scores.iplt20.com/ipl/teamlogos/DC.png',
+  'punjab kings':                 'https://scores.iplt20.com/ipl/teamlogos/PBKS.png',
+  'rajasthan royals':             'https://scores.iplt20.com/ipl/teamlogos/RR.png',
+  'gujarat titans':               'https://scores.iplt20.com/ipl/teamlogos/GT.png',
+  'lucknow super giants':         'https://scores.iplt20.com/ipl/teamlogos/LSG.png',
+};
+
+function getTeamLogo(teamName: string): string | null {
+  return TEAM_LOGO_MAP[teamName.trim().toLowerCase()] ?? null;
+}
+
+// ─── Admin: Sync team logos for all matches ───────────────────────────────────
+export async function syncTeamLogos(_req: Request, res: Response): Promise<void> {
+  try {
+    const matches = await prisma.iplMatch.findMany({
+      select: { id: true, team1: true, team2: true },
+    });
+
+    let updated = 0;
+    let skipped = 0;
+
+    for (const m of matches) {
+      const logo1 = getTeamLogo(m.team1);
+      const logo2 = getTeamLogo(m.team2);
+
+      if (logo1 || logo2) {
+        await prisma.iplMatch.update({
+          where: { id: m.id },
+          data: {
+            team1Logo: logo1 ?? undefined,
+            team2Logo: logo2 ?? undefined,
+          },
+        });
+        updated++;
+      } else {
+        skipped++;
+      }
+    }
+
+    success(res, { total: matches.length, updated, skipped },
+      `Team logos synced: ${updated} updated, ${skipped} skipped`);
+  } catch (err) {
+    logger.error('syncTeamLogos error:', err);
+    error(res, 'Failed to sync team logos', 500);
+  }
+}

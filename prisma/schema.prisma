@@ -307,6 +307,8 @@ model IplMatch {
   autoProcessed         Boolean         @default(false)
   matchType             String          @default("T20")
   lastSyncedAt          DateTime?
+  team1Logo             String?
+  team2Logo             String?
   predictions           IplPrediction[]
   questions             IplQuestion[]
   contests              IplContest[]
