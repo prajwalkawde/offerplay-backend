@@ -354,6 +354,7 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
 
     // Fetch questions in user's language, limited to contest.questionCount
     const questionLimit = contest.questionCount || 10;
+    logger.info(`[getContestQuestions] contestId=${contestId} lang=${userLang} questionCount=${contest.questionCount} limit=${questionLimit}`);
     let questions = await prisma.iplQuestion.findMany({
       where: { matchId, status: 'active', language: userLang },
       orderBy: { questionNumber: 'asc' },
@@ -400,6 +401,7 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
         correctAnswer: predictionsLocked ? q.correctAnswer : null,
       })),
       totalQuestions: questions.length,
+      questionLimit,
       answeredCount: predictions.length,
     });
   } catch (err) {
