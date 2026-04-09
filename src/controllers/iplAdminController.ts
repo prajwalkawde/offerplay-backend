@@ -647,6 +647,7 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
 }
 
 // ─── Save edited questions for a match ────────────────────────────────────────
+// Also propagates correctAnswer to same questionNumber in all other languages.
 export async function saveEditedQuestions(req: Request, res: Response): Promise<void> {
   const { matchId } = req.params as { matchId: string };
   const { questions } = req.body as {
@@ -654,6 +655,7 @@ export async function saveEditedQuestions(req: Request, res: Response): Promise<
       id?: string; question: string; options: string[];
       correctAnswer?: string; points?: number;
       category?: string; difficulty?: string;
+      questionNumber?: number;
     }>;
   };
 
@@ -663,8 +665,16 @@ export async function saveEditedQuestions(req: Request, res: Response): Promise<
   }
 
   let saved = 0;
+  let propagated = 0;
+
   for (const q of questions) {
     if (q.id) {
+      // Get current question to know its questionNumber
+      const existing = await prisma.iplQuestion.findUnique({
+        where: { id: q.id },
+        select: { questionNumber: true },
+      }).catch(() => null);
+
       await prisma.iplQuestion.update({
         where: { id: q.id },
         data: {
@@ -677,6 +687,21 @@ export async function saveEditedQuestions(req: Request, res: Response): Promise<
           ...(q.difficulty && { difficulty: q.difficulty }),
         },
       }).catch(() => {});
+
+      // Propagate correctAnswer to all other-language questions with the same questionNumber
+      const qNum = q.questionNumber ?? existing?.questionNumber;
+      if (q.correctAnswer && qNum) {
+        const result = await prisma.iplQuestion.updateMany({
+          where: {
+            matchId,
+            questionNumber: qNum,
+            id: { not: q.id },
+            status: 'active',
+          },
+          data: { correctAnswer: q.correctAnswer },
+        }).catch(() => null);
+        propagated += result?.count ?? 0;
+      }
     } else {
       await prisma.iplQuestion.create({
         data: {
@@ -695,7 +720,8 @@ export async function saveEditedQuestions(req: Request, res: Response): Promise<
     saved++;
   }
 
-  success(res, { saved }, `${saved} questions saved!`);
+  logger.info(`saveEditedQuestions: ${saved} English questions saved, ${propagated} other-language questions propagated`);
+  success(res, { saved, propagated }, `${saved} questions saved! (${propagated} translations updated)`);
 }
 
 // ─── Generate AI result report (auto-detect correct answers with confidence) ───
