@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
+import { updateQuestProgress } from './questController';
 
 // ─── GET /api/referral/dashboard ──────────────────────────────────────────────
 export const getReferralDashboard = async (req: Request, res: Response): Promise<void> => {
@@ -173,6 +174,7 @@ export const applyReferralCode = async (req: Request, res: Response): Promise<vo
       }
     });
 
+    updateQuestProgress(referrer.id, 'REFER_FRIEND', 1).catch(() => {});
     success(res, { signupBonus, referrerName: referrer.name },
       `Referral applied! You earned ${signupBonus} coins!`);
   } catch (err) {

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 import { creditTickets } from '../services/ticketService';
+import { updateQuestProgress } from './questController';
 
 const S2S_TOKEN = 'unucagmxxbpiwtwifyjhvwzudmqxcwkz';
 
@@ -110,6 +111,7 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
     });
 
     logger.info(`[Adjoe] credited ${ticketsToCredit} tickets → user ${user_uuid} (trans: ${trans_uuid})`);
+    updateQuestProgress(user_uuid, 'PLAY_GAMES', 1).catch(() => {});
     return res.status(200).send('OK');
 
   } catch (err) {

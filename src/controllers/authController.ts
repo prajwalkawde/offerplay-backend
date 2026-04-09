@@ -10,6 +10,7 @@ import { success, error } from '../utils/response';
 import { env } from '../config/env';
 import { TransactionType } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { updateQuestProgress } from './questController';
 
 const twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
 
@@ -174,6 +175,7 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
     }
 
     const token = generateJwt(user.id);
+    updateQuestProgress(user.id, 'DAILY_LOGIN', 1).catch(() => {});
     success(
       res,
       { user, token, isNew, isProfileComplete: user.isProfileComplete },
@@ -239,6 +241,7 @@ export async function phoneFirebaseVerify(req: Request, res: Response): Promise<
     }
 
     const token = generateJwt(user.id);
+    updateQuestProgress(user.id, 'DAILY_LOGIN', 1).catch(() => {});
     success(
       res,
       { user, token, isNew, isProfileComplete: user.isProfileComplete },
@@ -379,6 +382,7 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     }
 
     const token = generateJwt(user.id);
+    updateQuestProgress(user.id, 'DAILY_LOGIN', 1).catch(() => {});
     success(
       res,
       { user, token, isNew, isProfileComplete: user.isProfileComplete },
@@ -449,6 +453,7 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
     }
 
     const token = generateJwt(user.id);
+    updateQuestProgress(user.id, 'DAILY_LOGIN', 1).catch(() => {});
     success(
       res,
       { user, token, isNew, isProfileComplete: user.isProfileComplete },

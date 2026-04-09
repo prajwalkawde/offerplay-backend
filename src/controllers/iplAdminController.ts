@@ -943,62 +943,150 @@ export async function getIPLAnalytics(_req: Request, res: Response): Promise<voi
   });
 }
 
+// ─── Full IPL 2026 schedule ───────────────────────────────────────────────────
+const IPL_2026_SCHEDULE = [
+  // ── Week 1 (Mar 22–29) ──────────────────────────────────────────────────────
+  { matchNumber: 1,  team1: 'KKR',  team2: 'RCB',  matchDate: new Date('2026-03-22T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 2,  team1: 'SRH',  team2: 'RR',   matchDate: new Date('2026-03-23T10:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 3,  team1: 'DC',   team2: 'LSG',  matchDate: new Date('2026-03-23T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 4,  team1: 'GT',   team2: 'PBKS', matchDate: new Date('2026-03-24T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 5,  team1: 'MI',   team2: 'CSK',  matchDate: new Date('2026-03-25T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 6,  team1: 'RR',   team2: 'KKR',  matchDate: new Date('2026-03-26T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 7,  team1: 'LSG',  team2: 'SRH',  matchDate: new Date('2026-03-27T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  { matchNumber: 8,  team1: 'RCB',  team2: 'DC',   matchDate: new Date('2026-03-28T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 9,  team1: 'PBKS', team2: 'MI',   matchDate: new Date('2026-03-29T10:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 10, team1: 'CSK',  team2: 'GT',   matchDate: new Date('2026-03-29T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  // ── Week 2 (Mar 30–Apr 5) ───────────────────────────────────────────────────
+  { matchNumber: 11, team1: 'KKR',  team2: 'SRH',  matchDate: new Date('2026-03-30T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 12, team1: 'DC',   team2: 'RR',   matchDate: new Date('2026-03-31T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 13, team1: 'RCB',  team2: 'LSG',  matchDate: new Date('2026-04-01T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 14, team1: 'MI',   team2: 'GT',   matchDate: new Date('2026-04-02T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 15, team1: 'PBKS', team2: 'KKR',  matchDate: new Date('2026-04-03T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 16, team1: 'CSK',  team2: 'SRH',  matchDate: new Date('2026-04-04T10:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 17, team1: 'GT',   team2: 'DC',   matchDate: new Date('2026-04-04T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 18, team1: 'RR',   team2: 'MI',   matchDate: new Date('2026-04-05T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  // ── Week 3 (Apr 6–12) ───────────────────────────────────────────────────────
+  { matchNumber: 19, team1: 'LSG',  team2: 'PBKS', matchDate: new Date('2026-04-06T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  { matchNumber: 20, team1: 'KKR',  team2: 'CSK',  matchDate: new Date('2026-04-07T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 21, team1: 'SRH',  team2: 'GT',   matchDate: new Date('2026-04-08T14:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 22, team1: 'RCB',  team2: 'MI',   matchDate: new Date('2026-04-09T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 23, team1: 'DC',   team2: 'PBKS', matchDate: new Date('2026-04-10T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 24, team1: 'RR',   team2: 'LSG',  matchDate: new Date('2026-04-11T10:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 25, team1: 'CSK',  team2: 'KKR',  matchDate: new Date('2026-04-11T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 26, team1: 'GT',   team2: 'RCB',  matchDate: new Date('2026-04-12T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  // ── Week 4 (Apr 13–19) ──────────────────────────────────────────────────────
+  { matchNumber: 27, team1: 'MI',   team2: 'SRH',  matchDate: new Date('2026-04-13T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 28, team1: 'PBKS', team2: 'RR',   matchDate: new Date('2026-04-14T10:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 29, team1: 'LSG',  team2: 'DC',   matchDate: new Date('2026-04-14T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  { matchNumber: 30, team1: 'KKR',  team2: 'GT',   matchDate: new Date('2026-04-15T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 31, team1: 'CSK',  team2: 'RCB',  matchDate: new Date('2026-04-16T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 32, team1: 'SRH',  team2: 'PBKS', matchDate: new Date('2026-04-17T14:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 33, team1: 'RR',   team2: 'GT',   matchDate: new Date('2026-04-18T10:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 34, team1: 'MI',   team2: 'DC',   matchDate: new Date('2026-04-18T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 35, team1: 'LSG',  team2: 'KKR',  matchDate: new Date('2026-04-19T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  // ── Week 5 (Apr 20–26) ──────────────────────────────────────────────────────
+  { matchNumber: 36, team1: 'RCB',  team2: 'SRH',  matchDate: new Date('2026-04-20T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 37, team1: 'PBKS', team2: 'CSK',  matchDate: new Date('2026-04-21T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 38, team1: 'DC',   team2: 'KKR',  matchDate: new Date('2026-04-22T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 39, team1: 'GT',   team2: 'MI',   matchDate: new Date('2026-04-23T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 40, team1: 'RR',   team2: 'RCB',  matchDate: new Date('2026-04-24T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 41, team1: 'SRH',  team2: 'LSG',  matchDate: new Date('2026-04-25T10:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 42, team1: 'CSK',  team2: 'DC',   matchDate: new Date('2026-04-25T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 43, team1: 'KKR',  team2: 'PBKS', matchDate: new Date('2026-04-26T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  // ── Week 6 (Apr 27–May 3) ───────────────────────────────────────────────────
+  { matchNumber: 44, team1: 'MI',   team2: 'RR',   matchDate: new Date('2026-04-27T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 45, team1: 'GT',   team2: 'LSG',  matchDate: new Date('2026-04-28T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 46, team1: 'RCB',  team2: 'CSK',  matchDate: new Date('2026-04-29T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 47, team1: 'DC',   team2: 'SRH',  matchDate: new Date('2026-04-30T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 48, team1: 'PBKS', team2: 'GT',   matchDate: new Date('2026-05-01T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 49, team1: 'KKR',  team2: 'MI',   matchDate: new Date('2026-05-02T10:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 50, team1: 'RR',   team2: 'CSK',  matchDate: new Date('2026-05-02T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 51, team1: 'LSG',  team2: 'RCB',  matchDate: new Date('2026-05-03T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  // ── Week 7 (May 4–10) ───────────────────────────────────────────────────────
+  { matchNumber: 52, team1: 'SRH',  team2: 'KKR',  matchDate: new Date('2026-05-04T14:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 53, team1: 'GT',   team2: 'RR',   matchDate: new Date('2026-05-05T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 54, team1: 'MI',   team2: 'PBKS', matchDate: new Date('2026-05-06T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 55, team1: 'CSK',  team2: 'LSG',  matchDate: new Date('2026-05-07T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 56, team1: 'DC',   team2: 'GT',   matchDate: new Date('2026-05-08T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  { matchNumber: 57, team1: 'RCB',  team2: 'KKR',  matchDate: new Date('2026-05-09T10:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 58, team1: 'RR',   team2: 'SRH',  matchDate: new Date('2026-05-09T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 59, team1: 'PBKS', team2: 'LSG',  matchDate: new Date('2026-05-10T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  // ── Week 8 (May 11–17) ──────────────────────────────────────────────────────
+  { matchNumber: 60, team1: 'MI',   team2: 'RCB',  matchDate: new Date('2026-05-11T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 61, team1: 'CSK',  team2: 'PBKS', matchDate: new Date('2026-05-12T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  { matchNumber: 62, team1: 'GT',   team2: 'SRH',  matchDate: new Date('2026-05-13T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
+  { matchNumber: 63, team1: 'KKR',  team2: 'DC',   matchDate: new Date('2026-05-14T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 64, team1: 'RR',   team2: 'PBKS', matchDate: new Date('2026-05-15T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
+  { matchNumber: 65, team1: 'LSG',  team2: 'MI',   matchDate: new Date('2026-05-16T10:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
+  { matchNumber: 66, team1: 'RCB',  team2: 'GT',   matchDate: new Date('2026-05-16T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
+  { matchNumber: 67, team1: 'SRH',  team2: 'CSK',  matchDate: new Date('2026-05-17T10:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
+  { matchNumber: 68, team1: 'DC',   team2: 'RR',   matchDate: new Date('2026-05-17T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
+  // ── Week 9 — Final league round (May 18–21) ─────────────────────────────────
+  { matchNumber: 69, team1: 'PBKS', team2: 'RCB',  matchDate: new Date('2026-05-18T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
+  { matchNumber: 70, team1: 'KKR',  team2: 'LSG',  matchDate: new Date('2026-05-19T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
+  { matchNumber: 71, team1: 'MI',   team2: 'GT',   matchDate: new Date('2026-05-20T10:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
+  { matchNumber: 72, team1: 'CSK',  team2: 'RR',   matchDate: new Date('2026-05-20T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
+  // ── Playoffs ─────────────────────────────────────────────────────────────────
+  { matchNumber: 73, team1: 'TBD',  team2: 'TBD',  matchDate: new Date('2026-05-27T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },  // Qualifier 1
+  { matchNumber: 74, team1: 'TBD',  team2: 'TBD',  matchDate: new Date('2026-05-28T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },  // Eliminator
+  { matchNumber: 75, team1: 'TBD',  team2: 'TBD',  matchDate: new Date('2026-05-30T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },              // Qualifier 2
+  { matchNumber: 76, team1: 'TBD',  team2: 'TBD',  matchDate: new Date('2026-06-01T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },              // Final
+];
+
 // ─── Fetch / sync IPL 2026 schedule ──────────────────────────────────────────
+// Body params:
+//   fromDate  (optional) – ISO date string, e.g. "2026-04-09"  → only sync matches on/after this date
+//   toDate    (optional) – ISO date string, e.g. "2026-05-31"  → only sync matches on/before this date
+//   If neither is provided, defaults to today onwards.
 export async function fetchIPLSchedule(req: Request, res: Response): Promise<void> {
   try {
-    const ipl2026Matches = [
-      { matchNumber: 1,  team1: 'KKR',  team2: 'RCB',  matchDate: new Date('2026-03-22T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
-      { matchNumber: 2,  team1: 'SRH',  team2: 'RR',   matchDate: new Date('2026-03-23T10:00:00Z'), venue: 'Rajiv Gandhi Intl. Stadium, Hyderabad' },
-      { matchNumber: 3,  team1: 'DC',   team2: 'LSG',  matchDate: new Date('2026-03-23T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
-      { matchNumber: 4,  team1: 'GT',   team2: 'PBKS', matchDate: new Date('2026-03-24T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
-      { matchNumber: 5,  team1: 'MI',   team2: 'CSK',  matchDate: new Date('2026-03-25T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
-      { matchNumber: 6,  team1: 'RR',   team2: 'KKR',  matchDate: new Date('2026-03-26T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
-      { matchNumber: 7,  team1: 'LSG',  team2: 'SRH',  matchDate: new Date('2026-03-27T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
-      { matchNumber: 8,  team1: 'RCB',  team2: 'DC',   matchDate: new Date('2026-03-28T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
-      { matchNumber: 9,  team1: 'PBKS', team2: 'MI',   matchDate: new Date('2026-03-29T10:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
-      { matchNumber: 10, team1: 'CSK',  team2: 'GT',   matchDate: new Date('2026-03-29T14:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
-      { matchNumber: 11, team1: 'KKR',  team2: 'SRH',  matchDate: new Date('2026-03-30T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
-      { matchNumber: 12, team1: 'DC',   team2: 'RR',   matchDate: new Date('2026-03-31T14:00:00Z'), venue: 'Arun Jaitley Stadium, Delhi' },
-      { matchNumber: 13, team1: 'RCB',  team2: 'LSG',  matchDate: new Date('2026-04-01T14:00:00Z'), venue: 'M Chinnaswamy Stadium, Bengaluru' },
-      { matchNumber: 14, team1: 'MI',   team2: 'GT',   matchDate: new Date('2026-04-02T14:00:00Z'), venue: 'Wankhede Stadium, Mumbai' },
-      { matchNumber: 15, team1: 'PBKS', team2: 'KKR',  matchDate: new Date('2026-04-03T14:00:00Z'), venue: 'Maharaja Yadavindra Singh Cricket Stadium, Mullanpur' },
-      { matchNumber: 16, team1: 'CSK',  team2: 'SRH',  matchDate: new Date('2026-04-04T10:00:00Z'), venue: 'MA Chidambaram Stadium, Chennai' },
-      { matchNumber: 17, team1: 'GT',   team2: 'DC',   matchDate: new Date('2026-04-04T14:00:00Z'), venue: 'Narendra Modi Stadium, Ahmedabad' },
-      { matchNumber: 18, team1: 'RR',   team2: 'MI',   matchDate: new Date('2026-04-05T14:00:00Z'), venue: 'Sawai Mansingh Stadium, Jaipur' },
-      { matchNumber: 19, team1: 'LSG',  team2: 'PBKS', matchDate: new Date('2026-04-06T14:00:00Z'), venue: 'BRSABV Ekana Cricket Stadium, Lucknow' },
-      { matchNumber: 20, team1: 'KKR',  team2: 'CSK',  matchDate: new Date('2026-04-07T14:00:00Z'), venue: 'Eden Gardens, Kolkata' },
-    ];
+    const { fromDate, toDate } = req.body as { fromDate?: string; toDate?: string };
 
-    // Only sync matches from today onwards (IST midnight)
+    // ── Build date window ────────────────────────────────────────────────────
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     const nowIst = new Date(Date.now() + istOffsetMs);
     nowIst.setHours(0, 0, 0, 0);
-    const todayUtc = new Date(nowIst.getTime() - istOffsetMs);
+    const defaultFrom = new Date(nowIst.getTime() - istOffsetMs); // today midnight UTC
 
-    const upcomingMatches = ipl2026Matches.filter(m => m.matchDate >= todayUtc);
+    const from: Date = fromDate ? new Date(fromDate) : defaultFrom;
+    const to:   Date = toDate   ? new Date(toDate)   : new Date('2026-12-31T23:59:59Z');
+
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+      error(res, 'Invalid fromDate or toDate. Use ISO format e.g. "2026-04-09"', 400);
+      return;
+    }
+    if (from > to) {
+      error(res, 'fromDate must be before toDate', 400);
+      return;
+    }
+
+    // ── Filter schedule to requested window ──────────────────────────────────
+    const matchesToSync = IPL_2026_SCHEDULE.filter(
+      m => m.matchDate >= from && m.matchDate <= to,
+    );
+
+    if (matchesToSync.length === 0) {
+      success(res, { created: 0, updated: 0, skipped: 0, total: 0, from: from.toISOString(), to: to.toISOString() },
+        'No matches found in the specified date range');
+      return;
+    }
 
     let created = 0;
     let updated = 0;
     let skipped = 0;
 
-    for (const m of ipl2026Matches) {
+    for (const m of matchesToSync) {
       const cricApiId = `ipl2026-match-${m.matchNumber}`;
 
-      // Find by cricApiId first, then fall back to matchNumber (covers manually-created matches)
       let existing = await prisma.iplMatch.findUnique({ where: { cricApiId } });
       if (!existing) {
         existing = await prisma.iplMatch.findFirst({ where: { matchNumber: m.matchNumber } }) ?? null;
       }
 
-      // Skip past matches — don't create them, but update if they already exist
-      if (m.matchDate < todayUtc) {
-        if (!existing) { skipped++; continue; }
-      }
-
       if (existing) {
-        // Never overwrite a completed/live match status
+        // Never overwrite a live/completed match's status
         if (existing.status === 'completed' || existing.status === 'live') {
-          updated++;
+          skipped++;
           continue;
         }
         await prisma.iplMatch.update({
@@ -1030,7 +1118,13 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
       }
     }
 
-    success(res, { created, updated, skipped, upcoming: upcomingMatches.length }, `${created} created, ${updated} updated, ${skipped} past matches skipped`);
+    success(res, {
+      created, updated, skipped,
+      total: matchesToSync.length,
+      from: from.toISOString(),
+      to:   to.toISOString(),
+    }, `Synced ${matchesToSync.length} matches (${created} created, ${updated} updated, ${skipped} skipped)`);
+
   } catch (err) {
     logger.error('fetchIPLSchedule error:', err);
     error(res, 'Failed to fetch schedule', 500);

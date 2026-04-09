@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { creditCoins } from './coinService';
 import { verifyPubscaleSignature, verifyToroxSignature, verifyAyetSignature } from './offerwallService';
 import { TransactionType } from '@prisma/client';
+import { updateQuestProgress } from '../controllers/questController';
 
 // ─── Param helpers ────────────────────────────────────────────────────────────
 // Express makes duplicate query params an array. PubScale sometimes sends
@@ -240,6 +241,7 @@ export async function receivePubScalePostback(
     }
 
     await updateStreak(userId);
+    updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
     logger.info('PubScale coins credited', { userId, finalCoins, multiplier });
     return 'OK';
   } catch (err) {
@@ -311,6 +313,7 @@ export async function receiveToroxPostback(
     ]);
     if (offerId) await updateCompletionStats('torox', offerId);
     await updateStreak(userId);
+    updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
     logger.info('Torox coins credited', { userId, finalCoins, multiplier });
   } catch (err) {
     logger.error('Torox postback processing failed:', { message: (err as Error).message });
@@ -383,6 +386,7 @@ export async function receiveAyetPostback(
       }),
     ]);
     await updateStreak(userId);
+    updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
     logger.info('AyeT coins credited', { userId, finalCoins, multiplier });
   } catch (err) {
     logger.error('AyeT postback processing failed:', { message: (err as Error).message });
