@@ -1131,8 +1131,20 @@ export async function fetchIPLSchedule(req: Request, res: Response): Promise<voi
   }
 }
 
-// ─── Team name → logo URL mapping (official IPL CDN) ─────────────────────────
+// ─── Team code/name → logo URL mapping (official IPL CDN) ────────────────────
 const TEAM_LOGO_MAP: Record<string, string> = {
+  // Short codes (how they're stored in DB)
+  'mi':   'https://scores.iplt20.com/ipl/teamlogos/MI.png',
+  'csk':  'https://scores.iplt20.com/ipl/teamlogos/CSK.png',
+  'rcb':  'https://scores.iplt20.com/ipl/teamlogos/RCB.png',
+  'kkr':  'https://scores.iplt20.com/ipl/teamlogos/KKR.png',
+  'srh':  'https://scores.iplt20.com/ipl/teamlogos/SRH.png',
+  'dc':   'https://scores.iplt20.com/ipl/teamlogos/DC.png',
+  'pbks': 'https://scores.iplt20.com/ipl/teamlogos/PBKS.png',
+  'rr':   'https://scores.iplt20.com/ipl/teamlogos/RR.png',
+  'gt':   'https://scores.iplt20.com/ipl/teamlogos/GT.png',
+  'lsg':  'https://scores.iplt20.com/ipl/teamlogos/LSG.png',
+  // Full names (fallback)
   'mumbai indians':               'https://scores.iplt20.com/ipl/teamlogos/MI.png',
   'chennai super kings':          'https://scores.iplt20.com/ipl/teamlogos/CSK.png',
   'royal challengers bangalore':  'https://scores.iplt20.com/ipl/teamlogos/RCB.png',
