@@ -15,7 +15,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Mumbai',
     color: '#004BA0',
     secondaryColor: '#D4AC0D',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/MI.png',
     emoji: '🔵',
   },
   {
@@ -24,7 +24,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Chennai',
     color: '#FDB913',
     secondaryColor: '#0075BF',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/CSK.png',
     emoji: '🦁',
   },
   {
@@ -33,7 +33,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Bengaluru',
     color: '#C8102E',
     secondaryColor: '#000000',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/RCB.png',
     emoji: '🔴',
   },
   {
@@ -42,7 +42,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Kolkata',
     color: '#552683',
     secondaryColor: '#F4C300',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/KKR.png',
     emoji: '⚡',
   },
   {
@@ -51,7 +51,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Hyderabad',
     color: '#F26522',
     secondaryColor: '#000000',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/SRH.png',
     emoji: '🌅',
   },
   {
@@ -60,7 +60,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Delhi',
     color: '#0078BC',
     secondaryColor: '#EF1C25',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/DC.png',
     emoji: '🔷',
   },
   {
@@ -69,7 +69,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Punjab',
     color: '#AA4545',
     secondaryColor: '#DCDDDF',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/PBKS.png',
     emoji: '👊',
   },
   {
@@ -78,7 +78,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Rajasthan',
     color: '#254AA5',
     secondaryColor: '#F0137A',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/RR.png',
     emoji: '👑',
   },
   {
@@ -87,7 +87,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Gujarat',
     color: '#1C1C6E',
     secondaryColor: '#B5862A',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/GT.png',
     emoji: '🔱',
   },
   {
@@ -96,7 +96,7 @@ export const IPL_TEAMS: IplTeam[] = [
     shortName: 'Lucknow',
     color: '#00C2E3',
     secondaryColor: '#A72056',
-    logoUrl: '',
+    logoUrl: 'https://scores.iplt20.com/ipl/teamlogos/LSG.png',
     emoji: '🦅',
   },
 ];

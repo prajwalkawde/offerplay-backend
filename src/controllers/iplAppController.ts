@@ -34,11 +34,11 @@ export function enrichMatch(
   const t2 = getTeam(match.team2);
   return {
     ...match,
-    team1Logo:     logoUrls[match.team1] ?? t1?.logoUrl     ?? '',
+    team1Logo:     match.team1Logo || logoUrls[match.team1] || t1?.logoUrl || '',
     team1Color:    t1?.color       ?? '#7B2FBE',
     team1FullName: t1?.name        ?? match.team1,
     team1Emoji:    t1?.emoji       ?? '🏏',
-    team2Logo:     logoUrls[match.team2] ?? t2?.logoUrl     ?? '',
+    team2Logo:     match.team2Logo || logoUrls[match.team2] || t2?.logoUrl || '',
     team2Color:    t2?.color       ?? '#00C2E3',
     team2FullName: t2?.name        ?? match.team2,
     team2Emoji:    t2?.emoji       ?? '🏏',
