@@ -235,7 +235,7 @@ export async function deleteIPLContest(req: Request, res: Response): Promise<voi
             data: {
               userId: entry.userId,
               type: 'REFUND' as any,
-              coins: entry.coinsDeducted,
+              amount: entry.coinsDeducted,
               description: `Refund: ${contest.name} cancelled`,
             },
           });
