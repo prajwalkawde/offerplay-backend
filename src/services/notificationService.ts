@@ -1,24 +1,71 @@
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 
-// ─── OneSignal REST API push ──────────────────────────────────────────────────
-async function pushViaOneSignal(
+// ─── OneSignal REST API ───────────────────────────────────────────────────────
+
+async function getOneSignalHeaders() {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+  return { appId, apiKey, ok: !!(appId && apiKey) };
+}
+
+/**
+ * Push by external user IDs (set via OneSignal.login(userId) in the app).
+ * This is the primary push method — no player ID storage needed.
+ */
+async function pushByExternalIds(
+  userIds: string[],
+  title: string,
+  body: string,
+  type: string,
+): Promise<void> {
+  const { appId, apiKey, ok } = await getOneSignalHeaders();
+  if (!ok || userIds.length === 0) return;
+
+  const axios = (await import('axios')).default;
+
+  // OneSignal allows max 2000 external IDs per request
+  for (let i = 0; i < userIds.length; i += 2000) {
+    const batch = userIds.slice(i, i + 2000);
+    try {
+      const res = await axios.post(
+        'https://onesignal.com/api/v1/notifications',
+        {
+          app_id: appId,
+          include_external_user_ids: batch,
+          channel_for_external_user_ids: 'push',
+          headings: { en: title },
+          contents: { en: body },
+          data: { type },
+          priority: 10,
+        },
+        {
+          headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        },
+      );
+      const sent = res.data?.recipients ?? batch.length;
+      logger.info(`[OneSignal] Pushed to ${sent} recipients (batch ${Math.floor(i / 2000) + 1}) via external IDs`);
+    } catch (err: any) {
+      logger.error(`[OneSignal] Push batch failed: ${err.response?.data?.errors ?? err.message}`);
+    }
+  }
+}
+
+/**
+ * Push by player IDs (legacy — used when we have stored player IDs).
+ */
+async function pushByPlayerIds(
   playerIds: string[],
   title: string,
   body: string,
   type: string,
 ): Promise<void> {
-  const appId = process.env.ONESIGNAL_APP_ID;
-  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
-  if (!appId || !apiKey) {
-    logger.warn('[OneSignal] ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY not set — skipping push');
-    return;
-  }
-  if (playerIds.length === 0) return;
+  const { appId, apiKey, ok } = await getOneSignalHeaders();
+  if (!ok || playerIds.length === 0) return;
 
   const axios = (await import('axios')).default;
 
-  // OneSignal allows max 2000 player IDs per request
   for (let i = 0; i < playerIds.length; i += 2000) {
     const batch = playerIds.slice(i, i + 2000);
     try {
@@ -33,14 +80,11 @@ async function pushViaOneSignal(
           priority: 10,
         },
         {
-          headers: {
-            Authorization: `Key ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { Authorization: `Key ${apiKey}`, 'Content-Type': 'application/json' },
           timeout: 15000,
         },
       );
-      logger.info(`[OneSignal] Pushed to ${batch.length} devices (batch ${Math.floor(i / 2000) + 1})`);
+      logger.info(`[OneSignal] Pushed to ${batch.length} devices (batch ${Math.floor(i / 2000) + 1}) via player IDs`);
     } catch (err: any) {
       logger.error(`[OneSignal] Push batch failed: ${err.response?.data?.errors ?? err.message}`);
     }
@@ -99,19 +143,19 @@ export async function sendBulkNotification(
     skipDuplicates: true,
   }).catch(() => {});
 
-  // 2. Fetch OneSignal player IDs for these users
-  const users = await prisma.user.findMany({
+  // 2. Push via external user IDs (set by OneSignal.login(userId) in the app)
+  //    Falls back to stored player IDs for users who haven't used the new app yet
+  await pushByExternalIds(userIds, title, body, type);
+
+  // 3. Fallback: also push by stored player IDs (covers users with old-style registration)
+  const usersWithPlayerIds = await prisma.user.findMany({
     where: { id: { in: userIds }, oneSignalPlayerId: { not: null } },
     select: { oneSignalPlayerId: true },
   });
-
-  const playerIds = users.map(u => u.oneSignalPlayerId).filter(Boolean) as string[];
-  if (playerIds.length === 0) {
-    logger.warn(`sendBulkNotification: no OneSignal IDs found for ${userIds.length} users`);
-    return;
+  const playerIds = usersWithPlayerIds.map(u => u.oneSignalPlayerId).filter(Boolean) as string[];
+  if (playerIds.length > 0) {
+    await pushByPlayerIds(playerIds, title, body, type);
   }
-
-  await pushViaOneSignal(playerIds, title, body, type);
 }
 
 export async function sendToAll(
@@ -125,17 +169,15 @@ export async function sendToAll(
     take: 10000,
   });
 
-  // 1. Write DB notifications in bulk
+  // 1. Write DB notifications
   await prisma.notification.createMany({
     data: users.map(u => ({ userId: u.id, title, body, type })),
     skipDuplicates: true,
   });
 
-  // 2. Push to all users with a OneSignal player ID
-  const playerIds = users.map(u => u.oneSignalPlayerId).filter(Boolean) as string[];
-  if (playerIds.length > 0) {
-    await pushViaOneSignal(playerIds, title, body, type);
-  }
+  // 2. Push via external user IDs
+  const allIds = users.map(u => u.id);
+  await pushByExternalIds(allIds, title, body, type);
 
   logger.info(`sendToAll: notified ${users.length} users — type=${type}`);
 }
