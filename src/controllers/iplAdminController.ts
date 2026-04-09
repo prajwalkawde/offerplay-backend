@@ -786,12 +786,13 @@ Return ONLY a valid JSON array:
           const aiAnswers: Array<{ id: string; correctAnswer: string; confidence: number; reason: string }> =
             JSON.parse(jsonMatch[0]);
 
-          // Merge AI answers back
+          // Merge AI answers back — cast to any[] to allow extra fields for admin UI
+          const filled = keywordFilled as any[];
           for (const ai of aiAnswers) {
-            const idx = keywordFilled.findIndex(q => q.id === ai.id);
+            const idx = filled.findIndex((q: any) => q.id === ai.id);
             if (idx !== -1 && ai.correctAnswer) {
-              keywordFilled[idx] = {
-                ...keywordFilled[idx],
+              filled[idx] = {
+                ...filled[idx],
                 correctAnswer: ai.correctAnswer,
                 confidence: ai.confidence,
                 autoSource: 'ai',
