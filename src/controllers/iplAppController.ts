@@ -243,25 +243,22 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
 
     const entryType = contest.entryType || 'FREE';
 
+    // Validate balance before touching money
     if (entryType === 'TICKET') {
       const ticketCost = contest.ticketCost || 1;
-      const { spendTickets } = await import('../services/ticketService');
-      const result = await spendTickets(userId, ticketCost, `Contest entry: ${contest.name}`, contestId);
-      if (!result.success) { error(res, result.error || 'Insufficient tickets!', 400); return; }
-
+      const { getTicketBalance } = await import('../services/ticketService');
+      const bal = await getTicketBalance(userId);
+      if (bal < ticketCost) { error(res, 'Insufficient tickets!', 400); return; }
     } else if (entryType === 'COINS') {
       const entryFee = contest.entryFee || 0;
       if (entryFee > 0) {
         const user = await prisma.user.findUnique({ where: { id: userId }, select: { coinBalance: true } });
         if (!user || user.coinBalance < entryFee) { error(res, 'Insufficient coins!', 400); return; }
-        await prisma.user.update({ where: { id: userId }, data: { coinBalance: { decrement: entryFee } } });
-        await prisma.transaction.create({
-          data: { userId, type: TransactionType.SPEND_IPL_ENTRY, amount: entryFee, refId: contestId, description: `Joined: ${contest.name}`, status: 'completed' },
-        });
       }
     }
-    // FREE — no deduction needed
 
+    // Atomic: create entry + increment counter, then deduct payment
+    // Entry creation is inside $transaction so it either fully succeeds or rolls back
     await prisma.$transaction([
       prisma.iplContestEntry.create({
         data: { userId, contestId, matchId: contest.matchId, coinsDeducted: entryType === 'COINS' ? (contest.entryFee || 0) : 0 },
@@ -270,7 +267,26 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
         where: { id: contestId },
         data: { currentPlayers: { increment: 1 } },
       }),
+      ...(entryType === 'COINS' && (contest.entryFee || 0) > 0 ? [
+        prisma.user.update({ where: { id: userId }, data: { coinBalance: { decrement: contest.entryFee! } } }),
+        prisma.transaction.create({
+          data: { userId, type: TransactionType.SPEND_IPL_ENTRY, amount: contest.entryFee!, refId: contestId, description: `Joined: ${contest.name}`, status: 'completed' },
+        }),
+      ] : []),
     ]);
+
+    // Ticket deduction (outside DB transaction — uses separate service)
+    if (entryType === 'TICKET') {
+      const ticketCost = contest.ticketCost || 1;
+      const { spendTickets } = await import('../services/ticketService');
+      const result = await spendTickets(userId, ticketCost, `Contest entry: ${contest.name}`, contestId);
+      if (!result.success) {
+        // Rollback the entry we just created
+        await prisma.iplContestEntry.deleteMany({ where: { userId, contestId } });
+        await prisma.iplContest.update({ where: { id: contestId }, data: { currentPlayers: { decrement: 1 } } });
+        error(res, result.error || 'Failed to deduct tickets — join cancelled', 400); return;
+      }
+    }
 
     const now = new Date();
     const questionsAvailable =
