@@ -977,11 +977,18 @@ export async function fetchTodayMatches(req: Request, res: Response): Promise<vo
 
 // ─── Generate AI questions for a match ────────────────────────────────────────
 const ALL_LANGUAGES = ['en', 'hi', 'hinglish', 'ta', 'te', 'bn', 'mr'];
+const generationLocks = new Set<string>(); // matchId lock to prevent double generation
 
 export async function generateIPLQuestions(req: Request, res: Response): Promise<void> {
   const { matchId, questionCount } = req.body as { matchId?: string; questionCount?: number };
 
   if (!matchId) { error(res, 'matchId required', 400); return; }
+
+  // Prevent concurrent generation for the same match
+  if (generationLocks.has(matchId)) {
+    success(res, { status: 'already_running', matchId }, 'Generation already in progress for this match. Please wait.');
+    return;
+  }
 
   const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
   if (!match) { error(res, 'Match not found', 404); return; }
@@ -999,6 +1006,8 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
 
   // Respond immediately — generation runs in background (Nginx would timeout otherwise)
   success(res, { status: 'generating', matchId }, 'Question generation started! Check back in 30 seconds.');
+
+  generationLocks.add(matchId);
 
   // Run generation in background
   (async () => {
@@ -1061,6 +1070,8 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
       logger.info(`✅ Background generation complete: ${totalCreated} questions for match ${match.id}`);
     } catch (err) {
       logger.error('Background question generation failed:', err);
+    } finally {
+      generationLocks.delete(matchId);
     }
   })();
 }
