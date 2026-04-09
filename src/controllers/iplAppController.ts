@@ -352,16 +352,19 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       return;
     }
 
-    // Fetch questions in user's language, fallback to English
+    // Fetch questions in user's language, limited to contest.questionCount
+    const questionLimit = contest.questionCount || 10;
     let questions = await prisma.iplQuestion.findMany({
       where: { matchId, status: 'active', language: userLang },
       orderBy: { questionNumber: 'asc' },
+      take: questionLimit,
     });
 
     if (questions.length === 0 && userLang !== 'en') {
       questions = await prisma.iplQuestion.findMany({
         where: { matchId, status: 'active', language: 'en' },
         orderBy: { questionNumber: 'asc' },
+        take: questionLimit,
       });
     }
 
