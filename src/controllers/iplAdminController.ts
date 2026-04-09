@@ -698,90 +698,129 @@ export async function saveEditedQuestions(req: Request, res: Response): Promise<
   success(res, { saved }, `${saved} questions saved!`);
 }
 
-// ─── Generate AI result report (auto-detect correct answers) ──────────────────
+// ─── Generate AI result report (auto-detect correct answers with confidence) ───
 export async function generateResultReport(req: Request, res: Response): Promise<void> {
   try {
-    const { matchId, winner, team1Score, team2Score, manOfMatch, questions } = req.body as {
+    const { matchId, winner, team1Score, team2Score, manOfMatch } = req.body as {
       matchId: string; winner: string; team1Score?: string;
       team2Score?: string; manOfMatch?: string;
-      questions?: Array<{ id: string; question: string; options: string[]; correctAnswer?: string }>;
     };
+
+    if (!matchId || !winner) { error(res, 'matchId and winner required', 400); return; }
 
     const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
     if (!match) { error(res, 'Match not found', 404); return; }
 
-    // Attempt Claude AI to auto-detect correct answers
-    let autoAnswers: Array<{ id: string; correctAnswer: string }> = [];
+    // Always load questions fresh from DB (English only for answer matching)
+    const dbQuestions = await prisma.iplQuestion.findMany({
+      where: { matchId, status: 'active', language: 'en' },
+      orderBy: { questionNumber: 'asc' },
+    });
 
-    try {
-      const Anthropic = require('@anthropic-ai/sdk').default as typeof import('@anthropic-ai/sdk').default;
-      const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-      const response = await claude.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: `Match Result:
-Winner: ${winner}
-${match.team1} Score: ${team1Score || 'N/A'}
-${match.team2} Score: ${team2Score || 'N/A'}
-Man of Match: ${manOfMatch || 'Unknown'}
-
-For each question below, determine the correct answer based on the match result.
-
-Questions:
-${JSON.stringify((questions || []).map(q => ({ id: q.id, question: q.question, options: q.options })))}
-
-Return ONLY a JSON array with no extra text:
-[{"id": "question_id", "correctAnswer": "exact option text or empty string if unknown"}]
-
-Rules:
-- correctAnswer MUST exactly match one of the options, or be empty string
-- If about winner/winning team: ${winner}
-- If about man of the match: ${manOfMatch || ''}
-- If about scores: ${team1Score} vs ${team2Score}
-- If uncertain, return empty string`,
-        }],
-      });
-
-      const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        autoAnswers = JSON.parse(jsonMatch[0]) as typeof autoAnswers;
-      }
-    } catch (aiErr) {
-      logger.warn('AI report generation failed, using keyword fallback:', aiErr);
+    if (dbQuestions.length === 0) {
+      success(res, { winner, team1Score, team2Score, manOfMatch, updatedQuestions: [], autoAnsweredCount: 0 });
+      return;
     }
 
-    // Apply AI answers + keyword fallback
-    const updatedQuestions = (questions || []).map(q => {
-      const autoAnswer = autoAnswers.find(a => a.id === q.id);
-      if (autoAnswer?.correctAnswer) return { ...q, correctAnswer: autoAnswer.correctAnswer };
-
-      // Keyword fallback
+    // Step 1: Apply keyword auto-fill first (fast, deterministic)
+    const keywordFilled = dbQuestions.map(q => {
+      if (q.correctAnswer) return { ...q, confidence: 1.0, autoSource: 'existing' };
       const qLower = q.question.toLowerCase();
-      if (qLower.includes('who will win') || qLower.includes('winner') || qLower.includes('which team')) {
-        const match = q.options?.find(o => o.toLowerCase().includes(winner?.toLowerCase()));
-        if (match) return { ...q, correctAnswer: match };
+      const opts = q.options as string[];
+
+      if (qLower.includes('who will win') || qLower.includes('winner') || qLower.includes('which team will win')) {
+        const match = opts.find(o => o.toLowerCase().includes(winner.toLowerCase()));
+        if (match) return { ...q, correctAnswer: match, confidence: 1.0, autoSource: 'keyword' };
       }
-      if ((qLower.includes('man of') || qLower.includes('player of')) && manOfMatch) {
-        const firstName = manOfMatch.toLowerCase().split(' ')[0];
-        const match = q.options?.find(o => o.toLowerCase().includes(firstName));
-        if (match) return { ...q, correctAnswer: match };
+      if (qLower.includes('man of') || qLower.includes('motm') || qLower.includes('player of the match')) {
+        if (manOfMatch) {
+          const firstName = manOfMatch.toLowerCase().split(' ')[0];
+          const match = opts.find(o => o.toLowerCase().includes(firstName));
+          if (match) return { ...q, correctAnswer: match, confidence: 0.95, autoSource: 'keyword' };
+        }
       }
-      return q;
+      return { ...q, correctAnswer: q.correctAnswer || '', confidence: 0, autoSource: 'needs_review' };
     });
+
+    // Step 2: Use Claude Sonnet for remaining unanswered questions
+    const unanswered = keywordFilled.filter(q => !q.correctAnswer);
+
+    if (unanswered.length > 0) {
+      try {
+        const Anthropic = require('@anthropic-ai/sdk').default as typeof import('@anthropic-ai/sdk').default;
+        const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+        const prompt = `You are verifying IPL T20 match prediction contest answers based on the actual match scorecard.
+
+MATCH RESULT:
+Match: ${match.team1} vs ${match.team2}
+Winner: ${winner}
+${match.team1} Score: ${team1Score || 'Not provided'}
+${match.team2} Score: ${team2Score || 'Not provided'}
+Man of the Match: ${manOfMatch || 'Not provided'}
+
+QUESTIONS TO ANSWER (these are pre-match predictions):
+${JSON.stringify(unanswered.map(q => ({ id: q.id, question: q.question, options: q.options as string[] })), null, 2)}
+
+For each question, pick the correct answer from the given options based ONLY on the match result above.
+
+RULES:
+- correctAnswer MUST exactly match one of the provided options (copy it exactly)
+- confidence: 0.95 = very sure, 0.80 = fairly sure, 0.60 = guessing
+- If the match result doesn't have enough info to answer (e.g. powerplay scores not given), set correctAnswer to "" and confidence to 0
+- For "winning margin" questions: use the scores provided to estimate
+- For "total runs" questions: add both team scores if provided
+
+Return ONLY a valid JSON array:
+[{"id":"<id>","correctAnswer":"<exact option text or empty>","confidence":<0-1>,"reason":"<1 line why>"}]`;
+
+        const response = await claude.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: prompt }],
+        });
+
+        const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const aiAnswers: Array<{ id: string; correctAnswer: string; confidence: number; reason: string }> =
+            JSON.parse(jsonMatch[0]);
+
+          // Merge AI answers back
+          for (const ai of aiAnswers) {
+            const idx = keywordFilled.findIndex(q => q.id === ai.id);
+            if (idx !== -1 && ai.correctAnswer) {
+              keywordFilled[idx] = {
+                ...keywordFilled[idx],
+                correctAnswer: ai.correctAnswer,
+                confidence: ai.confidence,
+                autoSource: 'ai',
+                aiReason: ai.reason,
+              };
+            }
+          }
+        }
+      } catch (aiErr) {
+        logger.warn('Claude Sonnet AI answer detection failed:', aiErr);
+      }
+    }
+
+    const answered = keywordFilled.filter(q => q.correctAnswer).length;
+    const highConf  = keywordFilled.filter(q => (q.confidence as number) >= 0.85).length;
+    const needsReview = keywordFilled.filter(q => !q.correctAnswer || (q.confidence as number) < 0.7).length;
 
     success(res, {
       winner, team1Score, team2Score, manOfMatch,
-      updatedQuestions,
-      autoAnswers,
-      autoAnsweredCount: updatedQuestions.filter(q => q.correctAnswer).length,
-    });
+      updatedQuestions: keywordFilled,
+      autoAnsweredCount: answered,
+      highConfidenceCount: highConf,
+      needsReviewCount: needsReview,
+      totalQuestions: dbQuestions.length,
+    }, `Auto-detected ${answered}/${dbQuestions.length} answers (${highConf} high confidence)`);
+
   } catch (err) {
     logger.error('generateResultReport error:', err);
-    error(res, 'Failed to generate report', 500);
+    error(res, 'Failed to generate result report', 500);
   }
 }
 
