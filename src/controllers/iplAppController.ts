@@ -329,7 +329,11 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       where: { contestId_userId: { contestId, userId } },
       include: {
         contest: {
-          include: { match: { select: { id: true } } },
+          include: {
+            match: {
+              select: { id: true, regCloseTime: true, registrationCloseTime: true, matchDate: true, status: true },
+            },
+          },
         },
       },
     });
@@ -349,12 +353,22 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       return;
     }
 
+    // Use same fallback chain as savePredictions — questionsLockAt → contest.regCloseTime → match times
+    const effectiveLockTime =
+      contest.questionsLockAt ||
+      contest.regCloseTime ||
+      contest.match?.regCloseTime ||
+      contest.match?.registrationCloseTime ||
+      contest.match?.matchDate;
+
     const predictionsLocked =
-      !!contest.questionsLockAt && contest.questionsLockAt <= now;
+      (!!effectiveLockTime && new Date(effectiveLockTime) <= now) ||
+      contest.match?.status === 'LIVE' ||
+      contest.match?.status === 'completed';
 
     const matchId = contest.match?.id;
     if (!matchId) {
-      success(res, { questionsAvailable: true, questionsLocked: predictionsLocked, questions: [], message: 'No questions available' });
+      success(res, { questionsAvailable: true, questionsLocked: predictionsLocked, questionsLockAt: effectiveLockTime || null, questions: [], message: 'No questions available' });
       return;
     }
 
@@ -379,6 +393,7 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
       success(res, {
         questionsAvailable: true,
         questionsLocked: predictionsLocked,
+        questionsLockAt: effectiveLockTime || null,
         questions: [],
         message: 'No questions available for this match yet',
       });
@@ -394,7 +409,7 @@ export async function getContestQuestions(req: Request, res: Response): Promise<
     success(res, {
       questionsAvailable: true,
       questionsLocked: predictionsLocked,
-      questionsLockAt: contest.questionsLockAt,
+      questionsLockAt: effectiveLockTime || null,
       language: userLang,
       questions: questions.map(q => ({
         id: q.id,
