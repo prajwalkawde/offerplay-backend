@@ -287,6 +287,10 @@ async function fetchAyetOffers(userId: string, _gaid: string, ip: string): Promi
 
       if (!o.tracking_link) continue;
 
+      const ayetClick = o.tracking_link || '';
+      const ayetPkgMatch = (o.package_name || o.bundle_id || ayetClick).match(
+        /[?&/](?:id=|details\/)([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)/i
+      );
       result.push({
         provider: 'ayet',
         offerId: String(o.id || ''),
@@ -297,9 +301,10 @@ async function fetchAyetOffers(userId: string, _gaid: string, ip: string): Promi
         offType: events.length > 1 ? 'CPE' : 'CPI',
         coins: totalCoins,
         payoutUsd: 0,
-        click: o.tracking_link || '',
+        click: ayetClick,
         events,
         os: 'android',
+        packageName: o.package_name || o.bundle_id || (ayetPkgMatch ? ayetPkgMatch[1].toLowerCase() : ''),
       });
     }
 
@@ -381,6 +386,9 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string, countr
         });
       }
 
+      const toroxPkgMatch = (o.package_name || o.bundle_id || clickUrl).match(
+        /[?&/](?:id=|details\/)([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)/i
+      );
       result.push({
         provider: 'torox',
         offerId: campaignId,
@@ -394,6 +402,7 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string, countr
         click: clickUrl,
         events,
         os: 'android',
+        packageName: o.package_name || o.bundle_id || (toroxPkgMatch ? toroxPkgMatch[1].toLowerCase() : ''),
       });
     }
 
@@ -434,6 +443,12 @@ function normalizePubScaleOffer(o: any, userId: string, gaid: string): any | nul
     };
   }).sort((a: any, b: any) => a.order - b.order);
 
+  const clickUrl = buildClickUrl(offerTrkUrl, userId, gaid);
+  const pkgMatch = (o.pkg || o.app_pkg || clickUrl).match(
+    /[?&/](?:id=|details\/)([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)/i
+  );
+  const packageName = o.pkg || o.app_pkg || (pkgMatch ? pkgMatch[1].toLowerCase() : '');
+
   return {
     provider: 'pubscale',
     offerId,
@@ -444,10 +459,11 @@ function normalizePubScaleOffer(o: any, userId: string, gaid: string): any | nul
     offType,
     coins: totalCoins,
     payoutUsd: parseFloat(o.pyt?.amt || '0'),
-    click: buildClickUrl(offerTrkUrl, userId, gaid),
+    click: clickUrl,
     events,
     geo: o.geo_tgt || {},
     os: o.os || 'android',
+    packageName,
   };
 }
 
