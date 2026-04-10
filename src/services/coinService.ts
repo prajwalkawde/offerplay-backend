@@ -123,6 +123,7 @@ export async function awardPrizes(contestId: string): Promise<void> {
   if (!contest) throw new Error('Contest not found');
 
   const distribution = contest.prizeDistribution as Record<string, number>;
+  const ticketDistribution = (contest.ticketPrizeDistribution ?? {}) as Record<string, number>;
   const txns: ReturnType<typeof prisma.transaction.create>[] = [];
   const updates: ReturnType<typeof prisma.participant.update>[] = [];
 
@@ -154,7 +155,7 @@ export async function awardPrizes(contestId: string): Promise<void> {
   });
 
   // Credit prize coins to winners
-  const winnerUpdates = contest.participants
+  const winnerCoinUpdates = contest.participants
     .map((p, idx) => {
       const rank = idx + 1;
       const prizeCoins = distribution[String(rank)] ?? 0;
@@ -166,7 +167,22 @@ export async function awardPrizes(contestId: string): Promise<void> {
     })
     .filter(Boolean) as ReturnType<typeof prisma.user.update>[];
 
-  await prisma.$transaction([...updates, ...txns, ...winnerUpdates]);
+  await prisma.$transaction([...updates, ...txns, ...winnerCoinUpdates]);
+
+  // Credit prize tickets to winners (outside main transaction — creditTickets manages its own audit log)
+  for (const [idx, p] of contest.participants.entries()) {
+    const rank = idx + 1;
+    const prizeTickets = ticketDistribution[String(rank)] ?? 0;
+    if (prizeTickets > 0) {
+      try {
+        const { creditTickets } = await import('./ticket.service');
+        await creditTickets(p.userId, prizeTickets, 'contest_win', `Contest win — rank ${rank}`, contestId);
+      } catch (err) {
+        logger.error('Failed to credit ticket prize', { contestId, userId: p.userId, rank, prizeTickets, err });
+      }
+    }
+  }
+
   logger.info('Prizes awarded', { contestId });
 }
 

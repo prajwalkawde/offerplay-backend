@@ -168,10 +168,11 @@ model Contest {
   regEndTime        DateTime
   gameStartTime     DateTime
   gameEndTime       DateTime
-  prizeType         PrizeType     @default(COINS)
-  totalPrizePool    Int           @default(0)
-  prizeDistribution Json
-  customFields      Json?
+  prizeType              PrizeType     @default(COINS)
+  totalPrizePool         Int           @default(0)
+  prizeDistribution      Json
+  ticketPrizeDistribution Json?
+  customFields           Json?
   status            ContestStatus @default(DRAFT)
   createdAt         DateTime      @default(now())
   game              Game          @relation(fields: [gameId], references: [id])

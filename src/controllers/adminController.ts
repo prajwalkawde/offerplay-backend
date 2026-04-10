@@ -390,7 +390,9 @@ export async function createContest(req: Request, res: Response): Promise<void> 
     gameId: string; name: string; type: ContestType; entryFee: number;
     maxPlayers: number; minPlayers?: number; regStartTime: string;
     regEndTime: string; gameStartTime: string; gameEndTime: string;
-    prizeType?: PrizeType; totalPrizePool?: number; prizeDistribution: Record<string, number>;
+    prizeType?: PrizeType; totalPrizePool?: number;
+    prizeDistribution: Record<string, number>;
+    ticketPrizeDistribution?: Record<string, number>;
   };
 
   const contest = await prisma.contest.create({
@@ -408,6 +410,7 @@ export async function createContest(req: Request, res: Response): Promise<void> 
       prizeType: body.prizeType ?? PrizeType.COINS,
       totalPrizePool: body.totalPrizePool ?? 0,
       prizeDistribution: body.prizeDistribution,
+      ticketPrizeDistribution: body.ticketPrizeDistribution ?? null,
       status: ContestStatus.DRAFT,
     },
   });
