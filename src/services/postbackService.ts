@@ -206,31 +206,26 @@ export async function receivePubScalePostback(
   const coins = Math.round(parseFloat(coinsRaw));
   if (coins <= 0) return 'OK';
 
-  const multiplier = await getMultiplier(userId);
-  const finalCoins = Math.round(coins * multiplier);
-
   try {
     await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
+      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: coins } } }),
       prisma.transaction.create({
         data: {
           userId,
           type: TransactionType.EARN_OFFERWALL,
-          amount: finalCoins,
+          amount: coins,
           refId: transactionId,
-          description: `PubScale offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+          description: 'PubScale offer',
         },
       }),
       prisma.offerwallLog.create({
-        data: { userId, provider: 'pubscale', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
+        data: { userId, provider: 'pubscale', offerId: transactionId, coinsAwarded: coins, rawData: raw },
       }),
       prisma.notification.create({
         data: {
           userId,
           title: 'Coins Earned! 🪙',
-          body: multiplier > 1
-            ? `🔥 ${finalCoins} coins earned! (${multiplier}x streak bonus applied)`
-            : `You earned ${finalCoins} coins from completing an offer!`,
+          body: `You earned ${coins} coins from completing an offer!`,
           type: 'COIN_EARNED',
         },
       }),
@@ -257,7 +252,7 @@ export async function receivePubScalePostback(
 
     await updateStreak(userId);
     updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
-    logger.info('PubScale coins credited', { userId, finalCoins, multiplier });
+    logger.info('PubScale coins credited', { userId, coins });
     return 'OK';
   } catch (err) {
     logger.error('PubScale postback processing failed:', { message: (err as Error).message });
@@ -297,31 +292,26 @@ export async function receiveToroxPostback(
   const coins = Math.round(parseFloat(coinsRaw));
   if (coins <= 0) { logger.warn('Torox coins=0, skipping', { userId, coinsRaw }); return 'OK'; }
 
-  const multiplier = await getMultiplier(userId);
-  const finalCoins = Math.round(coins * multiplier);
-
   try {
     await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
+      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: coins } } }),
       prisma.transaction.create({
         data: {
           userId,
           type: TransactionType.EARN_OFFERWALL,
-          amount: finalCoins,
+          amount: coins,
           refId: transactionId,
-          description: `Torox offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+          description: 'Torox offer',
         },
       }),
       prisma.offerwallLog.create({
-        data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
+        data: { userId, provider: 'torox', offerId: transactionId, coinsAwarded: coins, rawData: raw },
       }),
       prisma.notification.create({
         data: {
           userId,
           title: 'Coins Earned! 🪙',
-          body: multiplier > 1
-            ? `🔥 ${finalCoins} coins earned! (${multiplier}x streak bonus)`
-            : `You earned ${finalCoins} coins from completing an offer!`,
+          body: `You earned ${coins} coins from completing an offer!`,
           type: 'COIN_EARNED',
         },
       }),
@@ -341,7 +331,7 @@ export async function receiveToroxPostback(
     }
     await updateStreak(userId);
     updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
-    logger.info('Torox coins credited', { userId, finalCoins, multiplier });
+    logger.info('Torox coins credited', { userId, coins });
   } catch (err) {
     logger.error('Torox postback processing failed:', { message: (err as Error).message });
     await queueFailedPostback(raw, 'processing_error', 'torox');
@@ -383,38 +373,33 @@ export async function receiveAyetPostback(
   const coins = Math.round(parseFloat(coinsRaw));
   if (coins <= 0) { logger.warn('AyeT coins=0, skipping', { userId, coinsRaw }); return '1'; }
 
-  const multiplier = await getMultiplier(userId);
-  const finalCoins = Math.round(coins * multiplier);
-
   try {
     await prisma.$transaction([
-      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: finalCoins } } }),
+      prisma.user.update({ where: { id: userId }, data: { coinBalance: { increment: coins } } }),
       prisma.transaction.create({
         data: {
           userId,
           type: TransactionType.EARN_OFFERWALL,
-          amount: finalCoins,
+          amount: coins,
           refId: transactionId,
-          description: `AyeT offer${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+          description: 'AyeT offer',
         },
       }),
       prisma.offerwallLog.create({
-        data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: finalCoins, rawData: raw },
+        data: { userId, provider: 'ayet', offerId: transactionId, coinsAwarded: coins, rawData: raw },
       }),
       prisma.notification.create({
         data: {
           userId,
           title: 'Coins Earned! 🪙',
-          body: multiplier > 1
-            ? `🔥 ${finalCoins} coins earned! (${multiplier}x streak bonus)`
-            : `You earned ${finalCoins} coins from completing an offer!`,
+          body: `You earned ${coins} coins from completing an offer!`,
           type: 'COIN_EARNED',
         },
       }),
     ]);
     await updateStreak(userId);
     updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
-    logger.info('AyeT coins credited', { userId, finalCoins, multiplier });
+    logger.info('AyeT coins credited', { userId, coins });
   } catch (err) {
     logger.error('AyeT postback processing failed:', { message: (err as Error).message });
     await queueFailedPostback(raw, 'processing_error', 'ayet');

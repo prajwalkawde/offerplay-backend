@@ -186,23 +186,19 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
   const coins = amountLocal > 0 ? Math.round(amountLocal) : Math.round(amountUsd * 1000);
   if (coins <= 0) { logger.warn('CPX coins=0', { userId, amountLocal, amountUsd }); return '1'; }
 
-  const streak = await prisma.userStreak.findUnique({ where: { userId } });
-  const multiplier = streak?.multiplier || 1.0;
-  const finalCoins = Math.round(coins * multiplier);
-
   try {
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        data: { coinBalance: { increment: finalCoins } },
+        data: { coinBalance: { increment: coins } },
       });
       await tx.transaction.create({
         data: {
           userId,
           type: TransactionType.EARN_SURVEY,
-          amount: finalCoins,
+          amount: coins,
           refId: transactionId,
-          description: `CPX Survey completed${multiplier > 1 ? ` (${multiplier}x streak)` : ''}`,
+          description: 'CPX Survey completed',
         },
       });
       await tx.offerwallLog.create({
@@ -210,7 +206,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
           userId,
           provider: 'cpx',
           offerId: transactionId,
-          coinsAwarded: finalCoins,
+          coinsAwarded: coins,
           rawData: params,
         },
       });
@@ -218,7 +214,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
         data: {
           userId,
           title: 'Survey Completed! 🪙',
-          body: `You earned ${finalCoins} coins from a survey!${multiplier > 1 ? ` (${multiplier}x streak bonus)` : ''}`,
+          body: `You earned ${coins} coins from a survey!`,
           type: 'COIN_EARNED',
         },
       });
@@ -228,7 +224,7 @@ export const handleCPXPostback = async (params: any): Promise<string> => {
     await updateStreak(userId);
     await updateQuestProgress(userId, 'COMPLETE_SURVEYS', 1);
 
-    logger.info('CPX coins credited', { userId, finalCoins, multiplier });
+    logger.info('CPX coins credited', { userId, coins });
     return '1';
   } catch (err) {
     logger.error('CPX postback processing failed:', err);
