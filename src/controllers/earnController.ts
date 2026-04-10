@@ -379,6 +379,31 @@ Return ONLY this JSON, no other text:
   }
 }
 
+// ─── GET /api/earn/recent-coins?since=ISO_DATE ───────────────────────────────
+export async function getRecentCoins(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const sinceRaw = req.query.since as string | undefined;
+    const since = sinceRaw ? new Date(sinceRaw) : new Date(Date.now() - 10 * 60_000);
+
+    const txns = await prisma.transaction.findMany({
+      where: {
+        userId,
+        type: TransactionType.EARN_OFFERWALL,
+        createdAt: { gte: since },
+      },
+      select: { amount: true, description: true, createdAt: true, refId: true },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    const coinsEarned = txns.reduce((s, t) => s + t.amount, 0);
+    success(res, { coinsEarned, count: txns.length, transactions: txns });
+  } catch (err) {
+    error(res, 'Failed to fetch recent coins', 500);
+  }
+}
+
 // ─── GET /api/earn/surveys/history ───────────────────────────────────────────
 export async function getSurveyHistory(req: Request, res: Response): Promise<void> {
   try {

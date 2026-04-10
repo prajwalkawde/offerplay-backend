@@ -237,7 +237,21 @@ export async function receivePubScalePostback(
     ]);
 
     if (offerId) {
-      await prisma.offerProgress.updateMany({ where: { userId, offerId }, data: { isCompleted: true } });
+      // Sync offerProgress so the app shows accurate step count
+      const prog = await prisma.offerProgress.findUnique({
+        where: { userId_offerId: { userId, offerId } },
+      });
+      if (prog) {
+        const newCount = prog.tasksStarted + 1;
+        await prisma.offerProgress.update({
+          where: { userId_offerId: { userId, offerId } },
+          data: {
+            tasksStarted: newCount,
+            isCompleted: newCount >= prog.totalTasks,
+            lastTaskAt: new Date(),
+          },
+        });
+      }
       await updateCompletionStats('pubscale', offerId);
     }
 
@@ -312,7 +326,19 @@ export async function receiveToroxPostback(
         },
       }),
     ]);
-    if (offerId) await updateCompletionStats('torox', offerId);
+    if (offerId) {
+      const prog = await prisma.offerProgress.findUnique({
+        where: { userId_offerId: { userId, offerId } },
+      });
+      if (prog) {
+        const newCount = prog.tasksStarted + 1;
+        await prisma.offerProgress.update({
+          where: { userId_offerId: { userId, offerId } },
+          data: { tasksStarted: newCount, isCompleted: newCount >= prog.totalTasks, lastTaskAt: new Date() },
+        });
+      }
+      await updateCompletionStats('torox', offerId);
+    }
     await updateStreak(userId);
     updateQuestProgress(userId, 'COMPLETE_OFFERS', 1).catch(() => {});
     logger.info('Torox coins credited', { userId, finalCoins, multiplier });

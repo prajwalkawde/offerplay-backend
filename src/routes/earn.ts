@@ -8,6 +8,7 @@ import {
   clickOffer,
   trackProgress,
   getProgress,
+  getRecentCoins,
   rateOffer,
   reportMissingCoins,
   reportDeadUrl,
@@ -58,6 +59,7 @@ router.get('/offers', authMiddleware, getOffers);
 router.post('/offers/click', authMiddleware, clickOffer);
 router.post('/offers/progress', authMiddleware, trackProgress);
 router.get('/offers/progress', authMiddleware, getProgress);
+router.get('/offers/recent-coins', authMiddleware, getRecentCoins);
 router.post('/offers/rate', authMiddleware, rateOffer);
 router.post('/offers/report-missing', authMiddleware, reportMissingCoins);
 router.post('/offers/report-dead', authMiddleware, reportDeadUrl);
