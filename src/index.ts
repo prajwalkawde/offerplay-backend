@@ -62,6 +62,12 @@ const allowedOrigins = [
   process.env.ALLOWED_ORIGINS,
 ].filter(Boolean) as string[];
 
+// ─── Request Logger ───────────────────────────────────────────────────────────
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  logger.info(`[REQ] ${req.method} ${req.path} | ip=${req.ip}`);
+  next();
+});
+
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {

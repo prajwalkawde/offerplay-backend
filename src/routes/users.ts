@@ -19,51 +19,48 @@ router.get('/me/referrals', getUserReferrals);
 router.get('/referral/:code', validateReferralCode);
 router.get('/wallet', getWalletData);
 
-router.get('/me/onesignal-debug', async (req: Request, res: Response) => {
+// Save FCM token for push notifications
+router.post('/me/fcm-token', async (req: Request, res: Response) => {
+  const { fcmToken } = req.body as { fcmToken?: string };
+  if (!fcmToken) return error(res, 'fcmToken is required', 400);
+
+  await prisma.user.update({
+    where: { id: req.userId! },
+    data: { fcmToken },
+  });
+
+  return success(res, null, 'FCM token saved');
+});
+
+// Debug: check FCM status for current user
+router.get('/me/fcm-debug', async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.userId! },
-    select: { id: true, name: true, phone: true, oneSignalPlayerId: true },
+    select: { id: true, name: true, phone: true, fcmToken: true },
   });
-  const hasApiKey = !!(process.env.ONESIGNAL_REST_API_KEY);
-  const hasAppId  = !!(process.env.ONESIGNAL_APP_ID);
   return success(res, {
     user,
-    config: { hasAppId, hasApiKey },
-    status: user?.oneSignalPlayerId
-      ? (hasApiKey ? 'ready' : 'player_id_saved_but_no_api_key')
-      : 'no_player_id_registered',
+    status: user?.fcmToken ? 'ready' : 'no_fcm_token',
   });
 });
 
 // Test: send a push notification to yourself
-router.post('/me/onesignal-test', async (req: Request, res: Response) => {
+router.post('/me/push-test', async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.userId! },
-    select: { id: true, oneSignalPlayerId: true },
+    select: { id: true, fcmToken: true },
   });
-  if (!user?.oneSignalPlayerId) {
-    return error(res, 'No OneSignal player ID registered for this user', 400);
+  if (!user?.fcmToken) {
+    return error(res, 'No FCM token registered for this user', 400);
   }
   const { sendBulkNotification } = await import('../services/notificationService');
   await sendBulkNotification(
     [user.id],
     '🔔 Test Notification',
-    'OneSignal push is working!',
+    'FCM push is working!',
     'TEST',
   );
-  return success(res, { playerId: user.oneSignalPlayerId }, 'Test notification sent');
-});
-
-router.post('/me/onesignal-token', async (req: Request, res: Response) => {
-  const { playerId } = req.body as { playerId?: string };
-  if (!playerId) return error(res, 'playerId is required', 400);
-
-  await prisma.user.update({
-    where: { id: req.userId! },
-    data: { oneSignalPlayerId: playerId },
-  });
-
-  return success(res, null, 'OneSignal token saved');
+  return success(res, null, 'Test notification sent');
 });
 
 export default router;

@@ -391,6 +391,10 @@ router.get('/redemptions/:id', getRedemptionDetails);
 router.post('/redemptions/:id/approve', approveRedemption);
 router.post('/redemptions/:id/reject', rejectRedemption);
 
+// ─── Notifications ────────────────────────────────────────────────────────────
+import adminNotifRoutes from './admin.notifications.routes';
+router.use('/notifications', adminNotifRoutes);
+
 // ─── File Upload ───────────────────────────────────────────────────────────────
 import { success as apiSuccess, error as apiError } from '../utils/response';
 

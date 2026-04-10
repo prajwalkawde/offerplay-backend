@@ -5,7 +5,7 @@ import { isMatchEnded, fetchMatchScorecard } from '../services/cricketService';
 import { generateIPLQuestions, verifyAnswersWithAI } from '../services/claudeAiService';
 import { creditCoins } from '../services/coinService';
 import { logger } from '../utils/logger';
-import { sendDailyBonusReminders } from '../services/oneSignalService';
+import { sendDailyBonusReminders } from '../services/fcmService';
 
 // Runs every day at 8 AM — generates quiz questions for today's IPL matches
 export function scheduleQuizGeneration(): void {

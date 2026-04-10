@@ -1,8 +1,7 @@
 import { Queue, Worker, Job } from 'bullmq';
-import axios from 'axios';
 import { prisma } from '../config/database';
-import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { sendFCMToUsers } from '../services/fcmService';
 
 // ─── Redis connection (same pattern as coinQueue / notifQueue) ────────────────
 
@@ -34,40 +33,6 @@ export const superOfferNotifQueue = new Queue(QUEUE_NAME, {
   },
 });
 
-// ─── OneSignal helper ─────────────────────────────────────────────────────────
-
-const ONESIGNAL_API = 'https://onesignal.com/api/v1/notifications';
-
-async function sendOneSignalNotification(uid: string, title: string, body: string): Promise<void> {
-  if (!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_REST_API_KEY) {
-    logger.warn('OneSignal credentials not configured — skipping notification');
-    return;
-  }
-
-  try {
-    await axios.post(
-      ONESIGNAL_API,
-      {
-        app_id: env.ONESIGNAL_APP_ID,
-        include_external_user_ids: [uid],
-        headings: { en: title },
-        contents: { en: body },
-        data: { type: 'super_offer_ready' },
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Key ${env.ONESIGNAL_REST_API_KEY}`,
-        },
-        timeout: 10000,
-      }
-    );
-
-    logger.debug('OneSignal notification sent', { uid, title });
-  } catch (err) {
-    logger.error('OneSignal notification failed', { err, uid });
-  }
-}
 
 // ─── Job handler ──────────────────────────────────────────────────────────────
 
@@ -85,15 +50,8 @@ async function runSuperOfferNotificationJob(): Promise<void> {
   });
 
   for (const attempt of cooldownEnded) {
-    await sendOneSignalNotification(
-      attempt.uid,
-      'Super Offer Ready!',
-      'Your Super Offer is back! Complete it to earn coins.'
-    );
-    await prisma.superOfferAttempt.update({
-      where: { id: attempt.id },
-      data: { notifCooldownSent: true },
-    });
+    await sendFCMToUsers([attempt.uid], 'Super Offer Ready! 🎯', 'Your Super Offer is back! Complete it to earn coins.', { type: 'super_offer_ready' });
+    await prisma.superOfferAttempt.update({ where: { id: attempt.id }, data: { notifCooldownSent: true } });
   }
 
   // ── 2. 6 HOURS REMAINING ──────────────────────────────────────────────────
@@ -110,15 +68,8 @@ async function runSuperOfferNotificationJob(): Promise<void> {
   });
 
   for (const attempt of notif6h) {
-    await sendOneSignalNotification(
-      attempt.uid,
-      'Super Offer in 6 Hours',
-      'Your Super Offer unlocks soon. Get ready!'
-    );
-    await prisma.superOfferAttempt.update({
-      where: { id: attempt.id },
-      data: { notif6hSent: true },
-    });
+    await sendFCMToUsers([attempt.uid], 'Super Offer in 6 Hours ⏳', 'Your Super Offer unlocks soon. Get ready!', { type: 'super_offer_ready' });
+    await prisma.superOfferAttempt.update({ where: { id: attempt.id }, data: { notif6hSent: true } });
   }
 
   // ── 3. 12 HOURS REMAINING ─────────────────────────────────────────────────
@@ -135,15 +86,8 @@ async function runSuperOfferNotificationJob(): Promise<void> {
   });
 
   for (const attempt of notif12h) {
-    await sendOneSignalNotification(
-      attempt.uid,
-      'Super Offer Unlocking Soon',
-      '12 hours until your next Super Offer. Stay tuned!'
-    );
-    await prisma.superOfferAttempt.update({
-      where: { id: attempt.id },
-      data: { notif12hSent: true },
-    });
+    await sendFCMToUsers([attempt.uid], 'Super Offer Unlocking Soon 🔓', '12 hours until your next Super Offer. Stay tuned!', { type: 'super_offer_ready' });
+    await prisma.superOfferAttempt.update({ where: { id: attempt.id }, data: { notif12hSent: true } });
   }
 
   const totalProcessed = cooldownEnded.length + notif6h.length + notif12h.length;
