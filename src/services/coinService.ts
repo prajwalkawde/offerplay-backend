@@ -114,76 +114,108 @@ export async function refundEscrow(contestId: string): Promise<void> {
   logger.info('Escrow refunded', { contestId, count: participants.length });
 }
 
+// Assign ranks with tie support. Players with equal scores share the same rank.
+// The prize for tied players = floor(sum of prizes for the covered ranks / tie count).
+// Tiebreaker: among equal scores, whoever achieved the score first (lastScoreAt ASC) is ordered first
+// but still shares the same rank as the others with the same score.
 export async function awardPrizes(contestId: string): Promise<void> {
   const contest = await prisma.contest.findUnique({
     where: { id: contestId },
-    include: { participants: { orderBy: { score: 'desc' } } },
+    include: {
+      participants: {
+        orderBy: [
+          { score: 'desc' },
+          { lastScoreAt: 'asc' },   // tiebreaker: fastest scorer first
+        ],
+      },
+    },
   });
 
   if (!contest) throw new Error('Contest not found');
 
   const distribution = contest.prizeDistribution as Record<string, number>;
   const ticketDistribution = (contest.ticketPrizeDistribution ?? {}) as Record<string, number>;
-  const txns: ReturnType<typeof prisma.transaction.create>[] = [];
-  const updates: ReturnType<typeof prisma.participant.update>[] = [];
 
-  contest.participants.forEach((p, idx) => {
-    const rank = idx + 1;
-    const prizeCoins = distribution[String(rank)] ?? 0;
+  // ── Assign ranks with tie grouping ────────────────────────────────────────
+  // participants is already sorted: score DESC, lastScoreAt ASC
+  const ranked: { p: typeof contest.participants[0]; rank: number; coins: number; tickets: number }[] = [];
+  let i = 0;
+  while (i < contest.participants.length) {
+    // Find the tie group: all players with the same score
+    const tieScore = contest.participants[i].score;
+    let j = i;
+    while (j < contest.participants.length && contest.participants[j].score === tieScore) j++;
 
-    updates.push(
-      prisma.participant.update({
-        where: { id: p.id },
-        data: { rank },
-      })
-    );
+    const tieSize = j - i;          // number of tied players
+    const rankStart = i + 1;        // lowest rank in the group (1-indexed)
+    const rankEnd = j;              // highest rank in the group
 
-    if (prizeCoins > 0) {
-      txns.push(
-        prisma.transaction.create({
-          data: {
-            userId: p.userId,
-            type: TransactionType.EARN_CONTEST_WIN,
-            amount: prizeCoins,
-            refId: contestId,
-            description: `Contest win — rank ${rank}`,
-            status: 'completed',
-          },
-        })
-      );
+    // Sum coin prizes for ranks rankStart..rankEnd, split equally (floored)
+    let coinSum = 0;
+    let ticketSum = 0;
+    for (let r = rankStart; r <= rankEnd; r++) {
+      coinSum += distribution[String(r)] ?? 0;
+      ticketSum += ticketDistribution[String(r)] ?? 0;
     }
-  });
+    const coinsEach = Math.floor(coinSum / tieSize);
+    const ticketsEach = Math.floor(ticketSum / tieSize);
 
-  // Credit prize coins to winners
-  const winnerCoinUpdates = contest.participants
-    .map((p, idx) => {
-      const rank = idx + 1;
-      const prizeCoins = distribution[String(rank)] ?? 0;
-      if (prizeCoins <= 0) return null;
-      return prisma.user.update({
-        where: { id: p.userId },
-        data: { coinBalance: { increment: prizeCoins } },
+    for (let k = i; k < j; k++) {
+      ranked.push({
+        p: contest.participants[k],
+        rank: rankStart,            // all tied players get the SAME rank
+        coins: coinsEach,
+        tickets: ticketsEach,
       });
-    })
-    .filter(Boolean) as ReturnType<typeof prisma.user.update>[];
+    }
 
-  await prisma.$transaction([...updates, ...txns, ...winnerCoinUpdates]);
+    i = j;
+  }
 
-  // Credit prize tickets to winners (outside main transaction — creditTickets manages its own audit log)
-  for (const [idx, p] of contest.participants.entries()) {
-    const rank = idx + 1;
-    const prizeTickets = ticketDistribution[String(rank)] ?? 0;
-    if (prizeTickets > 0) {
+  // ── Build DB operations ────────────────────────────────────────────────────
+  const updates: ReturnType<typeof prisma.participant.update>[] = [];
+  const txns: ReturnType<typeof prisma.transaction.create>[] = [];
+  const coinUpdates: ReturnType<typeof prisma.user.update>[] = [];
+
+  for (const { p, rank, coins } of ranked) {
+    updates.push(prisma.participant.update({
+      where: { id: p.id },
+      data: { rank },
+    }));
+
+    if (coins > 0) {
+      txns.push(prisma.transaction.create({
+        data: {
+          userId: p.userId,
+          type: TransactionType.EARN_CONTEST_WIN,
+          amount: coins,
+          refId: contestId,
+          description: `Contest win — rank ${rank}`,
+          status: 'completed',
+        },
+      }));
+      coinUpdates.push(prisma.user.update({
+        where: { id: p.userId },
+        data: { coinBalance: { increment: coins } },
+      }));
+    }
+  }
+
+  await prisma.$transaction([...updates, ...txns, ...coinUpdates]);
+
+  // ── Credit tickets (outside main tx — has its own audit log) ──────────────
+  const { creditTickets } = await import('./ticket.service');
+  for (const { p, rank, tickets } of ranked) {
+    if (tickets > 0) {
       try {
-        const { creditTickets } = await import('./ticket.service');
-        await creditTickets(p.userId, prizeTickets, 'contest_win', `Contest win — rank ${rank}`, contestId);
+        await creditTickets(p.userId, tickets, 'contest_win', `Contest win — rank ${rank}`, contestId);
       } catch (err) {
-        logger.error('Failed to credit ticket prize', { contestId, userId: p.userId, rank, prizeTickets, err });
+        logger.error('Failed to credit ticket prize', { contestId, userId: p.userId, rank, tickets, err });
       }
     }
   }
 
-  logger.info('Prizes awarded', { contestId });
+  logger.info('Prizes awarded', { contestId, players: ranked.length });
 }
 
 export async function getBalance(userId: string): Promise<number> {
