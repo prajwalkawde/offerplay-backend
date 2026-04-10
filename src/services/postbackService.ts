@@ -182,6 +182,7 @@ export async function receivePubScalePostback(
   const goalName      = pickStr(raw.goal_name) || '';
   const payoutUsd     = pickStr(raw.payout_usd) || '';
   const country       = pickStr(raw.country) || '';
+  const gaid          = pickStr(raw.gaid) || '';
   const description   = offerName
     ? `${offerName}${goalName ? ` — ${goalName}` : ''}`
     : 'PubScale offer';
@@ -230,7 +231,7 @@ export async function receivePubScalePostback(
           provider: 'pubscale',
           offerId: transactionId,
           coinsAwarded: coins,
-          rawData: { ...raw, _meta: { offerName, goalName, payoutUsd, country } },
+          rawData: { ...raw, _meta: { offerName, goalName, payoutUsd, country, gaid } },
         },
       }),
       prisma.notification.create({
