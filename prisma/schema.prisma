@@ -584,20 +584,22 @@ model ContestSponsor {
 }
 
 model IplPrizeClaim {
-  id           String     @id @default(cuid())
-  userId       String
-  iplContestId String
-  rank         Int
-  prizeType    String     @default("gift")
-  prizeName    String?
-  prizeValue   Int        @default(0)
-  prizeImageUrl String?
-  inventoryId  String?
-  status       String     @default("pending")
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  user         User       @relation(fields: [userId], references: [id])
-  contest      IplContest @relation(fields: [iplContestId], references: [id])
+  id              String     @id @default(cuid())
+  userId          String
+  iplContestId    String
+  rank            Int
+  prizeType       String     @default("gift")
+  prizeName       String?
+  prizeValue      Int        @default(0)
+  prizeImageUrl   String?
+  inventoryId     String?
+  status          String     @default("pending")
+  deliveryDetails Json?
+  claimedAt       DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  user            User       @relation(fields: [userId], references: [id])
+  contest         IplContest @relation(fields: [iplContestId], references: [id])
 }
 
 model RedemptionRequest {

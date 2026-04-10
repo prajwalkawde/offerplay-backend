@@ -672,6 +672,101 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
   }
 }
 
+// ─── GET /api/ipl/contests/:contestId/my-prize ───────────────────────────────
+export async function getMyPrize(req: Request, res: Response): Promise<void> {
+  const userId = req.userId!;
+  const { contestId } = req.params as { contestId: string };
+
+  try {
+    const claim = await prisma.iplPrizeClaim.findFirst({
+      where: { userId, iplContestId: contestId },
+    });
+
+    if (!claim) {
+      // No gift prize — user may have only won coins
+      success(res, { claim: null });
+      return;
+    }
+
+    let inventory: any = null;
+    if (claim.inventoryId) {
+      inventory = await prisma.prizeInventory.findUnique({
+        where: { id: claim.inventoryId },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          imageUrl: true,
+          category: true,
+          marketValue: true,
+          provider: true,
+        },
+      });
+    }
+
+    success(res, {
+      claim: {
+        id: claim.id,
+        rank: claim.rank,
+        prizeType: claim.prizeType,
+        prizeName: claim.prizeName,
+        prizeValue: claim.prizeValue,
+        prizeImageUrl: claim.prizeImageUrl,
+        status: claim.status,
+        deliveryDetails: claim.deliveryDetails,
+        claimedAt: claim.claimedAt,
+        inventory,
+      },
+    });
+  } catch (err) {
+    logger.error('getMyPrize error:', err);
+    error(res, 'Failed to fetch prize info', 500);
+  }
+}
+
+// ─── POST /api/ipl/contests/:contestId/claim-prize ───────────────────────────
+export async function claimPrize(req: Request, res: Response): Promise<void> {
+  const userId = req.userId!;
+  const { contestId } = req.params as { contestId: string };
+  const { name, phone, address, email } = req.body;
+
+  try {
+    const claim = await prisma.iplPrizeClaim.findFirst({
+      where: { userId, iplContestId: contestId },
+    });
+
+    if (!claim) {
+      error(res, 'No prize claim found for this contest', 404);
+      return;
+    }
+
+    if (claim.status === 'claimed') {
+      success(res, { message: 'Prize already claimed', alreadyClaimed: true });
+      return;
+    }
+
+    const deliveryDetails: Record<string, string> = {};
+    if (name) deliveryDetails.name = name;
+    if (phone) deliveryDetails.phone = phone;
+    if (address) deliveryDetails.address = address;
+    if (email) deliveryDetails.email = email;
+
+    await prisma.iplPrizeClaim.update({
+      where: { id: claim.id },
+      data: {
+        status: 'claimed',
+        deliveryDetails,
+        claimedAt: new Date(),
+      },
+    });
+
+    success(res, { message: 'Prize claim submitted! Our team will contact you shortly.' });
+  } catch (err) {
+    logger.error('claimPrize error:', err);
+    error(res, 'Failed to submit claim', 500);
+  }
+}
+
 // ─── GET /api/ipl/contests/:contestId/my-predictions ─────────────────────────
 export async function getMyPredictions(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;

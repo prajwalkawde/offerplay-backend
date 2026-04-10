@@ -14,6 +14,8 @@ import {
   getContestLeaderboard,
   getMyContests,
   getMyPredictions,
+  getMyPrize,
+  claimPrize,
   getGlobalLeaderboard,
   getRank1Prize,
   calcTotalPrizePool,
@@ -42,6 +44,8 @@ router.post('/contests/:contestId/predict', authMiddleware, savePredictions);
 router.get('/contests/:contestId/leaderboard', optionalAuthMiddleware, getContestLeaderboard);
 router.get('/my-contests', authMiddleware, getMyContests);
 router.get('/contests/:contestId/my-predictions', authMiddleware, getMyPredictions);
+router.get('/contests/:contestId/my-prize', authMiddleware, getMyPrize);
+router.post('/contests/:contestId/claim-prize', authMiddleware, claimPrize);
 router.get('/global-leaderboard', optionalAuthMiddleware, getGlobalLeaderboard);
 router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res) => {
   const { matchId } = req.params as { matchId: string };
