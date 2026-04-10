@@ -1,35 +1,38 @@
 import { Router, Request, Response } from 'express';
 import {
   receivePubScalePostback,
+  receivePubScaleChargeback,
   receiveToroxPostback,
   receiveAyetPostback,
 } from '../services/postbackService';
 import { handleCPXPostback } from '../services/surveyService';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
-// Normalize query params: flatten arrays → prefer numeric/non-macro values,
-// and strip unreplaced macro placeholders like {reward} / %7Breward%7D
-function normalizeQuery(query: Record<string, any>): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(query)) {
-    if (Array.isArray(val)) {
-      // Pick the first value that isn't an unreplaced macro placeholder
-      const real = val.find((v: string) => v && !v.includes('{') && !v.includes('%7B'));
-      result[key] = real ?? '';
-    } else {
-      const s = String(val ?? '');
-      // Treat unreplaced placeholders as empty
-      result[key] = (s.includes('{') || s.includes('%7B')) ? '' : s;
-    }
-  }
-  return result;
+// PubScale whitelisted IPs (updated 2024-01-23 per their docs)
+const PUBSCALE_IPS = new Set(['34.100.236.68']);
+
+function isPubScaleIP(req: Request): boolean {
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '';
+  return PUBSCALE_IPS.has(ip);
 }
 
 // PubScale — GET (providers redirect here)
 router.get('/pubscale', async (req: Request, res: Response): Promise<void> => {
-  // Pass raw query (any) — service normalizes internally after sig verification
   const result = await receivePubScalePostback(req.query as Record<string, any>);
+  res.send(result);
+});
+
+// PubScale Chargeback — IP whitelisted
+router.get('/pubscale/chargeback', async (req: Request, res: Response): Promise<void> => {
+  if (!isPubScaleIP(req)) {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    logger.warn('PubScale chargeback blocked — unknown IP', { ip });
+    res.status(403).send('Forbidden');
+    return;
+  }
+  const result = await receivePubScaleChargeback(req.query as Record<string, any>);
   res.send(result);
 });
 

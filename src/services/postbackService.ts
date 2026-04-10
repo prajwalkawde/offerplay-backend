@@ -431,3 +431,99 @@ export async function receiveAyetPostback(
   }
   return '1';
 }
+
+// ─── PubScale Chargeback ──────────────────────────────────────────────────────
+// Called by PubScale when an offer is reversed (fraud, refund, non-conversion).
+// Same signature formula as regular postback: MD5(secret.userId.int(value).token)
+// PubScale's IP: 34.100.236.68 — whitelist check done at route level.
+export async function receivePubScaleChargeback(
+  raw: Record<string, any>
+): Promise<string> {
+  const userId        = pickStr(raw.user_id);
+  const coinsRaw      = pickStr(raw.value) || '0';
+  const transactionId = pickStr(raw.token) || pickStr(raw.transaction_id) || '';
+  const sig           = pickStr(raw.signature) || pickStr(raw.sig) || '';
+
+  logger.warn('PubScale chargeback received', { userId, transactionId, coinsRaw });
+
+  if (!userId || !transactionId) {
+    logger.warn('PubScale chargeback missing userId or token');
+    return 'OK';
+  }
+
+  // Verify signature — same formula as regular postback
+  const valid = await verifyPubscaleSignature(userId, coinsRaw, transactionId, sig);
+  if (!valid) {
+    logger.warn('PubScale chargeback invalid signature', { userId, transactionId });
+    return 'INVALID_SIGNATURE';
+  }
+
+  // Idempotency — check if already chargebacked
+  const alreadyDone = await prisma.offerwallLog.findFirst({
+    where: { offerId: transactionId, provider: 'pubscale_chargeback' },
+  });
+  if (alreadyDone) {
+    logger.info('PubScale chargeback already processed', { transactionId });
+    return 'OK';
+  }
+
+  // Find the original credit
+  const original = await prisma.offerwallLog.findFirst({
+    where: { offerId: transactionId, provider: 'pubscale' },
+  });
+  if (!original) {
+    // No original credit found — nothing to reverse
+    logger.warn('PubScale chargeback: no original credit found', { transactionId });
+    return 'OK';
+  }
+
+  const coinsToDeduct = original.coinsAwarded;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { coinBalance: true } });
+    if (!user) return 'OK';
+
+    // Deduct coins but never go below zero
+    const deduction = Math.min(coinsToDeduct, user.coinBalance);
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { coinBalance: { decrement: deduction } },
+      }),
+      prisma.transaction.create({
+        data: {
+          userId,
+          type: TransactionType.EARN_OFFERWALL,
+          amount: -deduction,
+          refId: `cb_${transactionId}`,
+          description: `PubScale chargeback (offer reversed)`,
+        },
+      }),
+      // Mark as chargebacked for idempotency
+      prisma.offerwallLog.create({
+        data: {
+          userId,
+          provider: 'pubscale_chargeback',
+          offerId: transactionId,
+          coinsAwarded: -deduction,
+          rawData: raw,
+        },
+      }),
+      prisma.notification.create({
+        data: {
+          userId,
+          title: 'Coins Deducted',
+          body: `${deduction} coins were removed because an offer was reversed by the provider.`,
+          type: 'COIN_EARNED',
+        },
+      }),
+    ]);
+
+    logger.warn('PubScale chargeback processed', { userId, transactionId, deduction });
+    return 'OK';
+  } catch (err) {
+    logger.error('PubScale chargeback processing failed', { message: (err as Error).message });
+    return 'ERROR';
+  }
+}
