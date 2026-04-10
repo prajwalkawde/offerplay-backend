@@ -465,7 +465,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
           iplContestId: contestId,
           rank,
           prizeType: 'gift',
-          prizeName: giftTier.name || 'Gift Prize',
+          prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
           prizeValue: giftTier.value ?? 0,
           prizeImageUrl: giftTier.imageUrl || '',
           inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
