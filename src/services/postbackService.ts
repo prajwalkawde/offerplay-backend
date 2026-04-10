@@ -246,21 +246,31 @@ export async function receivePubScalePostback(
     ]);
 
     if (offerId) {
-      // Sync offerProgress so the app shows accurate step count
-      const prog = await prisma.offerProgress.findUnique({
-        where: { userId_offerId: { userId, offerId } },
+      // Count how many postbacks have been credited for this offer (source of truth)
+      const creditedCount = await prisma.offerwallLog.count({
+        where: { userId, provider: 'pubscale', rawData: { path: ['c1'], equals: offerId } },
       });
-      if (prog) {
-        const newCount = prog.tasksStarted + 1;
-        await prisma.offerProgress.update({
-          where: { userId_offerId: { userId, offerId } },
-          data: {
-            tasksStarted: newCount,
-            isCompleted: newCount >= prog.totalTasks,
-            lastTaskAt: new Date(),
-          },
-        });
-      }
+
+      await prisma.offerProgress.upsert({
+        where: { userId_offerId: { userId, offerId } },
+        update: {
+          tasksStarted: creditedCount,
+          isCompleted: true,  // postback = confirmed completion of this step
+          lastTaskAt: new Date(),
+          ...(offerName ? { offerName } : {}),
+        },
+        create: {
+          userId,
+          provider: 'pubscale',
+          offerId,
+          offerName: offerName || null,
+          offerCoins: coins,
+          tasksStarted: 1,
+          totalTasks: 1,
+          isCompleted: true,
+          lastTaskAt: new Date(),
+        },
+      });
       await updateCompletionStats('pubscale', offerId);
     }
 
@@ -331,16 +341,17 @@ export async function receiveToroxPostback(
       }),
     ]);
     if (offerId) {
-      const prog = await prisma.offerProgress.findUnique({
-        where: { userId_offerId: { userId, offerId } },
+      const creditedCount = await prisma.offerwallLog.count({
+        where: { userId, provider: 'torox', rawData: { path: ['oid'], equals: offerId } },
       });
-      if (prog) {
-        const newCount = prog.tasksStarted + 1;
-        await prisma.offerProgress.update({
-          where: { userId_offerId: { userId, offerId } },
-          data: { tasksStarted: newCount, isCompleted: newCount >= prog.totalTasks, lastTaskAt: new Date() },
-        });
-      }
+      await prisma.offerProgress.upsert({
+        where: { userId_offerId: { userId, offerId } },
+        update: { tasksStarted: creditedCount, isCompleted: true, lastTaskAt: new Date() },
+        create: {
+          userId, provider: 'torox', offerId,
+          offerCoins: coins, tasksStarted: 1, totalTasks: 1, isCompleted: true, lastTaskAt: new Date(),
+        },
+      });
       await updateCompletionStats('torox', offerId);
     }
     await updateStreak(userId);
