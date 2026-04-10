@@ -62,7 +62,8 @@ export async function getOffers(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.userId!;
     const gaid = qs(req.query.gaid) || '';
-    const ip = req.ip || '';
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0]?.trim()) || req.ip || '';
 
     const user = await prisma.user.findUnique({
       where: { id: userId },

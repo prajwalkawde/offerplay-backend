@@ -43,7 +43,11 @@ function getCountryFromIp(ip: string): string {
     const geoip = require('geoip-lite');
     const clean = ip.replace(/^::ffff:/, ''); // strip IPv4-mapped IPv6 prefix
     const geo = geoip.lookup(clean);
-    return geo?.country || DEFAULT_COUNTRY;
+    const detected = geo?.country || DEFAULT_COUNTRY;
+    // App primarily serves India — if detected country has no PubScale inventory,
+    // fall back to IN so users always see offers. Keep AU, US, GB etc as-is.
+    const SUPPORTED = new Set(['IN', 'US', 'GB', 'AU', 'CA', 'DE', 'FR', 'BR', 'PH', 'ID', 'PK', 'BD', 'NG', 'KE']);
+    return SUPPORTED.has(detected) ? detected : DEFAULT_COUNTRY;
   } catch {
     return DEFAULT_COUNTRY;
   }
