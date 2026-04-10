@@ -177,8 +177,14 @@ export async function receivePubScalePostback(
   const coinsRaw      = pickStr(raw.value) || pickStr(raw.coins) || '0';
   const offerId       = pickStr(raw.offer_id) || pickStr(raw.c1) || '';
   const transactionId = pickStr(raw.token) || pickStr(raw.transaction_id) || `ps_${Date.now()}`;
-  // PubScale uses both "signature" and "sig" field names depending on the offer type
   const sig           = pickStr(raw.signature) || pickStr(raw.sig) || '';
+  const offerName     = pickStr(raw.offer_name) || '';
+  const goalName      = pickStr(raw.goal_name) || '';
+  const payoutUsd     = pickStr(raw.payout_usd) || '';
+  const country       = pickStr(raw.country) || '';
+  const description   = offerName
+    ? `${offerName}${goalName ? ` — ${goalName}` : ''}`
+    : 'PubScale offer';
 
   logger.info('PubScale postback params', { userId, coinsRaw, offerId, transactionId, sig: sig.slice(0, 8) + '...' });
 
@@ -215,17 +221,25 @@ export async function receivePubScalePostback(
           type: TransactionType.EARN_OFFERWALL,
           amount: coins,
           refId: transactionId,
-          description: 'PubScale offer',
+          description,
         },
       }),
       prisma.offerwallLog.create({
-        data: { userId, provider: 'pubscale', offerId: transactionId, coinsAwarded: coins, rawData: raw },
+        data: {
+          userId,
+          provider: 'pubscale',
+          offerId: transactionId,
+          coinsAwarded: coins,
+          rawData: { ...raw, _meta: { offerName, goalName, payoutUsd, country } },
+        },
       }),
       prisma.notification.create({
         data: {
           userId,
           title: 'Coins Earned! 🪙',
-          body: `You earned ${coins} coins from completing an offer!`,
+          body: offerName
+            ? `You earned ${coins} coins from "${offerName}"!`
+            : `You earned ${coins} coins from completing an offer!`,
           type: 'COIN_EARNED',
         },
       }),
