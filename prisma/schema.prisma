@@ -463,6 +463,7 @@ model OfferProgress {
   provider     String
   offerId      String
   offerName    String?
+  offerIcon    String?
   offerCoins   Int      @default(0)
   tasksStarted Int      @default(0)
   totalTasks   Int      @default(1)

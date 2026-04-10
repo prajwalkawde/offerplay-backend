@@ -116,9 +116,9 @@ export async function clickOffer(req: Request, res: Response): Promise<void> {
 export async function trackProgress(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.userId!;
-    const { offerId, provider, taskIndex, totalTasks, offerName, offerCoins } = req.body as {
+    const { offerId, provider, taskIndex, totalTasks, offerName, offerCoins, offerIcon } = req.body as {
       offerId: string; provider: string; taskIndex: number; totalTasks: number;
-      offerName?: string; offerCoins?: number;
+      offerName?: string; offerCoins?: number; offerIcon?: string;
     };
 
     if (!offerId || taskIndex === undefined || !totalTasks) {
@@ -133,10 +133,12 @@ export async function trackProgress(req: Request, res: Response): Promise<void> 
         totalTasks,
         isCompleted: taskIndex + 1 >= totalTasks,
         lastTaskAt: new Date(),
+        ...(offerIcon ? { offerIcon } : {}),
       },
       create: {
         userId, provider, offerId,
         offerName: offerName ?? null,
+        offerIcon: offerIcon ?? null,
         offerCoins: offerCoins ?? 0,
         tasksStarted: taskIndex + 1,
         totalTasks,
