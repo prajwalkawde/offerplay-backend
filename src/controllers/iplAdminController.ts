@@ -419,13 +419,15 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     if (hasPrizeTiers) {
       const tier = findTier(rank);
       if (tier) {
-        const tType = (tier.type ?? '').toLowerCase();
-        if (tType === 'gift' || tType === 'inventory' || tType === 'xoxoday') {
+        const tType = (tier.type ?? '').toUpperCase();
+        if (tType === 'TICKETS') {
+          ticketsAward = tier.tickets ?? 0;
+        } else if (tType === 'GIFT' || tType === 'INVENTORY' || tType === 'XOXODAY') {
           giftTier = tier;
         } else {
+          // COINS (default)
           coinsAward = tier.coins ?? 0;
         }
-        ticketsAward = tier.tickets ?? 0;
       }
     } else if (contest.prizeType === 'COINS' && contest.prizeCoins && rank === 1) {
       coinsAward = contest.prizeCoins;
