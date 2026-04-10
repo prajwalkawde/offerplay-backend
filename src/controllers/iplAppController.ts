@@ -564,6 +564,8 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
                 status: true,
                 result: true,
                 youtubeUrl: true,
+                regCloseTime: true,
+                registrationCloseTime: true,
               },
             },
           },
@@ -590,8 +592,20 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       const contest = entry.contest;
       const questionsAvailable =
         !contest.questionsAvailableAt || contest.questionsAvailableAt <= now;
+
+      // Same fallback chain as getContestQuestions and savePredictions
+      const effectiveLockTime =
+        contest.questionsLockAt ||
+        contest.regCloseTime ||
+        contest.match.regCloseTime ||
+        contest.match.registrationCloseTime ||
+        contest.match.matchDate;
+      const matchDone =
+        contest.match.status === 'live' || contest.match.status === 'LIVE' ||
+        contest.match.status === 'completed' || contest.match.status === 'COMPLETED';
       const predictionsLocked =
-        !!contest.questionsLockAt && contest.questionsLockAt <= now;
+        matchDone || (!!effectiveLockTime && new Date(effectiveLockTime) <= now);
+
       const predictionCount = predCountMap.get(contest.matchId) || 0;
 
       let contestState = 'JOINED';
@@ -604,7 +618,8 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       } else if (predictionCount > 0 && predictionsLocked) {
         contestState = 'WAITING_RESULT';
       }
-      if (contest.status === 'completed') {
+      // Contest fully done (results processed) OR match completed
+      if (contest.status === 'completed' || matchDone) {
         contestState = (entry.coinsWon > 0 || (entry.rank !== null && entry.rank <= 3))
           ? 'WON' : 'COMPLETED';
       }

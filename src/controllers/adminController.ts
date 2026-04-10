@@ -814,9 +814,12 @@ export async function getMatchParticipants(req: Request, res: Response): Promise
 
 // ─── IPL Admin — Match questions CRUD ────────────────────────────────────────
 export async function getMatchQuestions(req: Request, res: Response): Promise<void> {
+  const language = req.query.language as string | undefined;
+  const where: any = { matchId: req.params.id as string };
+  if (language) where.language = language;
   const questions = await prisma.iplQuestion.findMany({
-    where: { matchId: req.params.id as string },
-    orderBy: { id: 'asc' },
+    where,
+    orderBy: [{ language: 'asc' }, { questionNumber: 'asc' }],
   });
   success(res, questions);
 }
