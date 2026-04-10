@@ -176,8 +176,9 @@ export async function receivePubScalePostback(
   const userId        = pickStr(raw.user_id);
   const coinsRaw      = pickStr(raw.value) || pickStr(raw.coins) || '0';
   const offerId       = pickStr(raw.offer_id) || pickStr(raw.c1) || '';
-  const transactionId = pickStr(raw.token) || `ps_${Date.now()}`;
-  const sig           = pickStr(raw.signature) || '';
+  const transactionId = pickStr(raw.token) || pickStr(raw.transaction_id) || `ps_${Date.now()}`;
+  // PubScale uses both "signature" and "sig" field names depending on the offer type
+  const sig           = pickStr(raw.signature) || pickStr(raw.sig) || '';
 
   logger.info('PubScale postback params', { userId, coinsRaw, offerId, transactionId, sig: sig.slice(0, 8) + '...' });
 
