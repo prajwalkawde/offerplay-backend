@@ -4,7 +4,7 @@ import { scoreMatch } from '../services/iplService';
 import { finalizeContest } from '../services/contestService';
 import { success, error, paginated } from '../utils/response';
 import { qs } from '../utils/query';
-import { ContestStatus, ContestType, PrizeType, TransactionType } from '@prisma/client';
+import { ContestStatus, ContestType, PrizeType, TransactionType, Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
@@ -410,7 +410,7 @@ export async function createContest(req: Request, res: Response): Promise<void> 
       prizeType: body.prizeType ?? PrizeType.COINS,
       totalPrizePool: body.totalPrizePool ?? 0,
       prizeDistribution: body.prizeDistribution,
-      ticketPrizeDistribution: body.ticketPrizeDistribution ?? null,
+      ticketPrizeDistribution: body.ticketPrizeDistribution ?? Prisma.JsonNull,
       status: ContestStatus.DRAFT,
     },
   });
