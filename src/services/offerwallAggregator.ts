@@ -11,7 +11,7 @@ const claude = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 const MIN_PAYOUT_USD = 0.03;   // ~₹2.5 — show virtually all real offers
 const HIGH_VALUE_USD = 0.50;   // $0.50+ gets "high value" badge
 const FEED_CACHE_TTL = 900; // 15 minutes
-const USER_COUNTRY = 'IN';
+const DEFAULT_COUNTRY = 'IN';  // fallback if IP lookup fails
 
 const TIME_ESTIMATES: Record<string, string> = {
   CPI: '2-5 min',
@@ -36,6 +36,19 @@ const cleanHtml = (text: string): string => {
     .trim();
 };
 
+// ─── Country detection from IP ────────────────────────────────────────────────
+function getCountryFromIp(ip: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const geoip = require('geoip-lite');
+    const clean = ip.replace(/^::ffff:/, ''); // strip IPv4-mapped IPv6 prefix
+    const geo = geoip.lookup(clean);
+    return geo?.country || DEFAULT_COUNTRY;
+  } catch {
+    return DEFAULT_COUNTRY;
+  }
+}
+
 // ─── Main Aggregator ──────────────────────────────────────────────────────────
 export async function getMergedFeed(
   userId: string,
@@ -43,21 +56,23 @@ export async function getMergedFeed(
   language = 'en',
   ip = ''
 ): Promise<any[]> {
-  const cacheKey = rk(`offer_feed:${userId}:${gaid}:${language}`);
+  const country = getCountryFromIp(ip) || DEFAULT_COUNTRY;
+  const cacheKey = rk(`offer_feed:${userId}:${gaid}:${language}:${country}`);
   const cached = await redis.get(cacheKey);
   if (cached) {
-    logger.info('Serving cached offer feed', { userId });
+    logger.info('Serving cached offer feed', { userId, country });
     return JSON.parse(cached);
   }
 
+  logger.info('Building offer feed', { userId, country, ip });
   const [qualityMap, socialMap] = await Promise.all([loadQualityMap(), loadSocialMap()]);
 
   const allOffers: any[] = [];
 
   const [pubscaleResult, ayetResult, toroxResult] = await Promise.allSettled([
-    fetchPubScaleOffers(userId, gaid),
+    fetchPubScaleOffers(userId, gaid, country),
     fetchAyetOffers(userId, gaid, ip),
-    fetchToroxOffers(userId, gaid, ip),
+    fetchToroxOffers(userId, gaid, ip, country),
   ]);
 
   for (const result of [pubscaleResult, ayetResult, toroxResult]) {
@@ -171,9 +186,11 @@ async function translateOffers(offers: any[], language: string): Promise<any[]> 
 }
 
 // ─── PubScale Provider ────────────────────────────────────────────────────────
-async function fetchPubScaleOffers(userId: string, gaid: string): Promise<any[]> {
+async function fetchPubScaleOffers(userId: string, gaid: string, country: string): Promise<any[]> {
   try {
     if (!env.PUBSCALE_APP_ID || !env.PUBSCALE_PUB_KEY) return [];
+
+    // Raw feed cached globally (country-agnostic) — geo filtering done locally
     const cacheKey = rk('pubscale:raw:feed');
     const cached = await redis.get(cacheKey);
 
@@ -205,12 +222,12 @@ async function fetchPubScaleOffers(userId: string, gaid: string): Promise<any[]>
     for (const raw of data.offers || []) {
       const payoutUsd = parseFloat(raw.pyt?.amt || '0');
       if (payoutUsd < MIN_PAYOUT_USD) continue;
-      if (!isAvailableInIndia(raw)) continue;
+      if (!isAvailableInCountry(raw, country)) continue;
       const offer = normalizePubScaleOffer(raw, userId, gaid);
       if (offer) offers.push(offer);
     }
 
-    logger.info(`PubScale: ${offers.length} offers fetched`);
+    logger.info(`PubScale: ${offers.length} offers for country=${country}`);
     return offers;
   } catch (err) {
     logger.error('PubScale fetch error:', { message: (err as Error).message });
@@ -295,7 +312,7 @@ async function fetchAyetOffers(userId: string, _gaid: string, ip: string): Promi
 }
 
 // ─── Torox Provider ───────────────────────────────────────────────────────────
-async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promise<any[]> {
+async function fetchToroxOffers(userId: string, gaid: string, ip: string, country: string): Promise<any[]> {
   try {
     if (!env.TOROX_API_KEY || !env.TOROX_APP_ID) return [];
 
@@ -331,7 +348,7 @@ async function fetchToroxOffers(userId: string, gaid: string, ip: string): Promi
             source_id: env.TOROX_APP_ID,
             token: env.TOROX_API_KEY,
             uid: userId,
-            geo: 'IN',
+            geo: country,
             campaign_id: campaignId,
           },
           timeout: 5000,
@@ -580,11 +597,11 @@ function diversifyProviders(offers: any[], maxPerProvider: number, topN: number)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function isAvailableInIndia(raw: any): boolean {
+function isAvailableInCountry(raw: any, country: string): boolean {
   const geo = raw.geo_tgt || {};
   if (!geo.include && !geo.exclude) return true;
-  if ((geo.exclude || []).includes(USER_COUNTRY)) return false;
-  if (geo.include?.length > 0 && !geo.include.includes(USER_COUNTRY)) return false;
+  if ((geo.exclude || []).includes(country)) return false;
+  if (geo.include?.length > 0 && !geo.include.includes(country)) return false;
   return true;
 }
 
