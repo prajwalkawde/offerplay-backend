@@ -330,12 +330,14 @@ interface PrizeTier {
   rank?: number;
   rankFrom?: number;
   rankTo?: number;
-  type: 'gift' | 'coins';
+  type: 'gift' | 'coins' | 'COINS' | 'INVENTORY' | 'XOXODAY';
   name?: string;
   imageUrl?: string;
   value?: number;
   coins?: number;
+  tickets?: number;
   inventoryId?: string;
+  inventoryItemId?: string;
 }
 
 export async function processIPLContestResults(req: Request, res: Response): Promise<void> {
@@ -370,9 +372,20 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     }
   }
 
-  const rankings = Object.entries(userScores)
-    .sort(([, a], [, b]) => b - a)
-    .map(([userId, score], i) => ({ userId, score, rank: i + 1 }));
+  // ── Rank with tie handling: equal scores → same rank ────────────────────────
+  const sortedEntries = Object.entries(userScores).sort(([, a], [, b]) => b - a);
+  const rankings: { userId: string; score: number; rank: number }[] = [];
+  let pos = 0;
+  while (pos < sortedEntries.length) {
+    const tieScore = sortedEntries[pos][1];
+    let end = pos;
+    while (end < sortedEntries.length && sortedEntries[end][1] === tieScore) end++;
+    const sharedRank = pos + 1; // all in this group get the same rank
+    for (let k = pos; k < end; k++) {
+      rankings.push({ userId: sortedEntries[k][0], score: tieScore, rank: sharedRank });
+    }
+    pos = end;
+  }
 
   // Use prizeTiersConfig (new) → prizeTiers (old) → fallback
   const prizeTiers = (
@@ -389,25 +402,30 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
   let coinsDistributed = 0;
   let giftClaimsCreated = 0;
 
+  const { creditTickets } = await import('../services/ticket.service');
+
   for (const { userId, rank } of rankings) {
     let coinsAward = 0;
+    let ticketsAward = 0;
     let giftTier: PrizeTier | undefined;
 
-    if (hasPrizeTiers) {
-      // Find matching tier from admin-configured prize tiers
-      const tier = prizeTiers.find(t => {
-        if (t.rankFrom !== undefined && t.rankTo !== undefined) {
-          return rank >= t.rankFrom && rank <= t.rankTo;
-        }
-        return t.rank === rank;
-      });
+    const findTier = (r: number) => prizeTiers.find(t => {
+      const lo = t.rankFrom ?? t.rank;
+      const hi = t.rankTo ?? t.rank;
+      if (lo !== undefined && hi !== undefined) return r >= lo && r <= hi;
+      return false;
+    });
 
+    if (hasPrizeTiers) {
+      const tier = findTier(rank);
       if (tier) {
-        if (tier.type === 'gift') {
+        const tType = (tier.type ?? '').toLowerCase();
+        if (tType === 'gift' || tType === 'inventory' || tType === 'xoxoday') {
           giftTier = tier;
         } else {
           coinsAward = tier.coins ?? 0;
         }
+        ticketsAward = tier.tickets ?? 0;
       }
     } else if (contest.prizeType === 'COINS' && contest.prizeCoins && rank === 1) {
       coinsAward = contest.prizeCoins;
@@ -425,11 +443,16 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
         userId, coinsAward, TransactionType.EARN_IPL_WIN, contestId,
         `IPL Contest Win — ${contest.name} — Rank #${rank}`
       );
-      await prisma.iplContestEntry.updateMany({
-        where: { contestId, userId },
-        data: { rank, coinsWon: coinsAward, totalPoints: userScores[userId] ?? 0 },
-      });
       coinsDistributed += coinsAward;
+    }
+
+    // Award tickets
+    if (ticketsAward > 0) {
+      try {
+        await creditTickets(userId, ticketsAward, 'ipl_contest_win', `IPL Contest Win — ${contest.name} — Rank #${rank}`, contestId);
+      } catch (ticketErr) {
+        logger.error('Failed to credit IPL contest tickets', { userId, rank, ticketsAward, ticketErr });
+      }
     }
 
     // Award gift prize — create an IplPrizeClaim
@@ -443,24 +466,18 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
           prizeName: giftTier.name || 'Gift Prize',
           prizeValue: giftTier.value ?? 0,
           prizeImageUrl: giftTier.imageUrl || '',
-          inventoryId: giftTier.inventoryId || null,
+          inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
           status: 'pending',
         },
-      });
-      await prisma.iplContestEntry.updateMany({
-        where: { contestId, userId },
-        data: { rank, totalPoints: userScores[userId] ?? 0 },
       });
       giftClaimsCreated++;
     }
 
-    // Update rank+points for non-winners
-    if (coinsAward === 0 && !giftTier) {
-      await prisma.iplContestEntry.updateMany({
-        where: { contestId, userId },
-        data: { rank, totalPoints: userScores[userId] ?? 0 },
-      });
-    }
+    // Update entry rank + points
+    await prisma.iplContestEntry.updateMany({
+      where: { contestId, userId },
+      data: { rank, coinsWon: coinsAward, totalPoints: userScores[userId] ?? 0 },
+    });
   }
 
   await prisma.iplContest.update({
