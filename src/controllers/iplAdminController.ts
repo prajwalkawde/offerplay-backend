@@ -5,6 +5,7 @@ import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { creditCoins } from '../services/coinService';
 import { getTodayIPLMatches } from '../services/cricApiService';
+import { sendFCMToUsers } from '../services/fcmService';
 
 // ─── Admin: List all matches with question + contest counts ───────────────────
 export async function getAdminIPLMatches(_req: Request, res: Response): Promise<void> {
@@ -619,6 +620,29 @@ export async function distributeIPLContestPrizes(contestId: string): Promise<{
       where: { contestId, userId },
       data: { rank: prizeRank, coinsWon: coinsAward, totalPoints: score },
     });
+
+    // Push notification for winner
+    let notifTitle = '';
+    let notifBody = '';
+    const rankLabel = `Rank #${prizeRank}`;
+    if (giftTier) {
+      const prizeName = (giftTier as any).itemName || giftTier.name || 'a gift prize';
+      notifTitle = `🏆 You won ${prizeName}!`;
+      notifBody = `Congratulations! You finished ${rankLabel} in ${contest.name}. Tap to claim your prize!`;
+    } else if (coinsAward > 0) {
+      notifTitle = `🎉 You won ${coinsAward} coins!`;
+      notifBody = `You finished ${rankLabel} in ${contest.name}. Your winnings have been credited!`;
+    } else if (ticketsAward > 0) {
+      notifTitle = `🎟️ You won ${ticketsAward} ticket${ticketsAward > 1 ? 's' : ''}!`;
+      notifBody = `You finished ${rankLabel} in ${contest.name}. Your tickets have been credited!`;
+    }
+    if (notifTitle) {
+      sendFCMToUsers([userId], notifTitle, notifBody, {
+        type: 'contest_win',
+        contestId,
+        rank: String(prizeRank),
+      }).catch(e => logger.error('Contest win FCM error:', e));
+    }
   }
 
   await prisma.iplContest.update({ where: { id: contestId }, data: { status: 'completed' } });

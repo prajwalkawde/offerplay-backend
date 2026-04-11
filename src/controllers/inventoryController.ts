@@ -2,6 +2,14 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
+import { sendFCMToUsers } from '../services/fcmService';
+
+const PRIZE_STATUS_MESSAGES: Record<string, { title: string; body: (prizeName: string) => string }> = {
+  verified:  { title: '✅ Prize Verified!',    body: (p) => `Your ${p} claim has been verified. We're processing your delivery.` },
+  shipped:   { title: '🚚 Prize Shipped!',      body: (p) => `Great news! Your ${p} is on the way. Track your delivery in the app.` },
+  delivered: { title: '🎉 Prize Delivered!',    body: (p) => `Your ${p} has been delivered! Open the app to get your details.` },
+  rejected:  { title: '❌ Claim Rejected',      body: (p) => `Your ${p} claim was rejected. Open the app for more info.` },
+};
 
 // ─── Inventory CRUD (Admin) ────────────────────────────────────────────────────
 
@@ -212,6 +220,18 @@ export async function updateIplPrizeClaim(req: Request, res: Response): Promise<
 
     const claim = await prisma.iplPrizeClaim.update({ where: { id }, data: updateData });
     success(res, claim, 'Claim updated!');
+
+    // Send push notification to user about status change
+    const finalStatus = updateData.status;
+    const msg = finalStatus ? PRIZE_STATUS_MESSAGES[finalStatus] : null;
+    if (msg) {
+      const prizeName = claim.prizeName || 'your prize';
+      sendFCMToUsers([claim.userId], msg.title, msg.body(prizeName), {
+        type: 'prize_status',
+        claimId: id,
+        status: finalStatus,
+      }).catch(e => logger.error('Prize status FCM error:', e));
+    }
   } catch (err) {
     logger.error('updateIplPrizeClaim error:', err);
     error(res, 'Failed to update claim', 500);
