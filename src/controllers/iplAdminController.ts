@@ -601,7 +601,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
           rank,
           prizeType: claimPrizeType,
           prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
-          prizeValue: giftTier.denominationValue ?? giftTier.value ?? 0,
+          prizeValue: (giftTier as any).denominationValue ?? giftTier.value ?? 0,
           prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
           inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
           status: 'pending',
