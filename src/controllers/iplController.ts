@@ -4,6 +4,7 @@ import { submitPrediction, getLeaderboard } from '../services/iplService';
 import { debitCoins } from '../services/coinService';
 import { success, error, paginated } from '../utils/response';
 import { qs } from '../utils/query';
+import { getRank1Prize, calcTotalPrizePool } from './iplAppController';
 
 export async function listMatches(req: Request, res: Response): Promise<void> {
   const status = qs(req.query.status);
@@ -91,24 +92,47 @@ export async function getMatchContestsForUser(req: Request, res: Response): Prom
     orderBy: { createdAt: 'asc' },
   });
 
-  const result = contests.map(c => ({
-    id: c.id,
-    matchId: c.matchId,
-    name: c.name,
-    contestType: c.contestType,
-    battleType: c.battleType,
-    maxPlayers: c.maxPlayers,
-    minPlayers: c.minPlayers,
-    currentPlayers: c._count.entries,
-    entryFee: c.entryFee,
-    prizeType: c.prizeType,
-    prizeCoins: c.prizeCoins,
-    prizeGiftName: c.prizeGiftName,
-    prizeGiftValue: c.prizeGiftValue,
-    prizeDistribution: c.prizeDistribution,
-    regCloseTime: c.regCloseTime,
-    status: c.status,
-  }));
+  const result = contests.map(c => {
+    const parsedTiers = typeof c.prizeTiersConfig === 'string'
+      ? JSON.parse(c.prizeTiersConfig as string)
+      : c.prizeTiersConfig;
+    const allTiers: any[] = Array.isArray(parsedTiers) ? parsedTiers : [];
+
+    return {
+      id: c.id,
+      matchId: c.matchId,
+      name: c.name,
+      contestType: c.contestType,
+      battleType: c.battleType,
+      maxPlayers: c.maxPlayers,
+      minPlayers: c.minPlayers,
+      currentPlayers: c._count.entries,
+      spotsLeft: Math.max(0, c.maxPlayers - c._count.entries),
+      isFull: c._count.entries >= c.maxPlayers,
+      entryFee: c.entryFee,
+      ticketCost: c.ticketCost,
+      isFree: c.isFree,
+      entryType: c.entryType || 'FREE',
+      prizeType: c.prizeType,
+      prizeCoins: c.prizeCoins,
+      prizeGiftName: c.prizeGiftName,
+      prizeGiftValue: c.prizeGiftValue,
+      prizeDistribution: c.prizeDistribution,
+      prizeTiersConfig: allTiers,
+      rank1Prize: getRank1Prize({ prizeTiersConfig: allTiers }),
+      totalPrizePool: calcTotalPrizePool(allTiers),
+      regCloseTime: c.regCloseTime,
+      questionsAvailableAt: c.questionsAvailableAt,
+      questionsLockAt: c.questionsLockAt,
+      sponsorName: c.sponsorName,
+      sponsorLogo: c.sponsorLogo,
+      youtubeUrl: c.youtubeUrl,
+      maxEntriesPerUser: c.maxEntriesPerUser,
+      botCount: c.botCount,
+      questionCount: c.questionCount,
+      status: c.status,
+    };
+  });
 
   success(res, result);
 }
