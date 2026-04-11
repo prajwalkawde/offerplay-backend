@@ -401,15 +401,19 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
   ]);
 
   // Score each user — compare answer to correctAnswer directly
-  // Bots get a random realistic score
+  // Bots get a random realistic score based on actual question points
   const userScores: Record<string, number> = {};
-  const questionCount = contest.questionCount || 10;
-  const maxBotScore = questionCount * 100;
+  const questionsPerUser = contest.questionCount || 10;
+  // Estimate max achievable score: sum of top-N question points (the N a user would actually see)
+  const sortedByPoints = [...questions].sort((a, b) => b.points - a.points);
+  const topN = sortedByPoints.slice(0, questionsPerUser);
+  const estimatedMaxScore = topN.reduce((s, q) => s + q.points, 0) || (questionsPerUser * 100);
+  // Bot scoring: bell-curve random between 10% and 65% of max (rarely wins top rank)
   for (const entry of contest.entries) {
     if (botUserIds.has(entry.userId)) {
-      // Random score: bell-curve-ish by averaging 3 randoms, capped at 70% max
+      // Average 3 randoms gives bell-curve centered at ~35% max
       const r = (Math.random() + Math.random() + Math.random()) / 3;
-      userScores[entry.userId] = Math.floor(r * maxBotScore * 0.7);
+      userScores[entry.userId] = Math.floor((0.10 + r * 0.55) * estimatedMaxScore);
     } else {
       userScores[entry.userId] = 0;
     }
@@ -576,17 +580,26 @@ export async function getContestParticipants(req: Request, res: Response): Promi
 }
 
 // ─── Bot Management ───────────────────────────────────────────────────────────
-const BOT_NAMES = [
-  'Rahul Kumar', 'Priya Sharma', 'Arjun Patel', 'Sneha Singh', 'Vikram Rao',
-  'Ananya Gupta', 'Karthik Nair', 'Divya Joshi', 'Rohan Verma', 'Pooja Iyer',
-  'Amit Desai', 'Kavya Reddy', 'Siddharth Mehta', 'Neha Krishnan', 'Aditya Banerjee',
-  'Shreya Pillai', 'Nikhil Malhotra', 'Tanvi Bose', 'Ravi Choudhury', 'Meera Nambiar',
-  'Dhruv Saxena', 'Anjali Bose', 'Varun Subramaniam', 'Lakshmi Hegde', 'Suresh Pandey',
-  'Ishaan Trivedi', 'Nisha Kulkarni', 'Manav Agarwal', 'Swati Dubey', 'Pratik Shah',
-  'Simran Dhaliwal', 'Gaurav Jha', 'Ritika Tiwari', 'Akash Chauhan', 'Bhavna Patel',
-  'Hardik Parikh', 'Sonali Mishra', 'Chirag Goyal', 'Preeti Rastogi', 'Tejas Soni',
-  'Ayesha Khan', 'Mohan Lal', 'Deepika Chawla', 'Kunal Srivastava', 'Nandini Rao',
-  'Santosh Kumar', 'Kavitha Nair', 'Shubham Tomar', 'Ankita Pandey', 'Vishal Bhatt',
+// Combine first + last names for ~3,600 unique combinations
+const BOT_FIRST_NAMES = [
+  'Aarav', 'Aditya', 'Akash', 'Amit', 'Ananya', 'Ankita', 'Anjali', 'Arjun', 'Ayesha',
+  'Bhavna', 'Chirag', 'Deepika', 'Dhruv', 'Divya', 'Gaurav', 'Hardik', 'Ishaan',
+  'Karthik', 'Kavitha', 'Kavya', 'Kunal', 'Lakshmi', 'Manav', 'Meera', 'Mohan',
+  'Nandini', 'Neha', 'Nikhil', 'Nisha', 'Pooja', 'Pratik', 'Preeti', 'Priya',
+  'Rahul', 'Ravi', 'Ritika', 'Rohan', 'Santosh', 'Shreya', 'Shubham', 'Siddharth',
+  'Simran', 'Sneha', 'Sonali', 'Suresh', 'Swati', 'Tanvi', 'Tejas', 'Varun', 'Vikram',
+  'Vishal', 'Vivek', 'Yash', 'Zara', 'Abhinav', 'Aditi', 'Alok', 'Amrita', 'Ashish',
+  'Bharat', 'Chetna', 'Dilip', 'Farhan', 'Girish', 'Harish', 'Jatin', 'Kriti', 'Lokesh',
+  'Mahesh', 'Namrata', 'Omkar', 'Pallavi', 'Rajesh', 'Sanjay', 'Tanya', 'Uday', 'Vijay',
+];
+
+const BOT_LAST_NAMES = [
+  'Agarwal', 'Banerjee', 'Bhatt', 'Bose', 'Chauhan', 'Chawla', 'Choudhury', 'Desai',
+  'Dhaliwal', 'Dubey', 'Goyal', 'Gupta', 'Hegde', 'Iyer', 'Jha', 'Joshi', 'Kulkarni',
+  'Kumar', 'Malhotra', 'Mehta', 'Mishra', 'Nair', 'Nambiar', 'Pandey', 'Parikh',
+  'Patel', 'Pillai', 'Rao', 'Rastogi', 'Reddy', 'Saxena', 'Shah', 'Sharma', 'Singh',
+  'Soni', 'Srivastava', 'Subramaniam', 'Tiwari', 'Tomar', 'Trivedi', 'Verma',
+  'Krishnan', 'Lal', 'Bhat', 'Kaur', 'Dixit', 'Kapoor', 'Khanna', 'Bajaj', 'Mehra',
 ];
 
 export async function getBotUsers(_req: Request, res: Response): Promise<void> {
@@ -607,8 +620,9 @@ export async function createBotUsers(req: Request, res: Response): Promise<void>
 
   for (let i = 0; i < n; i++) {
     const idx = existingCount + i + 1;
-    const baseName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
-    const name = `${baseName}`;
+    const first = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+    const last = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+    const name = `${first} ${last}`;
     const phone = `99${String(idx).padStart(9, '0')}`;
     const referralCode = `BOT${String(idx).padStart(6, '0')}`;
 
