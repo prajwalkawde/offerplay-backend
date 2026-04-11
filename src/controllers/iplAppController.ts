@@ -619,9 +619,21 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       } else if (predictionCount > 0 && predictionsLocked) {
         contestState = 'WAITING_RESULT';
       }
+      // Compute ticketsWon from prizeTiersConfig based on rank
+      let ticketsWon = 0;
+      if (entry.rank !== null) {
+        const tiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
+        const wonTier = tiers.find((t: any) => {
+          const from = t.rank ?? t.rankFrom ?? 1;
+          const to = t.rankTo ?? t.rank ?? from;
+          return entry.rank! >= from && entry.rank! <= to;
+        });
+        if (wonTier?.type === 'TICKETS') ticketsWon = wonTier.tickets || 0;
+      }
+
       // Contest fully done (results processed) OR match completed
       if (contest.status === 'completed' || matchDone) {
-        contestState = (entry.coinsWon > 0 || (entry.rank !== null && entry.rank <= 3))
+        contestState = (entry.coinsWon > 0 || ticketsWon > 0 || (entry.rank !== null && entry.rank <= 3))
           ? 'WON' : 'COMPLETED';
       }
 
@@ -634,6 +646,7 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         rank: entry.rank,
         totalPoints: entry.totalPoints,
         coinsWon: entry.coinsWon,
+        ticketsWon,
         status: contest.status,
         matchId: contest.matchId,
         matchTeam1: contest.match.team1,
