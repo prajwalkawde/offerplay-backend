@@ -594,6 +594,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     if (giftTier) {
       const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
       const claimPrizeType = tierTypeRaw === 'XOXODAY' ? 'XOXODAY' : 'INVENTORY';
+      const itemCategory = (giftTier as any).itemCategory || '';
       await prisma.iplPrizeClaim.create({
         data: {
           userId,
@@ -605,6 +606,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
           prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
           inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
           status: 'pending',
+          deliveryDetails: itemCategory ? { _itemCategory: itemCategory } : undefined,
         },
       });
       giftClaimsCreated++;

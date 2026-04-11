@@ -651,8 +651,11 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       } else if (predictionCount > 0 && predictionsLocked) {
         contestState = 'WAITING_RESULT';
       }
-      // Compute ticketsWon from prizeTiersConfig based on rank
+      // Compute ticketsWon and check if user has any prize tier
       let ticketsWon = 0;
+      let hasInventoryPrize = false;
+      let wonPrizeName: string | null = null;
+      let wonPrizeImage: string | null = null;
       if (entry.rank !== null) {
         const tiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
         const wonTier = tiers.find((t: any) => {
@@ -661,11 +664,16 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
           return entry.rank! >= from && entry.rank! <= to;
         });
         if (wonTier?.type === 'TICKETS') ticketsWon = wonTier.tickets || 0;
+        if (wonTier?.type === 'INVENTORY' || wonTier?.type === 'XOXODAY' || wonTier?.type === 'GIFT') {
+          hasInventoryPrize = true;
+          wonPrizeName = wonTier.itemName || null;
+          wonPrizeImage = wonTier.itemImage || null;
+        }
       }
 
       // Contest fully done (results processed) OR match completed
       if (contest.status === 'completed' || matchDone) {
-        contestState = (entry.coinsWon > 0 || ticketsWon > 0 || (entry.rank !== null && entry.rank <= 3))
+        contestState = (entry.coinsWon > 0 || ticketsWon > 0 || hasInventoryPrize)
           ? 'WON' : 'COMPLETED';
       }
 
@@ -679,6 +687,8 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         totalPoints: entry.totalPoints,
         coinsWon: entry.coinsWon,
         ticketsWon,
+        wonPrizeName,
+        wonPrizeImage,
         status: contest.status,
         matchId: contest.matchId,
         matchTeam1: contest.match.team1,
