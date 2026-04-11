@@ -504,21 +504,53 @@ export async function getContestLeaderboard(req: Request, res: Response): Promis
 
     const entries = await prisma.iplContestEntry.findMany({
       where: { contestId },
-      include: { user: { select: { id: true, name: true, phone: true } } },
+      include: { user: { select: { id: true, name: true, phone: true, isBot: true } } },
       orderBy: [{ totalPoints: 'desc' }, { joinedAt: 'asc' }],
       take: 100,
     });
 
-    const leaderboard = entries.map((entry, i) => ({
-      rank: i + 1,
-      userId: entry.userId,
-      name: entry.user.name?.split(' ')[0] ?? `User${entry.userId.slice(0, 4)}`,
-      fullName: entry.user.name ?? 'Unknown',
-      avatar: (entry.user.name?.charAt(0) ?? 'U').toUpperCase(),
-      totalPoints: entry.totalPoints,
-      coinsWon: entry.coinsWon,
-      isCurrentUser: entry.userId === userId,
-    }));
+    // Build prize lookup by rank from prizeTiersConfig
+    const allTiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
+    const getPrizeTier = (rank: number) => allTiers.find((t: any) => {
+      const from = t.rank ?? t.rankFrom ?? 1;
+      const to = t.rankTo ?? t.rank ?? from;
+      return rank >= from && rank <= to;
+    }) ?? null;
+
+    const getPrizeLabel = (tier: any): string | null => {
+      if (!tier) return null;
+      if (tier.type === 'TICKETS') return `🎟️ ${tier.tickets || 1} Ticket${(tier.tickets || 1) > 1 ? 's' : ''}`;
+      if (tier.type === 'INVENTORY') return `🎁 ${tier.itemName || 'Prize'}`;
+      if (tier.type === 'XOXODAY') return `🎫 ₹${tier.denominationValue} Gift Card`;
+      if (tier.type === 'COINS' && tier.coins) return `🪙 ${tier.coins} Coins`;
+      return null;
+    };
+
+    const leaderboard = entries.map((entry, i) => {
+      const displayRank = i + 1;
+      const prizeTier = getPrizeTier(displayRank);
+      return {
+        rank: displayRank,
+        userId: entry.userId,
+        name: entry.user.name?.split(' ')[0] ?? `User${entry.userId.slice(0, 4)}`,
+        fullName: entry.user.name ?? 'Unknown',
+        avatar: (entry.user.name?.charAt(0) ?? 'U').toUpperCase(),
+        totalPoints: entry.totalPoints,
+        coinsWon: entry.coinsWon,
+        isCurrentUser: entry.userId === userId,
+        isBot: entry.user.isBot ?? false,
+        prizeLabel: getPrizeLabel(prizeTier),
+        prizeTier: prizeTier ? {
+          type: prizeTier.type,
+          coins: prizeTier.coins ?? null,
+          tickets: prizeTier.tickets ?? null,
+          itemName: prizeTier.itemName ?? null,
+          itemImage: prizeTier.itemImage ?? null,
+          itemValue: prizeTier.itemValue ?? null,
+          denominationValue: prizeTier.denominationValue ?? null,
+        } : null,
+      };
+    });
 
     const userRank = leaderboard.find(e => e.isCurrentUser);
     const enriched = enrichMatch(contest.match, await getTeamLogoUrls());
