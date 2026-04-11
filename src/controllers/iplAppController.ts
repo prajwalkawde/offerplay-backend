@@ -858,6 +858,49 @@ export async function claimPrize(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ─── GET /api/ipl/my-prizes ───────────────────────────────────────────────────
+export async function getMyPrizeHistory(req: Request, res: Response): Promise<void> {
+  const userId = req.userId!;
+  try {
+    const claims = await prisma.iplPrizeClaim.findMany({
+      where: { userId },
+      include: {
+        contest: {
+          select: {
+            id: true,
+            name: true,
+            match: { select: { team1: true, team2: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const result = claims.map(c => ({
+      id: c.id,
+      contestId: c.iplContestId,
+      contestName: c.contest.name,
+      matchTeam1: c.contest.match.team1,
+      matchTeam2: c.contest.match.team2,
+      rank: c.rank,
+      prizeType: c.prizeType,
+      prizeName: c.prizeName,
+      prizeValue: c.prizeValue,
+      prizeImageUrl: c.prizeImageUrl,
+      status: c.status,
+      deliveryDetails: c.deliveryDetails,
+      claimedAt: c.claimedAt,
+      createdAt: c.createdAt,
+    }));
+
+    success(res, { prizes: result, total: result.length });
+  } catch (err) {
+    logger.error('getMyPrizeHistory error:', err);
+    error(res, 'Failed to fetch prize history', 500);
+  }
+}
+
 // ─── GET /api/ipl/contests/:contestId/my-predictions ─────────────────────────
 export async function getMyPredictions(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;

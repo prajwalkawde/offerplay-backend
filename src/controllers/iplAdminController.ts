@@ -592,15 +592,17 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
 
     // Award gift prize — create an IplPrizeClaim
     if (giftTier) {
+      const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
+      const claimPrizeType = tierTypeRaw === 'XOXODAY' ? 'XOXODAY' : 'INVENTORY';
       await prisma.iplPrizeClaim.create({
         data: {
           userId,
           iplContestId: contestId,
           rank,
-          prizeType: 'gift',
+          prizeType: claimPrizeType,
           prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
-          prizeValue: giftTier.value ?? 0,
-          prizeImageUrl: giftTier.imageUrl || '',
+          prizeValue: giftTier.denominationValue ?? giftTier.value ?? 0,
+          prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
           inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
           status: 'pending',
         },

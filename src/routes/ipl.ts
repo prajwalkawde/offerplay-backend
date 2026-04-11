@@ -19,6 +19,7 @@ import {
   getGlobalLeaderboard,
   getRank1Prize,
   calcTotalPrizePool,
+  getMyPrizeHistory,
 } from '../controllers/iplAppController';
 import { prisma } from '../config/database';
 import { success } from '../utils/response';
@@ -46,6 +47,7 @@ router.get('/my-contests', authMiddleware, getMyContests);
 router.get('/contests/:contestId/my-predictions', authMiddleware, getMyPredictions);
 router.get('/contests/:contestId/my-prize', authMiddleware, getMyPrize);
 router.post('/contests/:contestId/claim-prize', authMiddleware, claimPrize);
+router.get('/my-prizes', authMiddleware, getMyPrizeHistory);
 router.get('/global-leaderboard', optionalAuthMiddleware, getGlobalLeaderboard);
 router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res) => {
   const { matchId } = req.params as { matchId: string };
