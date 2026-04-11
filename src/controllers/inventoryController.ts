@@ -188,12 +188,29 @@ export async function getIplPrizeClaims(req: Request, res: Response): Promise<vo
 export async function updateIplPrizeClaim(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params as { id: string };
-    const { status } = req.body as { status: string };
+    const { status, voucherCode, voucherPin, voucherExpiry, voucherBrand, adminNote } = req.body;
 
-    const claim = await prisma.iplPrizeClaim.update({
-      where: { id },
-      data: { status },
-    });
+    // Build update payload
+    const updateData: any = {};
+    if (status) updateData.status = status;
+
+    // If voucher details provided, merge into deliveryDetails
+    if (voucherCode || voucherPin || voucherExpiry || voucherBrand || adminNote) {
+      const existing = await prisma.iplPrizeClaim.findUnique({ where: { id }, select: { deliveryDetails: true } });
+      const currentDetails = (existing?.deliveryDetails as Record<string, any>) || {};
+      updateData.deliveryDetails = {
+        ...currentDetails,
+        ...(voucherCode   && { _voucherCode:   voucherCode }),
+        ...(voucherPin    && { _voucherPin:     voucherPin }),
+        ...(voucherExpiry && { _voucherExpiry:  voucherExpiry }),
+        ...(voucherBrand  && { _voucherBrand:   voucherBrand }),
+        ...(adminNote     && { _adminNote:      adminNote }),
+      };
+      // Auto-set status to delivered when code is added, if not explicitly set
+      if (voucherCode && !status) updateData.status = 'delivered';
+    }
+
+    const claim = await prisma.iplPrizeClaim.update({ where: { id }, data: updateData });
     success(res, claim, 'Claim updated!');
   } catch (err) {
     logger.error('updateIplPrizeClaim error:', err);
