@@ -669,16 +669,61 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       };
     });
 
-    const active = result.filter(e => e.displayStatus === 'OPEN');
-    const pending = result.filter(e => e.displayStatus === 'LOCKED');
-    const completed = result.filter(e => e.displayStatus === 'COMPLETED' || e.status === 'completed');
+    // Fetch rank-1 (top winner) for all completed contests in one query
+    const completedContestIds = result
+      .filter(e => e.displayStatus === 'COMPLETED' || e.status === 'completed')
+      .map(e => e.contestId);
+
+    const topWinnerMap = new Map<string, any>();
+    if (completedContestIds.length > 0) {
+      const rank1Entries = await prisma.iplContestEntry.findMany({
+        where: { contestId: { in: completedContestIds }, rank: 1 },
+        include: { user: { select: { name: true, isBot: true } } },
+      });
+      for (const w of rank1Entries) {
+        const contestTiers: any[] = Array.isArray((w as any).contest?.prizeTiersConfig)
+          ? (w as any).contest.prizeTiersConfig
+          : [];
+        topWinnerMap.set(w.contestId, {
+          name: w.user.name?.split(' ')[0] ?? 'Winner',
+          isBot: w.user.isBot ?? false,
+          coinsWon: w.coinsWon,
+          rank: 1,
+        });
+      }
+    }
+
+    // Attach topWinner and compute rank-1 prize label for each completed entry
+    const resultWithWinner = result.map(e => {
+      if (e.displayStatus !== 'COMPLETED' && e.status !== 'completed') return e;
+      const winner = topWinnerMap.get(e.contestId) || null;
+      // Compute rank-1 prize from prizeTiersConfig
+      const tiers: any[] = Array.isArray((entries.find(en => en.contest.id === e.contestId)?.contest as any)?.prizeTiersConfig)
+        ? (entries.find(en => en.contest.id === e.contestId)?.contest as any).prizeTiersConfig
+        : [];
+      const rank1Tier = tiers.find((t: any) => (t.rank ?? t.rankFrom ?? 1) === 1) ?? tiers[0];
+      const rank1Prize = rank1Tier
+        ? rank1Tier.type === 'TICKETS'
+          ? `🎟️ ${rank1Tier.tickets || 1} Ticket${(rank1Tier.tickets || 1) > 1 ? 's' : ''}`
+          : rank1Tier.type === 'INVENTORY'
+          ? `🎁 ${rank1Tier.itemName || 'Prize'}`
+          : rank1Tier.type === 'XOXODAY'
+          ? `🎫 ₹${rank1Tier.denominationValue} Gift Card`
+          : `🪙 ${rank1Tier.coins || 0} Coins`
+        : null;
+      return { ...e, topWinner: winner ? { ...winner, prize: rank1Prize } : null };
+    });
+
+    const active = resultWithWinner.filter(e => e.displayStatus === 'OPEN');
+    const pending = resultWithWinner.filter(e => e.displayStatus === 'LOCKED');
+    const completed = resultWithWinner.filter(e => e.displayStatus === 'COMPLETED' || e.status === 'completed');
 
     success(res, {
-      all: result,
+      all: resultWithWinner,
       active,
       pending,
       completed,
-      totalJoined: result.length,
+      totalJoined: resultWithWinner.length,
     });
   } catch (err) {
     logger.error('getMyContests error:', err);
