@@ -21,7 +21,7 @@ import {
 import {
   getAdminIPLMatches, createAdminIPLMatch,
   getMatchContests, createIPLContest, updateIPLContest, deleteIPLContest,
-  publishIPLContest, processIPLContestResults, getContestParticipants,
+  publishIPLContest, processIPLContestResults, getContestParticipants, fixBotScores,
   fetchTodayMatches, updateIPLMatch, processIPLResults,
   saveEditedQuestions, generateResultReport,
   generateIPLQuestions, getIPLAnalytics, deleteAdminIPLMatch,
@@ -160,6 +160,7 @@ router.put('/ipl/contests/:contestId', updateIPLContest);
 router.delete('/ipl/contests/:contestId', deleteIPLContest);
 router.post('/ipl/contests/:contestId/publish', publishIPLContest);
 router.post('/ipl/contests/:contestId/process', processIPLContestResults);
+router.post('/ipl/contests/:contestId/fix-bots', fixBotScores);
 router.get('/ipl/contests/:contestId/participants', getContestParticipants);
 
 // Legacy AI triggers

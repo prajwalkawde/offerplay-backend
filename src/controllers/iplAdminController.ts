@@ -453,25 +453,35 @@ export async function distributeIPLContestPrizes(contestId: string): Promise<{
 
   // ── Score all participants ─────────────────────────────────────────────────
   const userScores: Record<string, number> = {};
-  const questionsPerUser = contest.questionCount || 10;
-  const sortedByPoints = [...questions].sort((a, b) => b.points - a.points);
-  const estimatedMaxScore = sortedByPoints.slice(0, questionsPerUser)
-    .reduce((s, q) => s + q.points, 0) || (questionsPerUser * 100);
 
+  // Step 1: Score real users from their actual predictions
   for (const entry of contest.entries) {
-    if (botUserIds.has(entry.userId)) {
-      const spread = Math.random() * 0.04;
-      userScores[entry.userId] = Math.floor((0.95 + spread) * estimatedMaxScore);
-    } else {
+    if (!botUserIds.has(entry.userId)) {
       userScores[entry.userId] = 0;
     }
   }
   for (const pred of predictions) {
+    if (botUserIds.has(pred.userId)) continue; // skip bots
     const question = questions.find(q => q.id === pred.questionId);
     if (!question?.correctAnswer) continue;
     if (pred.answer === question.correctAnswer) {
       userScores[pred.userId] = (userScores[pred.userId] ?? 0) + question.points;
     }
+  }
+
+  // Step 2: Score bots ABOVE the highest real user score so they always win
+  const highestRealScore = Math.max(0, ...Object.values(userScores));
+  const baseForBots = Math.max(
+    highestRealScore,
+    questions.reduce((s, q) => s + q.points, 0) * 0.7, // at least 70% of total possible
+    (contest.questionCount || 10) * 100,                // fallback minimum
+  );
+  const botIds = [...botUserIds];
+  for (let i = 0; i < botIds.length; i++) {
+    // Each bot gets a slightly different score so they have distinct ranks
+    // Bot 0 = highest, Bot 1 = slightly lower, etc.
+    const gap = (i + 1) * 50;
+    userScores[botIds[i]] = baseForBots + (botIds.length - i) * 100 - gap;
   }
 
   // ── Global ranking (bots + real) ──────────────────────────────────────────
@@ -624,6 +634,81 @@ export async function distributeIPLContestPrizes(contestId: string): Promise<{
     giftClaimsCreated,
     rankings: prizeRankings.slice(0, 10).map(r => ({ ...r, rank: r.prizeRank })),
   };
+}
+
+// ─── Fix bot scores for already-completed contests ────────────────────────────
+export async function fixBotScores(req: Request, res: Response): Promise<void> {
+  const { contestId } = req.params as { contestId: string };
+  try {
+    const contest = await prisma.iplContest.findUnique({
+      where: { id: contestId },
+      include: { entries: { include: { user: { select: { id: true, name: true, isBot: true } } } }, match: true },
+    });
+    if (!contest) { error(res, 'Contest not found', 404); return; }
+
+    const botEntries = contest.entries.filter((e: any) => e.user?.isBot);
+    if (botEntries.length === 0) { error(res, 'No bot entries in this contest', 400); return; }
+
+    const entryUserIds = contest.entries.map(e => e.userId);
+    const botUserIds = new Set(botEntries.map(e => e.userId));
+
+    const [predictions, questions] = await Promise.all([
+      prisma.iplPrediction.findMany({ where: { matchId: contest.matchId, userId: { in: entryUserIds } } }),
+      prisma.iplQuestion.findMany({ where: { matchId: contest.matchId } }),
+    ]);
+
+    // Compute real user scores
+    const realScores: Record<string, number> = {};
+    for (const entry of contest.entries) {
+      if (!botUserIds.has(entry.userId)) realScores[entry.userId] = 0;
+    }
+    for (const pred of predictions) {
+      if (botUserIds.has(pred.userId)) continue;
+      const q = questions.find(q => q.id === pred.questionId);
+      if (q?.correctAnswer && pred.answer === q.correctAnswer) {
+        realScores[pred.userId] = (realScores[pred.userId] ?? 0) + q.points;
+      }
+    }
+
+    const highestRealScore = Math.max(0, ...Object.values(realScores));
+    const baseForBots = Math.max(
+      highestRealScore,
+      questions.reduce((s, q) => s + q.points, 0) * 0.7,
+      (contest.questionCount || 10) * 100,
+    );
+
+    const botIds = [...botUserIds];
+    const updates = [];
+    for (let i = 0; i < botIds.length; i++) {
+      const botScore = baseForBots + (botIds.length - i) * 100 - (i + 1) * 50;
+      updates.push(prisma.iplContestEntry.updateMany({
+        where: { contestId, userId: botIds[i] },
+        data: { totalPoints: botScore },
+      }));
+    }
+    await Promise.all(updates);
+
+    // Re-rank everyone
+    const allEntries = await prisma.iplContestEntry.findMany({ where: { contestId }, orderBy: { totalPoints: 'desc' } });
+    for (let i = 0; i < allEntries.length; i++) {
+      await prisma.iplContestEntry.update({
+        where: { id: allEntries[i].id },
+        data: { rank: i + 1 },
+      });
+    }
+
+    success(res, {
+      botsFixed: botIds.length,
+      highestRealScore,
+      botScores: botIds.map((id, i) => ({
+        name: botEntries.find(e => e.userId === id)?.user?.name,
+        score: baseForBots + (botIds.length - i) * 100 - (i + 1) * 50,
+      })),
+    }, `Fixed ${botIds.length} bot scores. Bots now rank above real users.`);
+  } catch (err) {
+    logger.error('fixBotScores error:', err);
+    error(res, 'Failed to fix bot scores', 500);
+  }
 }
 
 // ─── HTTP handler — POST /api/admin/ipl/contests/:contestId/process ───────────
