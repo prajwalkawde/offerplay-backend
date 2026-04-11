@@ -400,25 +400,27 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     prisma.iplQuestion.findMany({ where: { matchId: contest.matchId } }),
   ]);
 
-  // Score each user — compare answer to correctAnswer directly
-  // Bots get a random realistic score based on actual question points
+  // ── Score real users from their predictions ────────────────────────────────
   const userScores: Record<string, number> = {};
   const questionsPerUser = contest.questionCount || 10;
-  // Estimate max achievable score: sum of top-N question points (the N a user would actually see)
+
+  // Estimate max score from actual question point values
   const sortedByPoints = [...questions].sort((a, b) => b.points - a.points);
-  const topN = sortedByPoints.slice(0, questionsPerUser);
-  const estimatedMaxScore = topN.reduce((s, q) => s + q.points, 0) || (questionsPerUser * 100);
-  // Bot scoring: bell-curve random between 10% and 65% of max (rarely wins top rank)
+  const estimatedMaxScore = sortedByPoints.slice(0, questionsPerUser)
+    .reduce((s, q) => s + q.points, 0) || (questionsPerUser * 100);
+
+  // Initialise scores: bots get 95–99% of max so leaderboard looks competitive
   for (const entry of contest.entries) {
     if (botUserIds.has(entry.userId)) {
-      // Average 3 randoms gives bell-curve centered at ~35% max
-      const r = (Math.random() + Math.random() + Math.random()) / 3;
-      userScores[entry.userId] = Math.floor((0.10 + r * 0.55) * estimatedMaxScore);
+      // Near-perfect scores: 95% + random 0–4% spread so they're not all identical
+      const spread = Math.random() * 0.04;
+      userScores[entry.userId] = Math.floor((0.95 + spread) * estimatedMaxScore);
     } else {
       userScores[entry.userId] = 0;
     }
   }
 
+  // Score real users based on correct predictions
   for (const pred of predictions) {
     const question = questions.find(q => q.id === pred.questionId);
     if (!question?.correctAnswer) continue;
@@ -427,20 +429,41 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     }
   }
 
-  // ── Rank with tie handling: equal scores → same rank ────────────────────────
+  // ── Global ranking (bots + real) — used for display / leaderboard ──────────
   const sortedEntries = Object.entries(userScores).sort(([, a], [, b]) => b - a);
-  const rankings: { userId: string; score: number; rank: number }[] = [];
+  const allRankings: { userId: string; score: number; displayRank: number }[] = [];
   let pos = 0;
   while (pos < sortedEntries.length) {
     const tieScore = sortedEntries[pos][1];
     let end = pos;
     while (end < sortedEntries.length && sortedEntries[end][1] === tieScore) end++;
-    const sharedRank = pos + 1; // all in this group get the same rank
+    const sharedRank = pos + 1;
     for (let k = pos; k < end; k++) {
-      rankings.push({ userId: sortedEntries[k][0], score: tieScore, rank: sharedRank });
+      allRankings.push({ userId: sortedEntries[k][0], score: tieScore, displayRank: sharedRank });
     }
     pos = end;
   }
+
+  // ── Prize ranking — real users only, re-ranked among themselves ────────────
+  // This ensures Rank 1 prize goes to the top-scoring REAL user even if bots
+  // score higher and appear above them on the leaderboard.
+  const realUserScores = Object.entries(userScores)
+    .filter(([uid]) => !botUserIds.has(uid))
+    .sort(([, a], [, b]) => b - a);
+
+  const prizeRankings: { userId: string; score: number; prizeRank: number }[] = [];
+  let rpos = 0;
+  while (rpos < realUserScores.length) {
+    const tieScore = realUserScores[rpos][1];
+    let rend = rpos;
+    while (rend < realUserScores.length && realUserScores[rend][1] === tieScore) rend++;
+    const sharedPrizeRank = rpos + 1;
+    for (let k = rpos; k < rend; k++) {
+      prizeRankings.push({ userId: realUserScores[k][0], score: tieScore, prizeRank: sharedPrizeRank });
+    }
+    rpos = rend;
+  }
+
 
   // Use prizeTiersConfig (new) → prizeTiers (old) → fallback
   const prizeTiers = (
@@ -459,15 +482,20 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
 
   const { creditTickets } = await import('../services/ticket.service');
 
-  for (const { userId, rank } of rankings) {
-    // Bots never receive prizes — just update their rank
+  // Update bot display ranks (no prizes)
+  for (const { userId, displayRank, score } of allRankings) {
     if (botUserIds.has(userId)) {
       await prisma.iplContestEntry.updateMany({
         where: { contestId, userId },
-        data: { rank, totalPoints: userScores[userId] ?? 0 },
+        data: { rank: displayRank, totalPoints: score },
       });
-      continue;
     }
+  }
+
+  // Distribute prizes to real users using their prize rank (rank among real users)
+  for (const { userId, prizeRank, score } of prizeRankings) {
+    const displayRank = allRankings.find(r => r.userId === userId)?.displayRank ?? prizeRank;
+    const rank = prizeRank; // prize rank = position among real users
 
     let coinsAward = 0;
     let ticketsAward = 0;
@@ -489,19 +517,18 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
         } else if (tType === 'GIFT' || tType === 'INVENTORY' || tType === 'XOXODAY') {
           giftTier = tier;
         } else {
-          // COINS (default)
           coinsAward = tier.coins ?? 0;
         }
       }
     } else if (contest.prizeType === 'COINS' && contest.prizeCoins && rank === 1) {
       coinsAward = contest.prizeCoins;
     } else {
-      // Default percentage distribution
       if (rank === 1)       coinsAward = Math.floor(prizePool * (dist['1']    ?? 40) / 100);
       else if (rank === 2)  coinsAward = Math.floor(prizePool * (dist['2']    ?? 25) / 100);
       else if (rank === 3)  coinsAward = Math.floor(prizePool * (dist['3']    ?? 15) / 100);
       else if (rank <= 10)  coinsAward = Math.floor(prizePool * (dist['4-10'] ?? 20) / 100 / 7);
     }
+
 
     // Award coins
     if (coinsAward > 0) {
@@ -539,10 +566,10 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
       giftClaimsCreated++;
     }
 
-    // Update entry rank + points
+    // Update entry: store prize rank (among real users), actual points
     await prisma.iplContestEntry.updateMany({
       where: { contestId, userId },
-      data: { rank, coinsWon: coinsAward, totalPoints: userScores[userId] ?? 0 },
+      data: { rank: prizeRank, coinsWon: coinsAward, totalPoints: score },
     });
   }
 
@@ -552,7 +579,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
   });
 
   const realParticipants = contest.entries.length - botUserIds.size;
-  logger.info(`IPL contest processed: ${contest.name} — ${rankings.length} participants (${botUserIds.size} bots), ${coinsDistributed} coins, ${giftClaimsCreated} gift claims`);
+  logger.info(`IPL contest processed: ${contest.name} — ${allRankings.length} total (${botUserIds.size} bots), ${coinsDistributed} coins, ${giftClaimsCreated} gift claims`);
 
   success(res, {
     totalParticipants: realParticipants,
@@ -560,7 +587,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     botsCount: botUserIds.size,
     coinsDistributed,
     giftClaimsCreated,
-    rankings: rankings.filter(r => !botUserIds.has(r.userId)).slice(0, 10),
+    rankings: prizeRankings.slice(0, 10).map(r => ({ ...r, rank: r.prizeRank })),
   }, 'Results processed! Prizes distributed to winners.');
 }
 
