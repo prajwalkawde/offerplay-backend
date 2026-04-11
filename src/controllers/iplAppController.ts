@@ -964,68 +964,99 @@ function maskName(name: string): string {
 
 export async function getGlobalLeaderboard(req: Request, res: Response): Promise<void> {
   const userId = req.userId;
-  const page  = parseInt(String(req.query.page)) || 1;
-  const limit = 50;
+  const page   = parseInt(String(req.query.page)) || 1;
+  const period = String(req.query.period || 'all'); // all | month | week | today
+  const limit  = 50;
+  const offset = (page - 1) * limit;
 
   try {
-    const topEntries = await prisma.iplContestEntry.groupBy({
-      by: ['userId'],
-      _sum: { totalPoints: true, coinsWon: true },
-      _count: { id: true },
-      orderBy: { _sum: { totalPoints: 'desc' } },
-      take: limit,
-      skip: (page - 1) * limit,
-    });
+    // ── Period-based: sum coins earned from transactions in the time window ──
+    if (period !== 'all') {
+      const now = new Date();
+      let since: Date;
+      if (period === 'today') {
+        since = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      } else if (period === 'week') {
+        since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else { // month
+        since = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      }
 
-    // ── Fallback: no contest entries yet — rank by coin balance ──────────────
-    if (topEntries.length === 0) {
-      const users = await prisma.user.findMany({
-        where: { status: 'ACTIVE' },
-        select: { id: true, name: true, coinBalance: true, favouriteTeam: true },
-        orderBy: { coinBalance: 'desc' },
+      // Sum positive transactions (earnings) per user in the period
+      const txGroups = await prisma.transaction.groupBy({
+        by: ['userId'],
+        where: { amount: { gt: 0 }, createdAt: { gte: since } },
+        _sum: { amount: true },
+        orderBy: { _sum: { amount: 'desc' } },
         take: limit,
+        skip: offset,
       });
-      const leaderboard = users.map((u, i) => ({
-        rank: i + 1,
-        userId: u.id,
-        name: maskName(u.name || 'User'),
-        avatar: (u.name?.charAt(0) ?? 'U').toUpperCase(),
-        favouriteTeam: u.favouriteTeam,
-        totalPoints: 0,
-        coinsWon: u.coinBalance,
-        contestsPlayed: 0,
-        isCurrentUser: u.id === userId,
-      }));
+
+      if (txGroups.length === 0) {
+        success(res, { leaderboard: [], userRank: null, totalPlayers: 0 });
+        return;
+      }
+
+      const userIds = txGroups.map(g => g.userId);
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, favouriteTeam: true },
+      });
+      const userMap = new Map(users.map(u => [u.id, u]));
+
+      const leaderboard = txGroups.map((g, i) => {
+        const u = userMap.get(g.userId);
+        const coinsEarned = g._sum.amount ?? 0;
+        return {
+          rank: offset + i + 1,
+          userId: g.userId,
+          name: maskName(u?.name || 'User'),
+          avatar: (u?.name?.charAt(0) ?? 'U').toUpperCase(),
+          favouriteTeam: u?.favouriteTeam ?? null,
+          totalPoints: coinsEarned,
+          coinsWon: coinsEarned,
+          contestsPlayed: 0,
+          isCurrentUser: g.userId === userId,
+        };
+      });
+
       const userRank = leaderboard.findIndex(p => p.userId === userId) + 1;
-      success(res, { leaderboard, userRank: userRank || null, totalPlayers: users.length });
+      const totalPlayers = await prisma.transaction.groupBy({
+        by: ['userId'],
+        where: { amount: { gt: 0 }, createdAt: { gte: since } },
+      }).then(r => r.length);
+
+      success(res, { leaderboard, userRank: userRank || null, totalPlayers });
       return;
     }
 
-    const userIds = topEntries.map(e => e.userId);
+    // ── All Time: rank by current coin balance ────────────────────────────────
     const users = await prisma.user.findMany({
-      where: { id: { in: userIds } },
-      select: { id: true, name: true, favouriteTeam: true },
+      where: { status: 'ACTIVE', coinBalance: { gt: 0 } },
+      select: { id: true, name: true, coinBalance: true, favouriteTeam: true },
+      orderBy: { coinBalance: 'desc' },
+      take: limit,
+      skip: offset,
     });
-    const userMap = new Map(users.map(u => [u.id, u]));
 
-    const leaderboard = topEntries.map((entry, i) => {
-      const u = userMap.get(entry.userId);
-      return {
-        rank: (page - 1) * limit + i + 1,
-        userId: entry.userId,
-        name: maskName(u?.name || 'User'),
-        avatar: (u?.name?.charAt(0) ?? 'U').toUpperCase(),
-        favouriteTeam: u?.favouriteTeam ?? null,
-        totalPoints: entry._sum.totalPoints ?? 0,
-        coinsWon: entry._sum.coinsWon ?? 0,
-        contestsPlayed: entry._count.id,
-        isCurrentUser: entry.userId === userId,
-      };
+    const totalPlayers = await prisma.user.count({
+      where: { status: 'ACTIVE', coinBalance: { gt: 0 } },
     });
+
+    const leaderboard = users.map((u, i) => ({
+      rank: offset + i + 1,
+      userId: u.id,
+      name: maskName(u.name || 'User'),
+      avatar: (u.name?.charAt(0) ?? 'U').toUpperCase(),
+      favouriteTeam: u.favouriteTeam,
+      totalPoints: u.coinBalance,
+      coinsWon: u.coinBalance,
+      contestsPlayed: 0,
+      isCurrentUser: u.id === userId,
+    }));
 
     const userRank = leaderboard.findIndex(p => p.userId === userId) + 1;
-
-    success(res, { leaderboard, userRank: userRank || null, totalPlayers: leaderboard.length });
+    success(res, { leaderboard, userRank: userRank || null, totalPlayers });
   } catch (err) {
     logger.error('getGlobalLeaderboard error:', err);
     error(res, 'Failed to fetch leaderboard', 500);
