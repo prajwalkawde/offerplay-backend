@@ -20,17 +20,24 @@ export function scheduleQuizGeneration(): void {
   logger.info('IPL quiz generation job scheduled (daily at 08:00)');
 }
 
-// Runs at 9 AM and 7 PM daily — reminds users to claim their daily bonus
+// Runs at midnight IST (18:30 UTC), 9 AM IST (03:30 UTC), and 7 PM IST (13:30 UTC)
 export function scheduleDailyBonusReminders(): void {
-  cron.schedule('0 9 * * *', async () => {
-    logger.info('Sending daily bonus reminders (9 AM)...');
+  // Midnight IST — bonus resets, fire "Daily Bonus Reset!" instantly
+  cron.schedule('30 18 * * *', async () => {
+    logger.info('Sending daily bonus reset notification (midnight IST)...');
+    await sendDailyBonusReminders(true);
+  });
+  // 9 AM IST reminder
+  cron.schedule('30 3 * * *', async () => {
+    logger.info('Sending daily bonus reminders (9 AM IST)...');
     await sendDailyBonusReminders();
   });
-  cron.schedule('0 19 * * *', async () => {
-    logger.info('Sending daily bonus reminders (7 PM)...');
+  // 7 PM IST reminder
+  cron.schedule('30 13 * * *', async () => {
+    logger.info('Sending daily bonus reminders (7 PM IST)...');
     await sendDailyBonusReminders();
   });
-  logger.info('Daily bonus reminder jobs scheduled (09:00 and 19:00)');
+  logger.info('Daily bonus reminder jobs scheduled (midnight, 09:00, 19:00 IST)');
 }
 
 // Runs every hour — checks completed matches and credits coins to correct predictors

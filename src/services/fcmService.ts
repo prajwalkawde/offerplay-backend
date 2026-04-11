@@ -98,7 +98,7 @@ async function sendFCMBatched(
 /**
  * Send daily bonus reminders to users who haven't claimed today.
  */
-export async function sendDailyBonusReminders(): Promise<void> {
+export async function sendDailyBonusReminders(isReset = false): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -122,12 +122,12 @@ export async function sendDailyBonusReminders(): Promise<void> {
     return;
   }
 
-  await sendFCMBatched(
-    tokens,
-    'Daily Bonus Available! 🎁',
-    "Your daily bonus is ready to claim! Don't break your streak!",
-    { type: 'daily_bonus', screen: 'DailyBonus' }
-  );
+  const title = isReset ? '🎁 Daily Bonus Reset!' : 'Daily Bonus Available! 🎁';
+  const body  = isReset
+    ? "A new day, a new bonus! Claim your daily reward and keep your streak alive! 🔥"
+    : "Your daily bonus is ready to claim! Don't break your streak!";
 
-  logger.info(`[FCM] Daily bonus reminder sent to ${tokens.length} users`);
+  await sendFCMBatched(tokens, title, body, { type: 'daily_bonus', screen: 'DailyBonus' });
+
+  logger.info(`[FCM] Daily bonus ${isReset ? 'reset' : 'reminder'} sent to ${tokens.length} users`);
 }
