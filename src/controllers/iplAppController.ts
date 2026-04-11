@@ -53,6 +53,7 @@ export function getRank1Prize(contest: any): any {
   return {
     type: rank1.type,
     coins: rank1.coins || null,
+    tickets: rank1.tickets || null,
     itemName: rank1.itemName || null,
     itemImage: rank1.itemImage || null,
     itemValue: rank1.itemValue || null,

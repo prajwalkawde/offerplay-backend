@@ -203,6 +203,48 @@ export async function updateIPLContest(req: Request, res: Response): Promise<voi
     data: safeData,
   });
 
+  // If contest is already published and botCount was updated, sync bot entries
+  if (contest.status === 'published' && contest.botCount > 0) {
+    try {
+      const existingBotEntries = await prisma.iplContestEntry.findMany({
+        where: { contestId },
+        include: { user: { select: { isBot: true } } },
+      });
+      const existingBotCount = existingBotEntries.filter((e: any) => e.user?.isBot).length;
+      const needed = contest.botCount - existingBotCount;
+
+      if (needed > 0) {
+        const existingBotIds = existingBotEntries.filter((e: any) => e.user?.isBot).map((e: any) => e.userId);
+        const bots = await prisma.user.findMany({
+          where: { isBot: true, id: { notIn: existingBotIds } },
+          select: { id: true },
+          take: needed,
+          orderBy: { updatedAt: 'asc' },
+        });
+        if (bots.length > 0) {
+          await prisma.iplContestEntry.createMany({
+            data: bots.map((b: { id: string }) => ({
+              contestId,
+              userId: b.id,
+              matchId: contest.matchId,
+              coinsDeducted: 0,
+              totalPoints: 0,
+              status: 'active',
+            })),
+            skipDuplicates: true,
+          });
+          await prisma.user.updateMany({
+            where: { id: { in: bots.map((b: { id: string }) => b.id) } },
+            data: { updatedAt: new Date() },
+          });
+          logger.info(`Bot sync on update: added ${bots.length} bots to contest ${contestId}`);
+        }
+      }
+    } catch (botErr) {
+      logger.warn('Bot sync on update failed:', botErr);
+    }
+  }
+
   success(res, contest, 'Contest updated');
 }
 
