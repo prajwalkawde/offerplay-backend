@@ -112,6 +112,7 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
     sponsorName,
     sponsorLogo,
     maxEntriesPerUser,
+    botCount,
     customFields,
     prizeDistribution,
     regCloseTime,
@@ -127,7 +128,7 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
     questionCount?: number; youtubeUrl?: string;
     winnersConfig?: unknown[]; prizeTiersConfig?: unknown[];
     sponsorId?: string; sponsorName?: string; sponsorLogo?: string;
-    maxEntriesPerUser?: number;
+    maxEntriesPerUser?: number; botCount?: number;
     customFields?: object; prizeDistribution?: object; regCloseTime?: string;
     questionsAvailableAt?: string; questionsLockAt?: string;
   };
@@ -174,6 +175,7 @@ export async function createIPLContest(req: Request, res: Response): Promise<voi
       sponsorName: sponsorName ?? null,
       sponsorLogo: sponsorLogo ?? null,
       maxEntriesPerUser: maxEntriesPerUser ?? 3,
+      botCount: botCount ?? 0,
       customFields: customFields ?? undefined,
       prizeDistribution: (prizeDistribution ?? { '1': 40, '2': 25, '3': 15, '4-10': 20 }) as object,
       regCloseTime: regCloseTime ? new Date(regCloseTime) : null,
@@ -310,6 +312,40 @@ export async function publishIPLContest(req: Request, res: Response): Promise<vo
     include: { match: true },
   });
 
+  // Auto-join bots if contest has botCount > 0
+  let botsJoined = 0;
+  if (contest.botCount > 0) {
+    try {
+      const bots = await prisma.user.findMany({
+        where: { isBot: true },
+        select: { id: true },
+        take: contest.botCount,
+        orderBy: { updatedAt: 'asc' }, // least-recently-used first
+      });
+
+      if (bots.length > 0) {
+        await prisma.iplContestEntry.createMany({
+          data: bots.map(b => ({
+            contestId,
+            userId: b.id,
+            matchId: contest.matchId,
+            coinsDeducted: 0,
+            totalPoints: 0,
+            status: 'active',
+          })),
+          skipDuplicates: true,
+        });
+        await prisma.user.updateMany({
+          where: { id: { in: bots.map(b => b.id) } },
+          data: { updatedAt: new Date() },
+        });
+        botsJoined = bots.length;
+      }
+    } catch (botErr) {
+      logger.warn('Failed to add bots to contest:', botErr);
+    }
+  }
+
   try {
     const { sendToAll } = await import('../services/notificationService');
     await sendToAll(
@@ -321,8 +357,8 @@ export async function publishIPLContest(req: Request, res: Response): Promise<vo
     logger.warn('Failed to send publish notification:', notifErr);
   }
 
-  logger.info(`IPL contest published: ${contest.name} (${contestId})`);
-  success(res, contest, '🚀 Contest published! Users notified.');
+  logger.info(`IPL contest published: ${contest.name} (${contestId}), ${botsJoined} bots joined`);
+  success(res, contest, `🚀 Contest published! ${botsJoined > 0 ? `${botsJoined} bots joined. ` : ''}Users notified.`);
 }
 
 // ─── Process results for a specific contest ────────────────────────────────────
@@ -345,13 +381,17 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
 
   const contest = await prisma.iplContest.findUnique({
     where: { id: contestId },
-    include: { entries: true, match: true },
+    include: {
+      entries: { include: { user: { select: { isBot: true } } } },
+      match: true,
+    },
   });
 
   if (!contest) { error(res, 'Contest not found', 404); return; }
   if (contest.status === 'completed') { error(res, 'Contest already processed', 400); return; }
 
   const entryUserIds = contest.entries.map(e => e.userId);
+  const botUserIds = new Set(contest.entries.filter(e => (e as any).user?.isBot).map(e => e.userId));
 
   const [predictions, questions] = await Promise.all([
     prisma.iplPrediction.findMany({
@@ -361,8 +401,19 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
   ]);
 
   // Score each user — compare answer to correctAnswer directly
+  // Bots get a random realistic score
   const userScores: Record<string, number> = {};
-  for (const entry of contest.entries) userScores[entry.userId] = 0;
+  const questionCount = contest.questionCount || 10;
+  const maxBotScore = questionCount * 100;
+  for (const entry of contest.entries) {
+    if (botUserIds.has(entry.userId)) {
+      // Random score: bell-curve-ish by averaging 3 randoms, capped at 70% max
+      const r = (Math.random() + Math.random() + Math.random()) / 3;
+      userScores[entry.userId] = Math.floor(r * maxBotScore * 0.7);
+    } else {
+      userScores[entry.userId] = 0;
+    }
+  }
 
   for (const pred of predictions) {
     const question = questions.find(q => q.id === pred.questionId);
@@ -405,6 +456,15 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
   const { creditTickets } = await import('../services/ticket.service');
 
   for (const { userId, rank } of rankings) {
+    // Bots never receive prizes — just update their rank
+    if (botUserIds.has(userId)) {
+      await prisma.iplContestEntry.updateMany({
+        where: { contestId, userId },
+        data: { rank, totalPoints: userScores[userId] ?? 0 },
+      });
+      continue;
+    }
+
     let coinsAward = 0;
     let ticketsAward = 0;
     let giftTier: PrizeTier | undefined;
@@ -487,13 +547,16 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     data: { status: 'completed' },
   });
 
-  logger.info(`IPL contest processed: ${contest.name} — ${rankings.length} participants, ${coinsDistributed} coins, ${giftClaimsCreated} gift claims`);
+  const realParticipants = contest.entries.length - botUserIds.size;
+  logger.info(`IPL contest processed: ${contest.name} — ${rankings.length} participants (${botUserIds.size} bots), ${coinsDistributed} coins, ${giftClaimsCreated} gift claims`);
 
   success(res, {
-    totalParticipants: contest.entries.length,
+    totalParticipants: realParticipants,
+    totalWithBots: contest.entries.length,
+    botsCount: botUserIds.size,
     coinsDistributed,
     giftClaimsCreated,
-    rankings: rankings.slice(0, 10),
+    rankings: rankings.filter(r => !botUserIds.has(r.userId)).slice(0, 10),
   }, 'Results processed! Prizes distributed to winners.');
 }
 
@@ -510,6 +573,56 @@ export async function getContestParticipants(req: Request, res: Response): Promi
   });
 
   success(res, { participants: entries, total: entries.length });
+}
+
+// ─── Bot Management ───────────────────────────────────────────────────────────
+const BOT_NAMES = [
+  'Rahul Kumar', 'Priya Sharma', 'Arjun Patel', 'Sneha Singh', 'Vikram Rao',
+  'Ananya Gupta', 'Karthik Nair', 'Divya Joshi', 'Rohan Verma', 'Pooja Iyer',
+  'Amit Desai', 'Kavya Reddy', 'Siddharth Mehta', 'Neha Krishnan', 'Aditya Banerjee',
+  'Shreya Pillai', 'Nikhil Malhotra', 'Tanvi Bose', 'Ravi Choudhury', 'Meera Nambiar',
+  'Dhruv Saxena', 'Anjali Bose', 'Varun Subramaniam', 'Lakshmi Hegde', 'Suresh Pandey',
+  'Ishaan Trivedi', 'Nisha Kulkarni', 'Manav Agarwal', 'Swati Dubey', 'Pratik Shah',
+  'Simran Dhaliwal', 'Gaurav Jha', 'Ritika Tiwari', 'Akash Chauhan', 'Bhavna Patel',
+  'Hardik Parikh', 'Sonali Mishra', 'Chirag Goyal', 'Preeti Rastogi', 'Tejas Soni',
+  'Ayesha Khan', 'Mohan Lal', 'Deepika Chawla', 'Kunal Srivastava', 'Nandini Rao',
+  'Santosh Kumar', 'Kavitha Nair', 'Shubham Tomar', 'Ankita Pandey', 'Vishal Bhatt',
+];
+
+export async function getBotUsers(_req: Request, res: Response): Promise<void> {
+  const bots = await prisma.user.findMany({
+    where: { isBot: true },
+    select: { id: true, name: true, phone: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  success(res, { bots, count: bots.length });
+}
+
+export async function createBotUsers(req: Request, res: Response): Promise<void> {
+  const { count = 20 } = req.body as { count?: number };
+  const n = Math.min(200, Math.max(1, Number(count)));
+
+  const existingCount = await prisma.user.count({ where: { isBot: true } });
+  const created = [];
+
+  for (let i = 0; i < n; i++) {
+    const idx = existingCount + i + 1;
+    const baseName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+    const name = `${baseName}`;
+    const phone = `99${String(idx).padStart(9, '0')}`;
+    const referralCode = `BOT${String(idx).padStart(6, '0')}`;
+
+    try {
+      const bot = await prisma.user.create({
+        data: { name, phone, isBot: true, referralCode, coinBalance: 0, ticketBalance: 999, language: 'en', status: 'ACTIVE' },
+      });
+      created.push(bot);
+    } catch {
+      // skip duplicates
+    }
+  }
+
+  success(res, { created: created.length }, `${created.length} bot users created`);
 }
 
 // ─── Update IPL match ─────────────────────────────────────────────────────────

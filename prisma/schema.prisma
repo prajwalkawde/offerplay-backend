@@ -97,6 +97,7 @@ model User {
   city              String?
   state             String?
   favouriteTeam     String?
+  isBot             Boolean       @default(false)
   isPhoneVerified   Boolean       @default(false)
   isEmailVerified   Boolean       @default(false)
   isProfileComplete Boolean       @default(false)
@@ -348,6 +349,7 @@ model IplContest {
   questionsAvailableAt DateTime?
   questionsLockAt      DateTime?
   prizeTiersConfig     Json               @default("[]")
+  botCount          Int                @default(0)
   regCloseTime      DateTime?
   status            String             @default("draft")
   createdAt         DateTime           @default(now())
@@ -1026,6 +1028,7 @@ model SportsQuestion {
   correctOption   String
   sport           String        @default("ipl")
   difficulty      String        @default("easy")
+  language        String        @default("en")
   explanation     String?
   isActive        Boolean       @default(true)
   isAiGenerated   Boolean       @default(false)

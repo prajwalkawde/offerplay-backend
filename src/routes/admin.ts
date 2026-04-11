@@ -28,6 +28,7 @@ import {
   fetchIPLSchedule,
   syncTeamLogos,
   deleteMatchAllQuestions,
+  getBotUsers, createBotUsers,
 } from '../controllers/iplAdminController';
 import {
   listOfferwallOffers, blacklistOffer, whitelistOffer, getQualityReport,
@@ -147,6 +148,10 @@ router.get('/ipl/matches/:id/participants', getMatchParticipants);
 router.get('/ipl/fetch-today', fetchTodayMatches);
 router.post('/ipl/fetch-schedule', fetchIPLSchedule);
 router.post('/ipl/sync-team-logos', syncTeamLogos);
+
+// IPL — Bot management
+router.get('/ipl/bots', getBotUsers);
+router.post('/ipl/bots/create', createBotUsers);
 
 // IPL — Multi-contest per match
 router.get('/ipl/matches/:matchId/contests', getMatchContests);

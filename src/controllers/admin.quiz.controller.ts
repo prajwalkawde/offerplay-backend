@@ -13,6 +13,7 @@ export async function adminGetQuestions(req: Request, res: Response): Promise<vo
       limit = '20',
       sport,
       difficulty,
+      language,
       isActive,
       isAiGenerated,
       search,
@@ -25,6 +26,7 @@ export async function adminGetQuestions(req: Request, res: Response): Promise<vo
     const where: Record<string, unknown> = {};
     if (sport) where.sport = sport;
     if (difficulty) where.difficulty = difficulty;
+    if (language) where.language = language;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (isAiGenerated !== undefined) where.isAiGenerated = isAiGenerated === 'true';
     if (search) {
@@ -52,7 +54,7 @@ export async function adminGetQuestions(req: Request, res: Response): Promise<vo
 
 export async function adminCreateQuestion(req: Request, res: Response): Promise<void> {
   try {
-    const { question, optionA, optionB, optionC, optionD, correctOption, sport, difficulty, explanation } =
+    const { question, optionA, optionB, optionC, optionD, correctOption, sport, difficulty, language, explanation } =
       req.body as {
         question: string;
         optionA: string;
@@ -62,6 +64,7 @@ export async function adminCreateQuestion(req: Request, res: Response): Promise<
         correctOption: string;
         sport: string;
         difficulty: string;
+        language?: string;
         explanation?: string;
       };
 
@@ -71,7 +74,7 @@ export async function adminCreateQuestion(req: Request, res: Response): Promise<
     }
 
     const created = await prisma.sportsQuestion.create({
-      data: { question, optionA, optionB, optionC, optionD, correctOption: correctOption.toUpperCase(), sport, difficulty, explanation: explanation ?? null },
+      data: { question, optionA, optionB, optionC, optionD, correctOption: correctOption.toUpperCase(), sport, difficulty, language: language ?? 'en', explanation: explanation ?? null },
     });
 
     success(res, created, 'Question created', 201);
@@ -88,7 +91,7 @@ export async function adminUpdateQuestion(req: Request, res: Response): Promise<
     const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { error(res, 'Invalid question id', 400); return; }
 
-    const { question, optionA, optionB, optionC, optionD, correctOption, sport, difficulty, explanation, isActive } =
+    const { question, optionA, optionB, optionC, optionD, correctOption, sport, difficulty, language, explanation, isActive } =
       req.body as Partial<{
         question: string;
         optionA: string;
@@ -98,6 +101,7 @@ export async function adminUpdateQuestion(req: Request, res: Response): Promise<
         correctOption: string;
         sport: string;
         difficulty: string;
+        language: string;
         explanation: string;
         isActive: boolean;
       }>;
@@ -113,6 +117,7 @@ export async function adminUpdateQuestion(req: Request, res: Response): Promise<
         ...(correctOption !== undefined && { correctOption: correctOption.toUpperCase() }),
         ...(sport !== undefined && { sport }),
         ...(difficulty !== undefined && { difficulty }),
+        ...(language !== undefined && { language }),
         ...(explanation !== undefined && { explanation }),
         ...(isActive !== undefined && { isActive }),
       },
