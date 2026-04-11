@@ -418,9 +418,15 @@ interface PrizeTier {
   inventoryItemId?: string;
 }
 
-export async function processIPLContestResults(req: Request, res: Response): Promise<void> {
-  const { contestId } = req.params as { contestId: string };
-
+// ─── Core prize distribution logic (reusable) ────────────────────────────────
+export async function distributeIPLContestPrizes(contestId: string): Promise<{
+  contestName: string;
+  totalParticipants: number;
+  botsCount: number;
+  coinsDistributed: number;
+  giftClaimsCreated: number;
+  rankings: any[];
+}> {
   const contest = await prisma.iplContest.findUnique({
     where: { id: contestId },
     include: {
@@ -429,8 +435,11 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     },
   });
 
-  if (!contest) { error(res, 'Contest not found', 404); return; }
-  if (contest.status === 'completed') { error(res, 'Contest already processed', 400); return; }
+  if (!contest) throw new Error(`Contest not found: ${contestId}`);
+  if (contest.status === 'completed') {
+    logger.info(`Contest ${contestId} already processed — skipping`);
+    return { contestName: contest.name, totalParticipants: 0, botsCount: 0, coinsDistributed: 0, giftClaimsCreated: 0, rankings: [] };
+  }
 
   const entryUserIds = contest.entries.map(e => e.userId);
   const botUserIds = new Set(contest.entries.filter(e => (e as any).user?.isBot).map(e => e.userId));
@@ -442,27 +451,21 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     prisma.iplQuestion.findMany({ where: { matchId: contest.matchId } }),
   ]);
 
-  // ── Score real users from their predictions ────────────────────────────────
+  // ── Score all participants ─────────────────────────────────────────────────
   const userScores: Record<string, number> = {};
   const questionsPerUser = contest.questionCount || 10;
-
-  // Estimate max score from actual question point values
   const sortedByPoints = [...questions].sort((a, b) => b.points - a.points);
   const estimatedMaxScore = sortedByPoints.slice(0, questionsPerUser)
     .reduce((s, q) => s + q.points, 0) || (questionsPerUser * 100);
 
-  // Initialise scores: bots get 95–99% of max so leaderboard looks competitive
   for (const entry of contest.entries) {
     if (botUserIds.has(entry.userId)) {
-      // Near-perfect scores: 95% + random 0–4% spread so they're not all identical
       const spread = Math.random() * 0.04;
       userScores[entry.userId] = Math.floor((0.95 + spread) * estimatedMaxScore);
     } else {
       userScores[entry.userId] = 0;
     }
   }
-
-  // Score real users based on correct predictions
   for (const pred of predictions) {
     const question = questions.find(q => q.id === pred.questionId);
     if (!question?.correctAnswer) continue;
@@ -471,7 +474,7 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     }
   }
 
-  // ── Global ranking (bots + real) — used for display / leaderboard ──────────
+  // ── Global ranking (bots + real) ──────────────────────────────────────────
   const sortedEntries = Object.entries(userScores).sort(([, a], [, b]) => b - a);
   const allRankings: { userId: string; score: number; displayRank: number }[] = [];
   let pos = 0;
@@ -486,13 +489,10 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     pos = end;
   }
 
-  // ── Prize ranking — real users only, re-ranked among themselves ────────────
-  // This ensures Rank 1 prize goes to the top-scoring REAL user even if bots
-  // score higher and appear above them on the leaderboard.
+  // ── Prize ranking — real users only ───────────────────────────────────────
   const realUserScores = Object.entries(userScores)
     .filter(([uid]) => !botUserIds.has(uid))
     .sort(([, a], [, b]) => b - a);
-
   const prizeRankings: { userId: string; score: number; prizeRank: number }[] = [];
   let rpos = 0;
   while (rpos < realUserScores.length) {
@@ -506,22 +506,18 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     rpos = rend;
   }
 
-
-  // Use prizeTiersConfig (new) → prizeTiers (old) → fallback
   const prizeTiers = (
     (contest.prizeTiersConfig as unknown as PrizeTier[])?.length > 0
       ? (contest.prizeTiersConfig as unknown as PrizeTier[])
       : (contest.prizeTiers as unknown as PrizeTier[])
   ) || [];
   const hasPrizeTiers = prizeTiers.length > 0;
-
   const totalPool = contest.entries.length * contest.entryFee;
   const prizePool = Math.floor(totalPool * 0.85);
   const dist = contest.prizeDistribution as Record<string, number>;
 
   let coinsDistributed = 0;
   let giftClaimsCreated = 0;
-
   const { creditTickets } = await import('../services/ticket.service');
 
   // Update bot display ranks (no prizes)
@@ -534,11 +530,9 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
     }
   }
 
-  // Distribute prizes to real users using their prize rank (rank among real users)
+  // Distribute prizes to real users
   for (const { userId, prizeRank, score } of prizeRankings) {
-    const displayRank = allRankings.find(r => r.userId === userId)?.displayRank ?? prizeRank;
-    const rank = prizeRank; // prize rank = position among real users
-
+    const rank = prizeRank;
     let coinsAward = 0;
     let ticketsAward = 0;
     let giftTier: PrizeTier | undefined;
@@ -571,70 +565,83 @@ export async function processIPLContestResults(req: Request, res: Response): Pro
       else if (rank <= 10)  coinsAward = Math.floor(prizePool * (dist['4-10'] ?? 20) / 100 / 7);
     }
 
-
-    // Award coins
     if (coinsAward > 0) {
-      await creditCoins(
-        userId, coinsAward, TransactionType.EARN_IPL_WIN, contestId,
-        `IPL Contest Win — ${contest.name} — Rank #${rank}`
-      );
+      await creditCoins(userId, coinsAward, TransactionType.EARN_IPL_WIN, contestId,
+        `IPL Contest Win — ${contest.name} — Rank #${rank}`);
       coinsDistributed += coinsAward;
     }
 
-    // Award tickets
     if (ticketsAward > 0) {
       try {
-        await creditTickets(userId, ticketsAward, 'ipl_contest_win', `IPL Contest Win — ${contest.name} — Rank #${rank}`, contestId);
+        await creditTickets(userId, ticketsAward, 'ipl_contest_win',
+          `IPL Contest Win — ${contest.name} — Rank #${rank}`, contestId);
       } catch (ticketErr) {
         logger.error('Failed to credit IPL contest tickets', { userId, rank, ticketsAward, ticketErr });
       }
     }
 
-    // Award gift prize — create an IplPrizeClaim
     if (giftTier) {
-      const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
-      const claimPrizeType = tierTypeRaw === 'XOXODAY' ? 'XOXODAY' : 'INVENTORY';
-      const itemCategory = (giftTier as any).itemCategory || '';
-      await prisma.iplPrizeClaim.create({
-        data: {
-          userId,
-          iplContestId: contestId,
-          rank,
-          prizeType: claimPrizeType,
-          prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
-          prizeValue: (giftTier as any).denominationValue ?? giftTier.value ?? 0,
-          prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
-          inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
-          status: 'pending',
-          deliveryDetails: itemCategory ? { _itemCategory: itemCategory } : undefined,
-        },
-      });
-      giftClaimsCreated++;
+      // Check if claim already exists (idempotent)
+      const existing = await prisma.iplPrizeClaim.findFirst({ where: { userId, iplContestId: contestId } });
+      if (!existing) {
+        const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
+        const claimPrizeType = tierTypeRaw === 'XOXODAY' ? 'XOXODAY' : 'INVENTORY';
+        const itemCategory = (giftTier as any).itemCategory || '';
+        await prisma.iplPrizeClaim.create({
+          data: {
+            userId,
+            iplContestId: contestId,
+            rank,
+            prizeType: claimPrizeType,
+            prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
+            prizeValue: (giftTier as any).denominationValue ?? giftTier.value ?? 0,
+            prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
+            inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
+            status: 'pending',
+            deliveryDetails: itemCategory ? { _itemCategory: itemCategory } : undefined,
+          },
+        });
+        giftClaimsCreated++;
+      }
     }
 
-    // Update entry: store prize rank (among real users), actual points
     await prisma.iplContestEntry.updateMany({
       where: { contestId, userId },
       data: { rank: prizeRank, coinsWon: coinsAward, totalPoints: score },
     });
   }
 
-  await prisma.iplContest.update({
-    where: { id: contestId },
-    data: { status: 'completed' },
-  });
+  await prisma.iplContest.update({ where: { id: contestId }, data: { status: 'completed' } });
 
   const realParticipants = contest.entries.length - botUserIds.size;
   logger.info(`IPL contest processed: ${contest.name} — ${allRankings.length} total (${botUserIds.size} bots), ${coinsDistributed} coins, ${giftClaimsCreated} gift claims`);
 
-  success(res, {
+  return {
+    contestName: contest.name,
     totalParticipants: realParticipants,
-    totalWithBots: contest.entries.length,
     botsCount: botUserIds.size,
     coinsDistributed,
     giftClaimsCreated,
     rankings: prizeRankings.slice(0, 10).map(r => ({ ...r, rank: r.prizeRank })),
-  }, 'Results processed! Prizes distributed to winners.');
+  };
+}
+
+// ─── HTTP handler — POST /api/admin/ipl/contests/:contestId/process ───────────
+export async function processIPLContestResults(req: Request, res: Response): Promise<void> {
+  const { contestId } = req.params as { contestId: string };
+  try {
+    const result = await distributeIPLContestPrizes(contestId);
+    success(res, result, 'Results processed! Prizes distributed to winners.');
+  } catch (err: any) {
+    if (err.message?.includes('already processed')) {
+      error(res, 'Contest already processed', 400);
+    } else if (err.message?.includes('not found')) {
+      error(res, 'Contest not found', 404);
+    } else {
+      logger.error('processIPLContestResults error:', err);
+      error(res, 'Failed to process contest results', 500);
+    }
+  }
 }
 
 // ─── Get contest participants ──────────────────────────────────────────────────

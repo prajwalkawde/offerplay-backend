@@ -715,7 +715,32 @@ export async function processResults(req: Request, res: Response): Promise<void>
   // Step 4: Mark completed
   await prisma.iplMatch.update({ where: { id: matchId }, data: { contestStatus: 'completed' } });
 
-  // Step 5: Notify participants (best effort)
+  // Step 5: Auto-distribute prizes for ALL contests of this match
+  let contestsProcessed = 0;
+  let totalGiftClaims = 0;
+  let totalContestCoins = 0;
+  try {
+    const { distributeIPLContestPrizes } = await import('./iplAdminController');
+    const contests = await prisma.iplContest.findMany({
+      where: { matchId, status: { not: 'completed' } },
+      select: { id: true },
+    });
+    for (const c of contests) {
+      try {
+        const result = await distributeIPLContestPrizes(c.id);
+        contestsProcessed++;
+        totalGiftClaims += result.giftClaimsCreated;
+        totalContestCoins += result.coinsDistributed;
+      } catch (contestErr) {
+        logger.error(`Failed to process contest ${c.id}:`, contestErr);
+      }
+    }
+    logger.info(`Auto-distributed prizes: ${contestsProcessed} contests, ${totalGiftClaims} gift claims, ${totalContestCoins} coins`);
+  } catch (distErr) {
+    logger.error('Prize distribution step failed:', distErr);
+  }
+
+  // Step 6: Notify participants (best effort)
   try {
     const { sendToAll } = await import('../services/notificationService');
     await sendToAll(
@@ -735,8 +760,11 @@ export async function processResults(req: Request, res: Response): Promise<void>
       winner,
       teamScores: { team1: team1Score, team2: team2Score },
       manOfMatch,
+      contestsProcessed,
+      giftClaimsCreated: totalGiftClaims,
+      contestCoinsDistributed: totalContestCoins,
     },
-  }, 'Results processed and coins credited');
+  }, 'Results processed, coins credited, and prizes distributed');
 }
 
 // ─── IPL Admin — Season analytics ────────────────────────────────────────────
