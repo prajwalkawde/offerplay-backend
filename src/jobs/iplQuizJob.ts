@@ -5,7 +5,7 @@ import { isMatchEnded, fetchMatchScorecard } from '../services/cricketService';
 import { generateIPLQuestions, verifyAnswersWithAI } from '../services/claudeAiService';
 import { creditCoins } from '../services/coinService';
 import { logger } from '../utils/logger';
-import { sendDailyBonusReminders } from '../services/fcmService';
+import { sendDailyBonusReminders, sendFCMToUsers } from '../services/fcmService';
 
 // Runs every day at 8 AM — generates quiz questions for today's IPL matches
 export function scheduleQuizGeneration(): void {
@@ -214,6 +214,11 @@ export async function verifyMatchResults(matchId: string): Promise<void> {
         pred.id,
         `IPL prediction correct: ${question.question as string}`
       );
+      sendFCMToUsers([pred.userId], '✅ Prediction Correct!', `You earned ${pointsEarned} coins for your correct prediction in ${match.team1} vs ${match.team2}!`, {
+        type: 'ipl_prediction_correct',
+        matchId: match.id,
+        coins: String(pointsEarned),
+      }).catch(() => {});
     }
   }
 

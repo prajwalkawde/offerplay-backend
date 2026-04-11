@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import * as superOfferService from '../services/superOffer.service';
 import { getTicketHistory, getTicketBalance } from '../services/ticket.service';
 import { prisma } from '../config/database';
+import { sendFCMToUsers } from '../services/fcmService';
 
 // ─── GET /api/superoffers/status ──────────────────────────────────────────────
 
@@ -132,6 +133,11 @@ export async function completeSuperOffer(req: Request, res: Response): Promise<v
 
     const settings = await superOfferService.getSettings();
 
+    sendFCMToUsers([req.userId!], '🎯 Super Offer Complete!', `You earned ${result.coinsAwarded} coins! Next offer unlocks in ${settings.cooldownHours} hours.`, {
+      type: 'super_offer_completed',
+      coinsAwarded: String(result.coinsAwarded),
+    }).catch(e => logger.error('FCM superOffer complete error:', e));
+
     success(res, {
       error: 'false',
       coins_awarded: result.coinsAwarded,
@@ -155,6 +161,11 @@ export async function failSuperOffer(req: Request, res: Response): Promise<void>
     if (!attempt_id) { error(res, 'attempt_id is required', 400); return; }
 
     await superOfferService.failAttempt(req.userId!, Number(attempt_id), reason);
+
+    sendFCMToUsers([req.userId!], '😔 Super Offer Failed', 'Your Super Offer attempt was unsuccessful. Try again soon!', {
+      type: 'super_offer_failed',
+    }).catch(e => logger.error('FCM superOffer fail error:', e));
+
     success(res, { error: 'false' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to fail attempt';

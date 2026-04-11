@@ -5,6 +5,7 @@ import { timingSafeEqual, hmacSha256, md5 } from '../utils/crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { updateQuestProgress } from '../controllers/questController';
+import { sendFCMToUsers } from './fcmService';
 
 export interface PostbackPayload {
   userId: string;
@@ -87,6 +88,12 @@ export async function processPostback(payload: PostbackPayload): Promise<{ dupli
     payload.offerId,
     `${payload.provider} offer completed`
   );
+
+  sendFCMToUsers([payload.userId], '🎉 Offer Completed!', `You earned ${payload.coins} coins for completing an offer!`, {
+    type: 'offerwall_credited',
+    coins: String(payload.coins),
+    provider: payload.provider,
+  }).catch(e => logger.error('FCM offerwall error:', e));
 
   // Credit quest progress for offer completion
   await updateQuestProgress(payload.userId, 'COMPLETE_OFFERS', 1);

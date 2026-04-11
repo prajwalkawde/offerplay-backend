@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { transferToUPI, transferToBank } from '../services/cashfreeService';
 import { getXoxodayProducts, placeXoxodayOrder } from '../services/xoxodayService';
 import { checkRedemptionFraud } from '../services/fraudDetectionService';
+import { sendFCMToUsers } from '../services/fcmService';
 
 export { getXoxodayProducts };
 
@@ -654,6 +655,18 @@ export async function approveRedemption(req: Request, res: Response): Promise<vo
       }),
     ]);
 
+    // FCM push
+    const isBank = redemption.type === 'UPI' || redemption.type === 'BANK';
+    const pushBody = isBank
+      ? `₹${redemption.amountInr} sent to your account! Ref: ${result.referenceId || orderId}`
+      : result.voucherCode
+        ? `Your voucher code is ready! Open the app to view it.`
+        : 'Your redemption has been processed successfully!';
+    sendFCMToUsers([redemption.userId], '💸 Payment Processed!', pushBody, {
+      type: 'redemption_approved',
+      redemptionId: id,
+    }).catch(e => logger.error('FCM approveRedemption error:', e));
+
     success(res, {
       status: 'completed',
       referenceId: result.referenceId,
@@ -801,6 +814,15 @@ export async function rejectRedemption(req: Request, res: Response): Promise<voi
         }),
       ] : []),
     ]);
+
+    // FCM push
+    const rejectBody = refundCoins
+      ? `Your redemption was rejected. ${redemption.coinsRedeemed} coins have been refunded.`
+      : `Your redemption was rejected. ${reason || 'Please contact support.'}`;
+    sendFCMToUsers([redemption.userId], '❌ Redemption Rejected', rejectBody, {
+      type: 'redemption_rejected',
+      redemptionId: id,
+    }).catch(e => logger.error('FCM rejectRedemption error:', e));
 
     logger.info(`[RejectRedemption] id=${id} | userId=${redemption.userId} | refundCoins=${refundCoins} | coins=${redemption.coinsRedeemed} | reason=${rejectReason}`);
     success(res, { refundCoins, coinsReturned: refundCoins ? redemption.coinsRedeemed : 0 },

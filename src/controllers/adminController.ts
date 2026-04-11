@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { generateQuestionsForTodayMatches, verifyMatchResults as verifyMatchResultsJob } from '../jobs/iplQuizJob';
+import { sendFCMToUsers } from '../services/fcmService';
 
 // ─── Admin Users (rich list with tx count) ────────────────────────────────────
 export async function getAdminUsers(req: Request, res: Response): Promise<void> {
@@ -125,6 +126,16 @@ export async function adjustUserCoins(req: Request, res: Response): Promise<void
       where: { id: userId },
       select: { coinBalance: true },
     });
+
+    const pushTitle = action === 'add' ? '🪙 Coins Credited!' : '🪙 Coins Deducted';
+    const pushBody = action === 'add'
+      ? `${amount} coins have been added to your account. ${reason ? `Reason: ${reason}` : ''}`
+      : `${amount} coins have been deducted from your account. ${reason ? `Reason: ${reason}` : ''}`;
+    sendFCMToUsers([userId], pushTitle, pushBody.trim(), {
+      type: 'admin_coin_adjust',
+      action,
+      amount: String(amount),
+    }).catch(e => logger.error('FCM adjustUserCoins error:', e));
 
     success(res, { newBalance: updated?.coinBalance, coinChange },
       `${action === 'add' ? 'Added' : 'Deducted'} ${amount} coins!`);
