@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { authMiddleware, optionalAuthMiddleware } from '../middleware/auth';
+import { fraudCheck } from '../middleware/fraud';
 import {
   listMatches, getMatch, predict, iplLeaderboard, myPredictions, joinIPLContest, myRank,
   getMatchContestsForUser,
@@ -39,14 +40,14 @@ const joinSchema = z.object({
 
 // ─── App-facing routes ────────────────────────────────────────────────────────
 router.get('/matches', optionalAuthMiddleware, getMatchesForApp);
-router.post('/contests/:contestId/join', authMiddleware, joinContest);
-router.get('/contests/:contestId/questions', authMiddleware, getContestQuestions);
-router.post('/contests/:contestId/predict', authMiddleware, savePredictions);
-router.get('/contests/:contestId/leaderboard', optionalAuthMiddleware, getContestLeaderboard);
+router.post('/contests/:contestId/join',        authMiddleware, fraudCheck('ipl_contest_join'), joinContest);
+router.get('/contests/:contestId/questions',    authMiddleware, getContestQuestions);
+router.post('/contests/:contestId/predict',     authMiddleware, fraudCheck('ipl_predict'),      savePredictions);
+router.get('/contests/:contestId/leaderboard',  optionalAuthMiddleware, getContestLeaderboard);
 router.get('/my-contests', authMiddleware, getMyContests);
 router.get('/contests/:contestId/my-predictions', authMiddleware, getMyPredictions);
-router.get('/contests/:contestId/my-prize', authMiddleware, getMyPrize);
-router.post('/contests/:contestId/claim-prize', authMiddleware, claimPrize);
+router.get('/contests/:contestId/my-prize',     authMiddleware, getMyPrize);
+router.post('/contests/:contestId/claim-prize', authMiddleware, fraudCheck('ipl_claim_prize'),  claimPrize);
 router.get('/my-prizes', authMiddleware, getMyPrizeHistory);
 router.get('/global-leaderboard', optionalAuthMiddleware, getGlobalLeaderboard);
 router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res) => {

@@ -14,8 +14,8 @@ const scoreSchema = z.object({ score: z.number().int().nonnegative() });
 
 router.get('/', listContests);
 router.get('/:id', getContest);
-router.post('/:id/join', authMiddleware, fraudCheck, joinContestHandler);
-router.post('/:id/score', authMiddleware, validate(scoreSchema), submitScoreHandler);
+router.post('/:id/join',  authMiddleware, fraudCheck('contest_join'),  joinContestHandler);
+router.post('/:id/score', authMiddleware, fraudCheck('contest_score'), validate(scoreSchema), submitScoreHandler);
 router.get('/:id/leaderboard', getContestLeaderboard);
 
 export default router;

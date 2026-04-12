@@ -30,7 +30,7 @@ router.post('/verify-usage',     fraudCheck('offer_verify'),  verifyUsage);
 router.post('/complete',         fraudCheck('offer_complete'), integrityCheck, completeSuperOffer);
 router.post('/fail', failSuperOffer);
 router.get('/tickets', getMyTickets);
-router.post('/quiz-start', superOfferQuizStart);
-router.post('/quiz-complete', superOfferQuizComplete);
+router.post('/quiz-start',    fraudCheck('super_offer_quiz_start'),    superOfferQuizStart);
+router.post('/quiz-complete', fraudCheck('super_offer_quiz_complete'), superOfferQuizComplete);
 
 export default router;

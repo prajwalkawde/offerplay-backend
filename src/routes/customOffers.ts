@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware as auth } from '../middleware/auth';
 import { adminAuthMiddleware as adminAuth } from '../middleware/adminAuth';
+import { fraudCheck } from '../middleware/fraud';
 import {
   getCustomOffers,
   startCustomOffer,
@@ -172,7 +173,7 @@ router.post('/admin/tasks/:taskId/verify', adminAuth, async (req, res) => {
 // ── User routes ───────────────────────────────────────────────────────────────
 router.get('/', auth, getCustomOffers);
 router.post('/:offerId/start', auth, startCustomOffer);
-router.post('/:offerId/tasks/:taskId/complete', auth, completeTask);
+router.post('/:offerId/tasks/:taskId/complete', auth, fraudCheck('custom_offer_complete'), completeTask);
 router.get('/:offerId/status', auth, getOfferStatus);
 
 export default router;

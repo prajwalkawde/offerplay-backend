@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware as auth } from '../middleware/auth';
 import { adminAuthMiddleware as adminAuth } from '../middleware/adminAuth';
+import { fraudCheck } from '../middleware/fraud';
 import {
   getQuests,
   claimQuestReward,
@@ -15,7 +16,7 @@ const router = Router();
 
 // User routes
 router.get('/',                  auth,      getQuests);
-router.post('/:id/claim',        auth,      claimQuestReward);
+router.post('/:id/claim',        auth,      fraudCheck('quest_claim'), claimQuestReward);
 router.get('/adjoe/stats',       auth,      getAdjoeStats);
 
 // Admin routes

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { adminAuthMiddleware } from '../middleware/adminAuth';
+import { fraudCheck } from '../middleware/fraud';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import {
@@ -24,7 +25,7 @@ router.get('/link',                   authMiddleware, getUserReferralLink);
 router.post('/apply',                 authMiddleware, applyReferralCode);
 router.post('/track-install',                         trackInstall);
 router.get('/milestones',             authMiddleware, getMilestones);
-router.post('/milestones/:id/claim',  authMiddleware, claimMilestone);
+router.post('/milestones/:id/claim',  authMiddleware, fraudCheck('referral_claim'), claimMilestone);
 
 // ─── Admin: settings ──────────────────────────────────────────────────────────
 router.get('/admin/settings', adminAuthMiddleware, async (_req: Request, res: Response) => {

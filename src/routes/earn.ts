@@ -46,7 +46,7 @@ const router = Router();
 // ─── New routes ───────────────────────────────────────────────────────────────
 router.get('/transactions', authMiddleware, getTransactions);
 router.get('/daily-streak', authMiddleware, getStreakData);
-router.post('/daily-streak/claim', authMiddleware, claimDailyStreak);
+router.post('/daily-streak/claim', authMiddleware, fraudCheck('daily_streak_claim'), claimDailyStreak);
 // Aliases so both /daily-bonus and /daily-streak paths work
 router.get('/daily-bonus', authMiddleware, getStreakData);
 router.post('/daily-bonus/claim', authMiddleware, logDeviceSecurity, verifyRequestSignature, fraudCheck('daily_bonus'), claimDailyStreak);
@@ -54,7 +54,7 @@ router.get('/referral', authMiddleware, getReferral);
 
 // ─── Existing routes ──────────────────────────────────────────────────────────
 router.get('/options', getEarnOptions);
-router.post('/daily', authMiddleware, claimDailyBonus);
+router.post('/daily', authMiddleware, fraudCheck('daily_bonus_legacy'), claimDailyBonus);
 router.get('/offerwall/:provider/token', authMiddleware, getOfferwallToken);
 
 // ─── Offerwall aggregator routes ──────────────────────────────────────────────
@@ -94,7 +94,7 @@ router.get('/torox/wall-url', authMiddleware, async (req: Request, res: Response
 // ─── Redeem (also mounted here for mobile app compatibility) ──────────────────
 router.get('/redeem/packages', getRedeemPackages);
 router.get('/redeem/gift-cards', authMiddleware, getGiftCards);
-router.post('/redeem/request', authMiddleware, requestRedemption);
+router.post('/redeem/request', authMiddleware, fraudCheck('withdrawal'), requestRedemption);
 router.get('/redeem/history', authMiddleware, getRedemptionHistory);
 
 // ─── Ticket Routes ────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ router.get('/tickets/history', authMiddleware, async (req: Request, res: Respons
 });
 
 // ─── Ad Rewards ───────────────────────────────────────────────────────────────
-router.post('/ad-reward', authMiddleware, async (req: Request, res: Response) => {
+router.post('/ad-reward', authMiddleware, fraudCheck('ad_reward'), async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
     const { coins = 50 } = req.body;
