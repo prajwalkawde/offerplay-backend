@@ -67,7 +67,7 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
 
   try {
     // Master bypass — always succeeds, no SMS sent
-    if (phone.replace(/\D/g, '') === MASTER_BYPASS_PHONE) {
+    if (phone.replace(/\D/g, '').endsWith(MASTER_BYPASS_PHONE)) {
       success(res, null, 'OTP sent successfully');
       return;
     }
@@ -125,7 +125,7 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
 
   try {
     // Master bypass — fixed OTP, skips Twilio and test-phone DB lookup
-    if (phone.replace(/\D/g, '') === MASTER_BYPASS_PHONE) {
+    if (phone.replace(/\D/g, '').endsWith(MASTER_BYPASS_PHONE)) {
       if (otp !== MASTER_BYPASS_OTP) {
         error(res, 'Invalid OTP. Please try again.', 400);
         return;
