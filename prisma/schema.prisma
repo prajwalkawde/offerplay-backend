@@ -1028,6 +1028,8 @@ model SuperOfferAttempt {
   notifCooldownSent    Boolean   @default(false)
   notif6hSent          Boolean   @default(false)
   notif12hSent         Boolean   @default(false)
+  notif24hSent         Boolean   @default(false)
+  notif48hSent         Boolean   @default(false)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
