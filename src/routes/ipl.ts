@@ -121,10 +121,10 @@ router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res
 });
 
 // ─── Existing / legacy routes ─────────────────────────────────────────────────
-router.post('/join', authMiddleware, validate(joinSchema), joinIPLContest);
+router.post('/join',    authMiddleware, fraudCheck('ipl_join_legacy'),    validate(joinSchema),    joinIPLContest);
 router.get('/matches/:id/contests', getMatchContestsForUser);
 router.get('/matches/:id', getMatch);
-router.post('/predict', authMiddleware, validate(predictSchema), predict);
+router.post('/predict', authMiddleware, fraudCheck('ipl_predict_legacy'), validate(predictSchema), predict);
 router.get('/leaderboard', iplLeaderboard);
 router.get('/my-predictions', authMiddleware, myPredictions);
 router.get('/my-rank', authMiddleware, myRank);
