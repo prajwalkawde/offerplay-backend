@@ -65,9 +65,11 @@ const allowedOrigins = [
 // Trust proxy — must be set before any middleware that reads req.ip or req.protocol
 app.set('trust proxy', 1);
 
-// ─── HTTPS redirect (nginx sets x-forwarded-proto) ───────────────────────────
+// ─── HTTPS redirect (Cloudways nginx sets X-Forwarded-Proto on external requests) ──
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.protocol === 'http') {
+  const proto = req.headers['x-forwarded-proto'] as string | undefined;
+  // Only redirect when header is explicitly 'http' — avoids loop on internal nginx proxy traffic
+  if (proto === 'http') {
     return res.redirect(301, 'https://' + req.headers.host + req.originalUrl);
   }
   next();
