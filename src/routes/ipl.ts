@@ -9,6 +9,7 @@ import {
 } from '../controllers/iplController';
 import {
   getMatchesForApp,
+  getResultMatchesForApp,
   joinContest,
   getContestQuestions,
   savePredictions,
@@ -40,6 +41,7 @@ const joinSchema = z.object({
 
 // ─── App-facing routes ────────────────────────────────────────────────────────
 router.get('/matches', optionalAuthMiddleware, getMatchesForApp);
+router.get('/results', optionalAuthMiddleware, getResultMatchesForApp);
 router.post('/contests/:contestId/join',        authMiddleware, fraudCheck('ipl_contest_join'), joinContest);
 router.get('/contests/:contestId/questions',    authMiddleware, getContestQuestions);
 router.post('/contests/:contestId/predict',     authMiddleware, fraudCheck('ipl_predict'),      savePredictions);

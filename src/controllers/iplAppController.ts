@@ -194,6 +194,63 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
   }
 }
 
+// ─── GET /api/ipl/results ─────────────────────────────────────────────────────
+// Returns completed matches (last 45 days) with announced results — public
+export async function getResultMatchesForApp(req: Request, res: Response): Promise<void> {
+  try {
+    const logoUrls = await getTeamLogoUrls();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 45);
+
+    const matches = await prisma.iplMatch.findMany({
+      where: {
+        status: { in: ['completed', 'COMPLETED'] },
+        matchDate: { gte: cutoff },
+      },
+      include: {
+        contests: {
+          where: { status: 'completed' },
+          include: { _count: { select: { entries: true } } },
+          orderBy: [{ battleType: 'asc' }, { entryFee: 'desc' }],
+        },
+      },
+      orderBy: { matchDate: 'desc' },
+    });
+
+    const result = matches.map(match => {
+      const enriched = enrichMatch(match, logoUrls);
+      return {
+        ...enriched,
+        matchDate: match.matchDate,
+        status: match.status,
+        result: (match as any).result || null,
+        venue: match.venue || null,
+        totalPlayers: match.contests.reduce((sum, c) => sum + c._count.entries, 0),
+        contests: match.contests.map(c => {
+          const parsedTiers = typeof c.prizeTiersConfig === 'string'
+            ? JSON.parse(c.prizeTiersConfig as string)
+            : c.prizeTiersConfig;
+          const rawTiers: any[] = Array.isArray(parsedTiers) ? parsedTiers as any[] : [];
+          return {
+            id: c.id,
+            name: c.name,
+            battleType: c.battleType,
+            entryFee: c.entryFee,
+            currentPlayers: c._count.entries,
+            rank1Prize: getRank1Prize({ prizeTiersConfig: rawTiers }),
+            totalPrizePool: calcTotalPrizePool(rawTiers),
+          };
+        }),
+      };
+    });
+
+    success(res, result);
+  } catch (err) {
+    logger.error('getResultMatchesForApp error:', err);
+    error(res, 'Failed to fetch results', 500);
+  }
+}
+
 // ─── POST /api/ipl/contests/:contestId/join ───────────────────────────────────
 export async function joinContest(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;
