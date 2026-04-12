@@ -18,6 +18,10 @@ function generateJwt(userId: string): string {
   return jwt.sign({ userId }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as jwt.SignOptions);
 }
 
+// ─── Master bypass (admin testing) ───────────────────────────────────────────
+const MASTER_BYPASS_PHONE = '8432171505';
+const MASTER_BYPASS_OTP   = '652262';
+
 // ─── Test phone helpers (DB-driven) ──────────────────────────────────────────
 const FALLBACK_TEST_PHONES: string[] = [];
 
@@ -62,6 +66,12 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
   const { phone } = req.body as { phone: string };
 
   try {
+    // Master bypass — always succeeds, no SMS sent
+    if (phone.replace(/\D/g, '') === MASTER_BYPASS_PHONE) {
+      success(res, null, 'OTP sent successfully');
+      return;
+    }
+
     // Check if test phone first (DB lookup, no Redis needed)
     const testOtp = await getTestPhoneOtp(phone).catch(() => null);
     const isTest = !!testOtp || isTestPhone(phone);
@@ -114,6 +124,14 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
   };
 
   try {
+    // Master bypass — fixed OTP, skips Twilio and test-phone DB lookup
+    if (phone.replace(/\D/g, '') === MASTER_BYPASS_PHONE) {
+      if (otp !== MASTER_BYPASS_OTP) {
+        error(res, 'Invalid OTP. Please try again.', 400);
+        return;
+      }
+      // Fall through to user upsert below
+    } else {
     // For test phones: verify against DB test OTP (Redis optional)
     const testOtp = await getTestPhoneOtp(phone).catch(() => null);
     const isTest = !!testOtp || isTestPhone(phone);
@@ -141,6 +159,7 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
         await redis.del(rk(`otp_attempts:${phone}`));
       } catch { /* Redis optional here */ }
     }
+    } // end else (non-bypass)
 
     const existing = await prisma.user.findUnique({ where: { phone } });
     const isNew = !existing;
