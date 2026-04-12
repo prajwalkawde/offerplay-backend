@@ -5,6 +5,17 @@ import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { getTeam } from '../config/iplTeams';
 
+// ─── Fake display names assigned to bots per-contest (resets each contest) ───
+const BOT_DISPLAY_NAMES = [
+  'Arjun K.', 'Priya S.', 'Rahul M.', 'Sneha T.', 'Vikram P.',
+  'Ananya R.', 'Kiran B.', 'Deepak V.', 'Meera J.', 'Suresh N.',
+  'Kavita L.', 'Ravi G.', 'Pooja D.', 'Amit H.', 'Neha C.',
+  'Aakash Y.', 'Divya F.', 'Sanjay W.', 'Lata Q.', 'Nikhil Z.',
+];
+function getBotDisplayName(botIndexInContest: number): string {
+  return BOT_DISPLAY_NAMES[botIndexInContest % BOT_DISPLAY_NAMES.length];
+}
+
 // ─── Team logo URL cache (refreshed every 10 min from DB settings) ────────────
 let _logoCache: Record<string, string> = {};
 let _logoCacheAt = 0;
@@ -583,19 +594,33 @@ export async function getContestLeaderboard(req: Request, res: Response): Promis
       return null;
     };
 
+    let botIndexInContest = 0;
     const leaderboard = entries.map((entry, i) => {
       const displayRank = i + 1;
       const prizeTier = getPrizeTier(displayRank);
+      const isBot = entry.user.isBot ?? false;
+
+      // Bots get a sequential fake name that resets per-contest so no two bots
+      // in the same contest share a name, and real bot usernames are never exposed.
+      let displayName: string;
+      let displayAvatar: string;
+      if (isBot) {
+        displayName = getBotDisplayName(botIndexInContest++);
+        displayAvatar = displayName.charAt(0).toUpperCase();
+      } else {
+        displayName = entry.user.name?.split(' ')[0] ?? `User${entry.userId.slice(0, 4)}`;
+        displayAvatar = (entry.user.name?.charAt(0) ?? 'U').toUpperCase();
+      }
+
       return {
         rank: displayRank,
         userId: entry.userId,
-        name: entry.user.name?.split(' ')[0] ?? `User${entry.userId.slice(0, 4)}`,
-        fullName: entry.user.name ?? 'Unknown',
-        avatar: (entry.user.name?.charAt(0) ?? 'U').toUpperCase(),
+        name: displayName,
+        fullName: isBot ? displayName : (entry.user.name ?? 'Unknown'),
+        avatar: displayAvatar,
         totalPoints: entry.totalPoints,
         coinsWon: entry.coinsWon,
         isCurrentUser: entry.userId === userId,
-        isBot: entry.user.isBot ?? false,
         prizeLabel: getPrizeLabel(prizeTier),
         prizeTier: prizeTier ? {
           type: prizeTier.type,
@@ -781,12 +806,13 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         include: { user: { select: { name: true, isBot: true } } },
       });
       for (const w of rank1Entries) {
-        const contestTiers: any[] = Array.isArray((w as any).contest?.prizeTiersConfig)
-          ? (w as any).contest.prizeTiersConfig
-          : [];
+        // If rank-1 is a bot, show a fake name so real bot usernames aren't exposed
+        const isBot = w.user.isBot ?? false;
+        const winnerName = isBot
+          ? getBotDisplayName(0)   // rank-1 bot is always the "first" bot in contest
+          : (w.user.name?.split(' ')[0] ?? 'Winner');
         topWinnerMap.set(w.contestId, {
-          name: w.user.name?.split(' ')[0] ?? 'Winner',
-          isBot: w.user.isBot ?? false,
+          name: winnerName,
           coinsWon: w.coinsWon,
           rank: 1,
         });
