@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
+import { verifyRequestSignature } from '../middleware/requestSign.middleware';
+import { logDeviceSecurity } from '../middleware/deviceSecurity.middleware';
 import {
   claimDailyBonus,
   getEarnOptions,
@@ -46,7 +48,7 @@ router.get('/daily-streak', authMiddleware, getStreakData);
 router.post('/daily-streak/claim', authMiddleware, claimDailyStreak);
 // Aliases so both /daily-bonus and /daily-streak paths work
 router.get('/daily-bonus', authMiddleware, getStreakData);
-router.post('/daily-bonus/claim', authMiddleware, claimDailyStreak);
+router.post('/daily-bonus/claim', authMiddleware, logDeviceSecurity, verifyRequestSignature, claimDailyStreak);
 router.get('/referral', authMiddleware, getReferral);
 
 // ─── Existing routes ──────────────────────────────────────────────────────────

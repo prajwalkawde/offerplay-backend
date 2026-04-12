@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth';
+import { integrityCheck } from '../middleware/integrityCheck.middleware';
+import { verifyRequestSignature } from '../middleware/requestSign.middleware';
+import { logDeviceSecurity } from '../middleware/deviceSecurity.middleware';
 import {
   startStage,
   getQuestions,
@@ -12,11 +15,13 @@ import {
 
 const router = Router();
 router.use(authMiddleware);
+router.use(logDeviceSecurity);
+router.use(verifyRequestSignature);
 
 router.post('/start', startStage);
 router.post('/questions', getQuestions);
 router.post('/hint', useHint);
-router.post('/claim', claimStage);
+router.post('/claim', integrityCheck, claimStage);
 router.post('/bonus', claimBonusTicket);
 router.post('/extra-ticket', claimExtraTicket);
 router.get('/status', getQuizStatus);

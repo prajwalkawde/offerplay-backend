@@ -1093,3 +1093,11 @@ model QuizSettings {
   aiGenerationEnabled   Boolean  @default(true)
   updatedAt             DateTime @updatedAt
 }
+
+model SecuritySettings {
+  id                   Int      @id @default(1)
+  enablePlayIntegrity  Boolean  @default(true)
+  enableRequestSigning Boolean  @default(true)
+  enableSslPinning     Boolean  @default(true)
+  updatedAt            DateTime @updatedAt
+}
