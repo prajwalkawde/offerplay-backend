@@ -1,12 +1,5 @@
+import { SecuritySettings } from '@prisma/client';
 import { prisma } from '../config/database';
-
-interface SecuritySettings {
-  id: number;
-  enablePlayIntegrity: boolean;
-  enableRequestSigning: boolean;
-  enableSslPinning: boolean;
-  updatedAt: Date;
-}
 
 let cache: SecuritySettings | null = null;
 let cacheTime = 0;

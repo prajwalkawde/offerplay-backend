@@ -1095,9 +1095,118 @@ model QuizSettings {
 }
 
 model SecuritySettings {
-  id                   Int      @id @default(1)
-  enablePlayIntegrity  Boolean  @default(true)
-  enableRequestSigning Boolean  @default(true)
-  enableSslPinning     Boolean  @default(true)
-  updatedAt            DateTime @updatedAt
+  id                          Int      @id @default(1)
+
+  // ─── IP Restriction Settings ───────────────────
+  enableIpTracking            Boolean  @default(true)
+  ipMonitorThreshold          Int      @default(2)
+  ipSuspiciousThreshold       Int      @default(4)
+  ipFraudFarmThreshold        Int      @default(8)
+  ipScoreDeductSuspicious     Int      @default(20)
+  ipScoreDeductFraudFarm      Int      @default(60)
+
+  // ─── VPN Detection Settings ────────────────────
+  enableVpnDetection          Boolean  @default(false)
+  blockVpnUsers               Boolean  @default(false)
+  vpnScoreDeduct              Int      @default(30)
+  vpnCacheTtlHours            Int      @default(24)
+
+  // ─── Device Fingerprint Settings ───────────────
+  enableDeviceFingerprint     Boolean  @default(true)
+  maxAccountsPerDevice        Int      @default(1)
+  deviceScoreDeduct           Int      @default(80)
+
+  // ─── General Security ──────────────────────────
+  enableRequestSigning        Boolean  @default(true)
+  enablePlayIntegrity         Boolean  @default(true)
+  enableRootDetection         Boolean  @default(true)
+  enableEmulatorDetection     Boolean  @default(true)
+  enableBehaviorAnalysis      Boolean  @default(true)
+  enablePerfectScoreCheck     Boolean  @default(true)
+  enableRapidWithdrawalCheck  Boolean  @default(true)
+  enableUsageSpoofCheck       Boolean  @default(true)
+  minQuizDurationMs           Int      @default(30000)
+  perfectScoreStreakLimit     Int      @default(5)
+  rapidWithdrawalMinutes      Int      @default(60)
+  autobanTrustScore           Int      @default(20)
+  autoRestrictTrustScore      Int      @default(50)
+
+  updatedAt                   DateTime @updatedAt
+}
+
+model IpRecord {
+  id           Int       @id @default(autoincrement())
+  ipAddress    String    @unique
+  uids         String[]
+  country      String?
+  city         String?
+  isp          String?
+  isVpn        Boolean   @default(false)
+  isProxy      Boolean   @default(false)
+  isDatacenter Boolean   @default(false)
+  isFlagged    Boolean   @default(false)
+  isBlocked    Boolean   @default(false)
+  flagReason   String?
+  firstSeen    DateTime  @default(now())
+  lastSeen     DateTime  @updatedAt
+  requestCount Int       @default(0)
+
+  @@index([ipAddress])
+  @@index([isFlagged])
+  @@index([isBlocked])
+}
+
+model FraudLog {
+  id                Int       @id @default(autoincrement())
+  uid               String
+  eventType         String
+  severity          String    @default("medium")
+  description       String
+  ipAddress         String?
+  deviceFingerprint String?
+  metadata          Json?
+  isResolved        Boolean   @default(false)
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([uid])
+  @@index([eventType])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+model UserTrustScore {
+  id                   Int       @id @default(autoincrement())
+  uid                  String    @unique
+  trustScore           Int       @default(100)
+  isBanned             Boolean   @default(false)
+  isRestricted         Boolean   @default(false)
+  banReason            String?
+  bannedAt             DateTime?
+  bannedBy             String?
+  totalFraudEvents     Int       @default(0)
+  lastFraudEventAt     DateTime?
+  perfectScoreStreak   Int       @default(0)
+  rapidWithdrawalCount Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([uid])
+  @@index([isBanned])
+  @@index([trustScore])
+}
+
+model DeviceFingerprint {
+  id          Int      @id @default(autoincrement())
+  fingerprint String   @unique
+  uids        String[]
+  ipAddresses String[]
+  firstSeen   DateTime @default(now())
+  lastSeen    DateTime @updatedAt
+  isFlagged   Boolean  @default(false)
+  flagReason  String?
+  trustScore  Int      @default(100)
+
+  @@index([fingerprint])
 }

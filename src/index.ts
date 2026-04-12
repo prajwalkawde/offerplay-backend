@@ -41,6 +41,7 @@ import { startSuperOfferNotificationJob } from './jobs/superOfferNotification.jo
 import quizRoutes from './routes/quiz.routes';
 import adminQuizRoutes from './routes/admin.quiz.routes';
 import { startQuizAIJob } from './jobs/quizAI.job';
+import adminSecurityRoutes from './routes/admin.security.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -127,6 +128,7 @@ app.use('/api/superoffers', superOfferRoutes);
 app.use('/api/admin', adminSuperOfferRoutes);
 app.use('/api/quiz', quizRoutes);
 app.use('/api/admin/quiz', adminQuizRoutes);
+app.use('/api/admin/security', adminSecurityRoutes);
 
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
