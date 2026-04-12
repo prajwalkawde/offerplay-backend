@@ -135,21 +135,9 @@ export async function completeSuperOffer(req: Request, res: Response): Promise<v
 
     const settings = await superOfferService.getSettings();
 
-    const rewardLabel = result.rewardType === 'TICKETS'
-      ? `${result.ticketsAwarded} tickets`
-      : `${result.coinsAwarded} coins`;
-
-    sendFCMToUsers(
-      [req.userId!],
-      '🎯 Super Offer Complete!',
-      `You earned ${rewardLabel}! Next offer unlocks in ${settings.cooldownHours} hours.`,
-      {
-        type: 'super_offer_completed',
-        coins_awarded: String(result.coinsAwarded),
-        tickets_awarded: String(result.ticketsAwarded),
-        reward_type: result.rewardType,
-      }
-    ).catch(e => logger.error('FCM superOffer complete error:', e));
+    // FCM is NOT sent here — the superOfferNotification.job sends a push
+    // exactly when the cooldown ends (next offer becomes available), using
+    // cooldownEndsAt which is calculated from the admin's cooldownHours setting.
 
     success(res, {
       error: 'false',

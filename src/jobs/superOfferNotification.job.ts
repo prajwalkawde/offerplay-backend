@@ -50,7 +50,7 @@ async function runSuperOfferNotificationJob(): Promise<void> {
   });
 
   for (const attempt of cooldownEnded) {
-    await sendFCMToUsers([attempt.uid], 'Super Offer Ready! 🎯', 'Your Super Offer is back! Complete it to earn coins.', { type: 'super_offer_ready' });
+    await sendFCMToUsers([attempt.uid], '⚡ Super Offer is Available!', 'Your next Super Offer is ready. Spend gems & earn coins now!', { type: 'super_offer_ready' });
     await prisma.superOfferAttempt.update({ where: { id: attempt.id }, data: { notifCooldownSent: true } });
   }
 
