@@ -692,6 +692,16 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
 
     const now = new Date();
 
+    // Fetch any unclaimed gift/inventory prize claims for this user in bulk
+    const contestIds = entries.map(e => e.contestId);
+    const prizeClaims = contestIds.length > 0
+      ? await prisma.iplPrizeClaim.findMany({
+          where: { userId, iplContestId: { in: contestIds } },
+          select: { iplContestId: true, prizeType: true, prizeName: true, prizeImageUrl: true, status: true },
+        })
+      : [];
+    const prizeClaimMap = new Map(prizeClaims.map(c => [c.iplContestId, c]));
+
     // Count user predictions per matchId in bulk
     const matchIds = [...new Set(entries.map(e => e.contest.matchId))];
     const predictionCounts = matchIds.length > 0
@@ -734,12 +744,21 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       } else {
         contestState = 'PREDICTED_CAN_EDIT';
       }
-      // Compute ticketsWon and check if user has any prize tier
+      // Detect non-coin prizes:
+      // - INVENTORY/GIFT/XOXODAY: check iplPrizeClaim (accurate regardless of rank)
+      // - TICKETS: still rank-based since tickets are credited directly with no claim record
       let ticketsWon = 0;
       let hasInventoryPrize = false;
       let wonPrizeName: string | null = null;
       let wonPrizeImage: string | null = null;
-      if (entry.rank !== null) {
+
+      const claim = prizeClaimMap.get(contest.id);
+      if (claim) {
+        hasInventoryPrize = true;
+        wonPrizeName = claim.prizeName || null;
+        wonPrizeImage = claim.prizeImageUrl || null;
+      } else if (entry.rank !== null) {
+        // Ticket prizes only — look up by rank
         const tiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
         const wonTier = tiers.find((t: any) => {
           const from = t.rank ?? t.rankFrom ?? 1;
@@ -747,11 +766,6 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
           return entry.rank! >= from && entry.rank! <= to;
         });
         if (wonTier?.type === 'TICKETS') ticketsWon = wonTier.tickets || 0;
-        if (wonTier?.type === 'INVENTORY' || wonTier?.type === 'XOXODAY' || wonTier?.type === 'GIFT') {
-          hasInventoryPrize = true;
-          wonPrizeName = wonTier.itemName || null;
-          wonPrizeImage = wonTier.itemImage || null;
-        }
       }
 
       // Contest fully done (results processed) OR match completed

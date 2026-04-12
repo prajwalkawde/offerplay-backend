@@ -420,7 +420,7 @@ interface PrizeTier {
 }
 
 // ─── Core prize distribution logic (reusable) ────────────────────────────────
-export async function distributeIPLContestPrizes(contestId: string): Promise<{
+export async function distributeIPLContestPrizes(contestId: string, notifyOnComplete = true): Promise<{
   contestName: string;
   totalParticipants: number;
   botsCount: number;
@@ -541,6 +541,9 @@ export async function distributeIPLContestPrizes(contestId: string): Promise<{
     }
   }
 
+  // Build a map: userId → displayRank (actual position in full leaderboard including bots)
+  const displayRankMap = new Map(allRankings.map(r => [r.userId, r.displayRank]));
+
   // Distribute prizes to real users
   for (const { userId, prizeRank, score } of prizeRankings) {
     const rank = prizeRank;
@@ -616,32 +619,38 @@ export async function distributeIPLContestPrizes(contestId: string): Promise<{
       }
     }
 
+    // Store the actual display rank (position including bots) so MyContests and the
+    // leaderboard show the same number. Prize is still determined by prizeRank.
+    const actualDisplayRank = displayRankMap.get(userId) ?? prizeRank;
     await prisma.iplContestEntry.updateMany({
       where: { contestId, userId },
-      data: { rank: prizeRank, coinsWon: coinsAward, totalPoints: score },
+      data: { rank: actualDisplayRank, coinsWon: coinsAward, totalPoints: score },
     });
 
-    // Push notification for winner
-    let notifTitle = '';
-    let notifBody = '';
-    const rankLabel = `Rank #${prizeRank}`;
-    if (giftTier) {
-      const prizeName = (giftTier as any).itemName || giftTier.name || 'a gift prize';
-      notifTitle = `🏆 You won ${prizeName}!`;
-      notifBody = `Congratulations! You finished ${rankLabel} in ${contest.name}. Tap to claim your prize!`;
-    } else if (coinsAward > 0) {
-      notifTitle = `🎉 You won ${coinsAward} coins!`;
-      notifBody = `You finished ${rankLabel} in ${contest.name}. Your winnings have been credited!`;
-    } else if (ticketsAward > 0) {
-      notifTitle = `🎟️ You won ${ticketsAward} ticket${ticketsAward > 1 ? 's' : ''}!`;
-      notifBody = `You finished ${rankLabel} in ${contest.name}. Your tickets have been credited!`;
-    }
-    if (notifTitle) {
-      sendFCMToUsers([userId], notifTitle, notifBody, {
-        type: 'contest_win',
-        contestId,
-        rank: String(prizeRank),
-      }).catch(e => logger.error('Contest win FCM error:', e));
+    // Push notification for winner — only when called from per-contest endpoint.
+    // processIPLResults sends its own bulk notifications so we skip here to avoid duplicates.
+    if (notifyOnComplete) {
+      let notifTitle = '';
+      let notifBody = '';
+      const rankLabel = `Rank #${actualDisplayRank}`;
+      if (giftTier) {
+        const prizeName = (giftTier as any).itemName || giftTier.name || 'a gift prize';
+        notifTitle = `🏆 You won ${prizeName}!`;
+        notifBody = `Congratulations! You finished ${rankLabel} in ${contest.name}. Tap to claim your prize!`;
+      } else if (coinsAward > 0) {
+        notifTitle = `🎉 You won ${coinsAward} coins!`;
+        notifBody = `You finished ${rankLabel} in ${contest.name}. Your winnings have been credited!`;
+      } else if (ticketsAward > 0) {
+        notifTitle = `🎟️ You won ${ticketsAward} ticket${ticketsAward > 1 ? 's' : ''}!`;
+        notifBody = `You finished ${rankLabel} in ${contest.name}. Your tickets have been credited!`;
+      }
+      if (notifTitle) {
+        sendFCMToUsers([userId], notifTitle, notifBody, {
+          type: 'contest_win',
+          contestId,
+          rank: String(actualDisplayRank),
+        }).catch(e => logger.error('Contest win FCM error:', e));
+      }
     }
   }
 
@@ -926,7 +935,8 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
 
   for (const c of contestsToProcess) {
     try {
-      const result = await distributeIPLContestPrizes(c.id);
+      // notifyOnComplete=false: we send one consolidated notification in Step 4 below
+      const result = await distributeIPLContestPrizes(c.id, false);
       totalCoinsDistributed += result.coinsDistributed;
       totalWinners += result.rankings.filter((r: any) => (r.coinsWon ?? 0) > 0).length;
     } catch (err: any) {
@@ -934,10 +944,10 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
     }
   }
 
-  // Re-fetch contests with updated entries for notifications
+  // Re-fetch contests with updated entries (now containing displayRank) for notifications
   const contests = await prisma.iplContest.findMany({
     where: { matchId },
-    include: { entries: true },
+    include: { entries: { include: { user: { select: { isBot: true } } } } },
   });
 
   await prisma.iplMatch.update({
@@ -950,11 +960,12 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
     const match = await prisma.iplMatch.findUnique({ where: { id: matchId } });
     const { sendBulkNotification } = await import('../services/notificationService');
 
-    // Build best rank per user across all contests in this match
+    // Build best rank + coins per REAL user across all contests in this match (skip bots)
     const bestRank: Record<string, number> = {};
     const coinsWon: Record<string, number> = {};
     for (const contest of contests) {
-      for (const entry of contest.entries) {
+      for (const entry of (contest.entries as any[])) {
+        if (entry.user?.isBot) continue;  // bots don't get result notifications
         const rank = entry.rank ?? 999;
         if (bestRank[entry.userId] === undefined || rank < bestRank[entry.userId]) {
           bestRank[entry.userId] = rank;
