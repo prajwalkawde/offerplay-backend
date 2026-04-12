@@ -914,87 +914,31 @@ export async function processIPLResults(req: Request, res: Response): Promise<vo
     }
   }
 
-  // Step 3: Process each contest for this match
-  const contests = await prisma.iplContest.findMany({
+  // Step 3: Process each contest for this match using distributeIPLContestPrizes
+  // This properly handles bots: bots are ranked above the highest real user automatically.
+  const contestsToProcess = await prisma.iplContest.findMany({
     where: { matchId, status: { in: ['published', 'live'] } },
-    include: { entries: true },
+    select: { id: true },
   });
 
   let totalCoinsDistributed = 0;
   let totalWinners = 0;
 
-  for (const contest of contests) {
-    const userIds = contest.entries.map(e => e.userId);
-
-    const [predictions, updatedQuestions] = await Promise.all([
-      prisma.iplPrediction.findMany({
-        where: { matchId, userId: { in: userIds } },
-      }),
-      prisma.iplQuestion.findMany({ where: { matchId } }),
-    ]);
-
-    const userScores: Record<string, number> = {};
-    for (const entry of contest.entries) userScores[entry.userId] = 0;
-
-    for (const pred of predictions) {
-      const q = updatedQuestions.find(q => q.id === pred.questionId);
-      if (!q?.correctAnswer) continue;
-      if (pred.answer === q.correctAnswer) {
-        userScores[pred.userId] = (userScores[pred.userId] ?? 0) + q.points;
-      }
+  for (const c of contestsToProcess) {
+    try {
+      const result = await distributeIPLContestPrizes(c.id);
+      totalCoinsDistributed += result.coinsDistributed;
+      totalWinners += result.rankings.filter((r: any) => (r.coinsWon ?? 0) > 0).length;
+    } catch (err: any) {
+      logger.warn(`distributeIPLContestPrizes failed for contest ${c.id}: ${err.message}`);
     }
-
-    const rankings = Object.entries(userScores)
-      .sort(([, a], [, b]) => b - a)
-      .map(([userId, score], i) => ({ userId, score, rank: i + 1 }));
-
-    const winnersConfig = (contest.winnersConfig as unknown[]) || [];
-    const totalPool = contest.entries.length * contest.entryFee;
-    const prizePool = Math.floor(totalPool * 0.85);
-
-    for (const { userId, rank } of rankings) {
-      let coinsToAward = 0;
-
-      if (winnersConfig.length > 0) {
-        const winnerRule = (winnersConfig as Array<{ rankFrom?: number; rankTo?: number; rank?: number; coins: number }>)
-          .find(w => {
-            if (w.rankFrom !== undefined && w.rankTo !== undefined) {
-              return rank >= w.rankFrom && rank <= w.rankTo;
-            }
-            return w.rank === rank;
-          });
-        coinsToAward = winnerRule?.coins || 0;
-      } else {
-        if (rank === 1)       coinsToAward = Math.floor(prizePool * 0.40);
-        else if (rank === 2)  coinsToAward = Math.floor(prizePool * 0.25);
-        else if (rank === 3)  coinsToAward = Math.floor(prizePool * 0.15);
-        else if (rank <= 10)  coinsToAward = Math.floor(prizePool * 0.20 / 7);
-      }
-
-      if (coinsToAward > 0) {
-        await creditCoins(
-          userId, coinsToAward, TransactionType.EARN_IPL_WIN, contest.id,
-          `IPL Contest Win - Rank #${rank} - ${contest.name}`
-        );
-        await prisma.iplContestEntry.updateMany({
-          where: { contestId: contest.id, userId },
-          data: { rank, coinsWon: coinsToAward, totalPoints: userScores[userId] ?? 0 },
-        });
-        totalCoinsDistributed += coinsToAward;
-        totalWinners++;
-      } else {
-        await prisma.iplContestEntry.updateMany({
-          where: { contestId: contest.id, userId },
-          data: { rank, totalPoints: userScores[userId] ?? 0 },
-        });
-      }
-    }
-
-    await prisma.iplContest.update({
-      where: { id: contest.id },
-      data: { status: 'completed' },
-    });
   }
+
+  // Re-fetch contests with updated entries for notifications
+  const contests = await prisma.iplContest.findMany({
+    where: { matchId },
+    include: { entries: true },
+  });
 
   await prisma.iplMatch.update({
     where: { id: matchId },
