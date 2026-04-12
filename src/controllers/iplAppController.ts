@@ -694,7 +694,6 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
 
     // Fetch gift/inventory prize claims for this user in bulk.
     // We keep only the latest claim per contest (orderBy createdAt desc → first wins in the Map).
-    // Rank validation happens per-entry below before setting hasInventoryPrize.
     const contestIds = entries.map(e => e.contestId);
     const prizeClaims = contestIds.length > 0
       ? await prisma.iplPrizeClaim.findMany({
@@ -707,6 +706,30 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
     const prizeClaimMap = new Map<string, typeof prizeClaims[0]>();
     for (const c of prizeClaims) {
       if (!prizeClaimMap.has(c.iplContestId)) prizeClaimMap.set(c.iplContestId, c);
+    }
+
+    // Compute prize rank (rank among real users only) for completed contests.
+    // Prize tiers reference prize rank, not display rank. Bots are always ranked above real users
+    // so entry.rank (displayRank) ≠ prizeRank when bots are present.
+    const completedEntries = entries.filter(e => e.contest.status === 'completed');
+    const prizeRankMap = new Map<string, number>(); // contestId → prizeRank
+    if (completedEntries.length > 0) {
+      // Find all bot userId sets per contest in one query, then count non-bots with higher score
+      const botUserIds = await prisma.user.findMany({
+        where: { isBot: true },
+        select: { id: true },
+      });
+      const botIdSet = new Set(botUserIds.map(u => u.id));
+      await Promise.all(completedEntries.map(async e => {
+        const higherCount = await prisma.iplContestEntry.count({
+          where: {
+            contestId: e.contestId,
+            totalPoints: { gt: e.totalPoints ?? 0 },
+            userId: { notIn: [...botIdSet] },
+          },
+        });
+        prizeRankMap.set(e.contestId, higherCount + 1);
+      }));
     }
 
     // Count user predictions per matchId in bulk
@@ -759,21 +782,28 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       let wonPrizeName: string | null = null;
       let wonPrizeImage: string | null = null;
 
+      // Prize detection uses prizeRank (rank among real users, bots excluded) not displayRank.
+      // prizeRankMap is pre-computed for completed contests only.
+      const prizeRank = prizeRankMap.get(contest.id) ?? null;
+      const tiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
+      const wonTier = prizeRank !== null
+        ? tiers.find((t: any) => {
+            const from = t.rank ?? t.rankFrom ?? 1;
+            const to = t.rankTo ?? t.rank ?? from;
+            return prizeRank >= from && prizeRank <= to;
+          })
+        : null;
+
       const claim = prizeClaimMap.get(contest.id);
-      // Only accept the claim if it actually belongs to this user's rank
-      if (claim && entry.rank !== null && claim.rank === entry.rank) {
+      const claimablePrizeTypes = ['INVENTORY', 'GIFT', 'XOXODAY'];
+
+      if (wonTier && claimablePrizeTypes.includes((wonTier.type ?? '').toUpperCase()) && claim) {
+        // User's prize rank earns a claimable prize AND a claim record exists
         hasInventoryPrize = true;
-        wonPrizeName = claim.prizeName || null;
-        wonPrizeImage = claim.prizeImageUrl || null;
-      } else if (entry.rank !== null) {
-        // Ticket prizes only — look up by rank
-        const tiers: any[] = Array.isArray(contest.prizeTiersConfig) ? contest.prizeTiersConfig as any[] : [];
-        const wonTier = tiers.find((t: any) => {
-          const from = t.rank ?? t.rankFrom ?? 1;
-          const to = t.rankTo ?? t.rank ?? from;
-          return entry.rank! >= from && entry.rank! <= to;
-        });
-        if (wonTier?.type === 'TICKETS') ticketsWon = wonTier.tickets || 0;
+        wonPrizeName = claim.prizeName || wonTier.itemName || null;
+        wonPrizeImage = claim.prizeImageUrl || wonTier.itemImage || null;
+      } else if (wonTier?.type === 'TICKETS') {
+        ticketsWon = wonTier.tickets || 0;
       }
 
       // Contest fully done (results processed) OR match completed
@@ -817,14 +847,14 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
     });
 
     // Fetch rank-1 (top winner) for all completed contests in one query
-    const completedContestIds = result
+    const completedContestIdsForWinner = result
       .filter(e => e.displayStatus === 'COMPLETED' || e.status === 'completed')
       .map(e => e.contestId);
 
     const topWinnerMap = new Map<string, any>();
-    if (completedContestIds.length > 0) {
+    if (completedContestIdsForWinner.length > 0) {
       const rank1Entries = await prisma.iplContestEntry.findMany({
-        where: { contestId: { in: completedContestIds }, rank: 1 },
+        where: { contestId: { in: completedContestIdsForWinner }, rank: 1 },
         include: { user: { select: { name: true, isBot: true } } },
       });
       for (const w of rank1Entries) {
@@ -879,18 +909,36 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
   }
 }
 
-// ─── Helper: find a valid prize claim for a user in a contest ────────────────
-// Returns the claim only if the user's actual contest rank earns a non-COINS prize.
-// Prevents spurious records (from re-runs / bugs) from leaking to the wrong user.
-async function findValidPrizeClaim(userId: string, contestId: string) {
-  // 1. Get user's actual rank in this contest
+// ─── Helper: compute a user's prize rank (rank among real users only) ─────────
+// Prize tiers use prize rank (bots excluded). entry.rank stores display rank (bots included).
+// We derive prize rank by counting non-bot entries with strictly higher totalPoints.
+async function getUserPrizeRank(userId: string, contestId: string): Promise<number | null> {
   const entry = await prisma.iplContestEntry.findFirst({
     where: { userId, contestId },
-    select: { rank: true },
+    select: { totalPoints: true },
   });
-  if (!entry || entry.rank === null) return null;
+  if (!entry) return null;
 
-  // 2. Load contest prize tiers to verify rank earns a claimable (non-COINS) prize
+  const higherCount = await prisma.iplContestEntry.count({
+    where: {
+      contestId,
+      totalPoints: { gt: entry.totalPoints ?? 0 },
+      user: { isBot: false },
+    },
+  });
+  return higherCount + 1;
+}
+
+// ─── Helper: find a valid prize claim for a user in a contest ────────────────
+// Returns the claim only if the user's prize rank (among real users) earns a
+// claimable (INVENTORY / GIFT / XOXODAY) prize tier. Prevents spurious records
+// from re-runs / bugs leaking to the wrong user.
+async function findValidPrizeClaim(userId: string, contestId: string) {
+  // 1. Compute prize rank — position among real users only (bots excluded)
+  const prizeRank = await getUserPrizeRank(userId, contestId);
+  if (prizeRank === null) return null;
+
+  // 2. Load contest prize tiers
   const contest = await prisma.iplContest.findUnique({
     where: { id: contestId },
     select: { prizeTiersConfig: true },
@@ -902,20 +950,19 @@ async function findValidPrizeClaim(userId: string, contestId: string) {
     : contest.prizeTiersConfig;
   const tiers: any[] = Array.isArray(rawTiers) ? rawTiers : [];
 
-  const userRank = entry.rank;
+  // 3. Verify prize rank earns a claimable (non-COINS) prize tier
   const matchingTier = tiers.find((t: any) => {
     const from = t.rank ?? t.rankFrom ?? 1;
     const to = t.rankTo ?? t.rank ?? from;
-    return userRank >= from && userRank <= to;
+    return prizeRank >= from && prizeRank <= to;
   });
 
-  // Only claimable prize types need a claim record (INVENTORY, GIFT, XOXODAY)
   const claimableTypes = ['INVENTORY', 'GIFT', 'XOXODAY'];
-  if (!matchingTier || !claimableTypes.includes(matchingTier.type)) return null;
+  if (!matchingTier || !claimableTypes.includes((matchingTier.type ?? '').toUpperCase())) return null;
 
-  // 3. Find the claim record that matches this user's rank (latest if duplicates)
+  // 4. Find the claim record for this user's prize rank (latest if duplicates)
   const claim = await prisma.iplPrizeClaim.findFirst({
-    where: { userId, iplContestId: contestId, rank: userRank },
+    where: { userId, iplContestId: contestId, rank: prizeRank },
     orderBy: { createdAt: 'desc' },
   });
 
