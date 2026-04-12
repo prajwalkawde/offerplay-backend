@@ -644,12 +644,13 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       let contestState = 'JOINED';
       if (!questionsAvailable) {
         contestState = 'WAITING_QUESTIONS';
-      } else if (questionsAvailable && predictionCount === 0) {
-        contestState = 'PREDICT_NOW';
-      } else if (predictionCount > 0 && !predictionsLocked) {
-        contestState = 'PREDICTED_CAN_EDIT';
-      } else if (predictionCount > 0 && predictionsLocked) {
+      } else if (predictionsLocked) {
+        // Registration/prediction time has passed — always go to leaderboard view
         contestState = 'WAITING_RESULT';
+      } else if (predictionCount === 0) {
+        contestState = 'PREDICT_NOW';
+      } else {
+        contestState = 'PREDICTED_CAN_EDIT';
       }
       // Compute ticketsWon and check if user has any prize tier
       let ticketsWon = 0;
