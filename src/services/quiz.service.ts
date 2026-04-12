@@ -7,7 +7,7 @@
 
 import crypto from 'crypto';
 import { prisma } from '../config/database';
-import { creditTickets } from './ticket.service';
+import { creditGems } from './gems.service';
 import { logger } from '../utils/logger';
 
 const GAME_SECRET = process.env.GAME_SECRET ?? 'offerplay_quiz_secret';
@@ -17,9 +17,9 @@ const GAME_SECRET = process.env.GAME_SECRET ?? 'offerplay_quiz_secret';
 interface StartStageResult {
   stageId: string;
   stageToken: string;
-  dailyTicketsEarned: number;
-  dailyTicketLimit: number;
-  remainingDailyTickets: number;
+  dailyGemsEarned: number;
+  dailyGemsLimit: number;
+  remainingDailyGems: number;
   cooldownMinutes: number;
   hintsPerStage: number;
 }
@@ -53,7 +53,7 @@ interface ClaimResult {
   totalQuestions: number;
   isPassed: boolean;
   passThreshold: number;
-  ticketsAwarded: number;
+  gemsAwarded: number;
   isFlagged: boolean;
   flagReason: string | null;
   nextStageAvailableAt: Date;
@@ -68,9 +68,9 @@ interface ClaimResult {
 
 interface StatusResult {
   canPlay: boolean;
-  dailyTicketsEarned: number;
-  dailyTicketLimit: number;
-  remainingDailyTickets: number;
+  dailyGemsEarned: number;
+  dailyGemsLimit: number;
+  remainingDailyGems: number;
   cooldownRemainingMinutes: number;
   nextStageAvailableAt: Date | null;
   showDailyLimitMessage: boolean;
@@ -183,9 +183,9 @@ export async function startStage(uid: string, _deviceId?: string): Promise<Start
   return {
     stageId,
     stageToken,
-    dailyTicketsEarned,
-    dailyTicketLimit: settings.dailyTicketLimit,
-    remainingDailyTickets: settings.dailyTicketLimit - dailyTicketsEarned,
+    dailyGemsEarned: dailyTicketsEarned,
+    dailyGemsLimit: settings.dailyTicketLimit,
+    remainingDailyGems: settings.dailyTicketLimit - dailyTicketsEarned,
     cooldownMinutes: 0,
     hintsPerStage: settings.maxHintsPerStage,
   };
@@ -373,40 +373,40 @@ export async function claimStage(
   const passThreshold = Math.ceil(totalQuestions / 2);
   const isPassed = correctAnswers >= passThreshold;
 
-  // Award ticket ONLY if passed and not flagged as bot
-  let ticketsAwarded = 0;
+  // Award gem ONLY if passed and not flagged as bot
+  let gemsAwarded = 0;
   if (isPassed && !isFlagged) {
-    await creditTickets(
+    await creditGems(
       uid,
       1,
       'earned_game',
       `Sports Quiz Stage 🏆 - ${correctAnswers}/${totalQuestions} correct`,
       stageId
     );
-    ticketsAwarded = 1;
+    gemsAwarded = 1;
   }
 
-  // Update stage with final data
+  // Update stage with final data (ticketsAwarded field reused as gems counter)
   await prisma.quizStage.update({
     where: { stageId },
     data: {
       correctAnswers,
       hintsUsed: stage.hintsUsed,
-      ticketsAwarded,
+      ticketsAwarded: gemsAwarded,
       sessionDurationMs,
       isFlagged,
       flagReason,
     },
   });
 
-  logger.info('Quiz stage claimed', { uid, stageId, correctAnswers, isPassed, ticketsAwarded, isFlagged });
+  logger.info('Quiz stage claimed', { uid, stageId, correctAnswers, isPassed, gemsAwarded, isFlagged });
 
   return {
     correctAnswers,
     totalQuestions,
     isPassed,
     passThreshold,
-    ticketsAwarded,
+    gemsAwarded,
     isFlagged,
     flagReason,
     nextStageAvailableAt: now,
@@ -426,7 +426,7 @@ export async function claimStage(
 
 // ─── claimBonusTicket ─────────────────────────────────────────────────────────
 
-export async function claimBonusTicket(uid: string, stageId: string, bonusAmount: number = 1): Promise<{ ticketsAwarded: number; newBalance: number }> {
+export async function claimBonusTicket(uid: string, stageId: string, bonusAmount: number = 1): Promise<{ gemsAwarded: number; newBalance: number }> {
   const settings = await getSettings();
 
   if (!settings.bonusTicketEnabled) {
@@ -458,12 +458,12 @@ export async function claimBonusTicket(uid: string, stageId: string, bonusAmount
     data: { bonusTicketClaimed: true },
   });
 
-  const label = bonusAmount >= 2 ? 'Sports Quiz Perfect Score Bonus 🏆🏆' : 'Sports Quiz Bonus Ticket';
-  const newBalance = await creditTickets(uid, amount, 'earned_game', label, stageId);
+  const label = bonusAmount >= 2 ? 'Sports Quiz Perfect Score Bonus 🏆🏆' : 'Sports Quiz Bonus Gems';
+  const newBalance = await creditGems(uid, amount, 'earned_game', label, stageId);
 
-  logger.info('Bonus ticket claimed', { uid, stageId, amount, newBalance });
+  logger.info('Bonus gems claimed', { uid, stageId, amount, newBalance });
 
-  return { ticketsAwarded: amount, newBalance };
+  return { gemsAwarded: amount, newBalance };
 }
 
 // ─── getStatus ────────────────────────────────────────────────────────────────
@@ -493,9 +493,9 @@ export async function getStatus(uid: string): Promise<StatusResult> {
 
   return {
     canPlay,
-    dailyTicketsEarned,
-    dailyTicketLimit: settings.dailyTicketLimit,
-    remainingDailyTickets,
+    dailyGemsEarned: dailyTicketsEarned,
+    dailyGemsLimit: settings.dailyTicketLimit,
+    remainingDailyGems: remainingDailyTickets,
     cooldownRemainingMinutes: 0,
     nextStageAvailableAt: null,
     showDailyLimitMessage,
@@ -508,7 +508,7 @@ export async function getStatus(uid: string): Promise<StatusResult> {
 export async function claimExtraTicket(
   uid: string,
   stageId: string
-): Promise<{ ticketsAwarded: number; newBalance: number }> {
+): Promise<{ gemsAwarded: number; newBalance: number }> {
   const stage = await prisma.quizStage.findUnique({ where: { stageId } });
   if (!stage) throw Object.assign(new Error('Stage not found'), { code: 'NOT_FOUND' });
   if (stage.uid !== uid) throw Object.assign(new Error('Unauthorized'), { code: 'UNAUTHORIZED' });
@@ -535,9 +535,9 @@ export async function claimExtraTicket(
       where: { stageId },
       data: { extraTicketClaimed: true, ticketsAwarded: { increment: 1 } },
     });
-    return creditTickets(uid, 1, 'earned_game', 'Sports Quiz Extra Ticket 📺', stageId, tx);
+    return creditGems(uid, 1, 'earned_game', 'Sports Quiz Extra Gem 📺', stageId, tx);
   });
 
-  logger.info('Extra ticket claimed', { uid, stageId, newBalance });
-  return { ticketsAwarded: 1, newBalance };
+  logger.info('Extra gem claimed', { uid, stageId, newBalance });
+  return { gemsAwarded: 1, newBalance };
 }

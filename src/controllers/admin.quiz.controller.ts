@@ -283,32 +283,32 @@ export async function adminGetAnalytics(req: Request, res: Response): Promise<vo
 
     // Build per-day stats
     const stagesPerDay: Record<string, number> = {};
-    const ticketsPerDay: Record<string, number> = {};
+    const gemsPerDay: Record<string, number> = {};
 
     for (const stage of recentStages) {
       const day = stage.createdAt.toISOString().slice(0, 10);
       stagesPerDay[day] = (stagesPerDay[day] ?? 0) + 1;
       if (stage.status === 'completed') {
-        ticketsPerDay[day] = (ticketsPerDay[day] ?? 0) + (stage.ticketsAwarded ?? 0);
+        gemsPerDay[day] = (gemsPerDay[day] ?? 0) + (stage.ticketsAwarded ?? 0);
       }
     }
 
     const avgScore = Math.round((correctAgg._avg.correctAnswers ?? 0) * 100) / 100;
     const avgHints = Math.round((hintAgg._avg.hintsUsed ?? 0) * 100) / 100;
-    const totalTickets = ticketAgg._sum.ticketsAwarded ?? 0;
+    const totalGems = ticketAgg._sum.ticketsAwarded ?? 0;
     const hintUsageRate = completedStages > 0 ? Math.round((avgHints / 3) * 100) / 100 : 0;
 
     success(res, {
       totalStages,
       completedStages,
       flaggedStages,
-      totalTicketsAwarded: totalTickets,
+      totalGemsAwarded: totalGems,
       avgScore,
       avgHints,
       hintUsageRate,
       sportBreakdown: sportBreakdown.map((s) => ({ sport: s.sport, count: s._count._all })),
       stagesPerDay,
-      ticketsPerDay,
+      gemsPerDay,
     });
   } catch (err) {
     logger.error('adminGetAnalytics error', { err });
