@@ -1007,7 +1007,7 @@ model SuperOfferAttempt {
   id                   Int       @id @default(autoincrement())
   uid                  String
   attemptNumber        Int
-  gemsCost             Int
+  gemsCost             Int       @default(0)
   coinReward           Int
   rewardType           String    @default("COINS")
   gemsFromQuiz         Int       @default(0)
