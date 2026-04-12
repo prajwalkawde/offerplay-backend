@@ -62,6 +62,17 @@ const allowedOrigins = [
   process.env.ALLOWED_ORIGINS,
 ].filter(Boolean) as string[];
 
+// Trust proxy — must be set before any middleware that reads req.ip or req.protocol
+app.set('trust proxy', 1);
+
+// ─── HTTPS redirect (nginx sets x-forwarded-proto) ───────────────────────────
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.protocol === 'http') {
+    return res.redirect(301, 'https://' + req.headers.host + req.originalUrl);
+  }
+  next();
+});
+
 // ─── Request Logger ───────────────────────────────────────────────────────────
 app.use((req: Request, _res: Response, next: NextFunction) => {
   logger.info(`[REQ] ${req.method} ${req.path} | ip=${req.ip}`);
@@ -87,22 +98,9 @@ app.use('/uploads', express.static('uploads'));
 // ─── Landing page (offerplay.in) ──────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Trust proxy for rate limiting behind load balancer
-app.set('trust proxy', 1);
-
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString(), env: env.NODE_ENV });
-});
-
-// ─── Temp Debug (remove after testing) ────────────────────────────────────────
-app.get('/debug/onesignal', async (_req: Request, res: Response) => {
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 10,
-    select: { id: true, name: true, phone: true, oneSignalPlayerId: true, createdAt: true },
-  });
-  res.json(users);
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────

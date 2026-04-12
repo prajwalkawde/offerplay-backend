@@ -53,10 +53,11 @@ export async function verifyRequestSignature(
     }
 
     // Verify signature
+    // Use originalUrl (e.g. /api/quiz/claim) to match what the mobile client signs
     const body = req.body ?? {};
     const payload = [
       req.method.toUpperCase(),
-      req.path,
+      req.originalUrl.split('?')[0],
       JSON.stringify(body),
       timestamp,
       uid,
@@ -77,10 +78,10 @@ export async function verifyRequestSignature(
 
     let valid = false;
     try {
-      valid = crypto.timingSafeEqual(
-        Buffer.from(signature.padEnd(expected.length, '0').slice(0, expected.length), 'hex'),
-        Buffer.from(expected, 'hex'),
-      );
+      const sigBuffer = Buffer.from(signature, 'hex');
+      const expBuffer = Buffer.from(expected, 'hex');
+      valid = sigBuffer.length === expBuffer.length &&
+              crypto.timingSafeEqual(sigBuffer, expBuffer);
     } catch {
       valid = false;
     }
