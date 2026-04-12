@@ -559,31 +559,16 @@ export async function quizComplete(
 
   const totalQuestions = questionIds.length;
   const passed = correctAnswers >= 3;
-  const quizGemReward = (attempt as any).quizGemReward ?? 0;
-  let gemsEarned = 0;
 
   if (passed) {
     await prisma.superOfferAttempt.update({
       where: { id: attemptId },
-      data: { status: 'game_done', quizGameDoneAt: new Date(), gemsFromQuiz: quizGemReward },
+      data: { status: 'game_done', quizGameDoneAt: new Date() },
     });
-
-    // Credit gems for passing quiz
-    if (quizGemReward > 0) {
-      await creditGems(
-        uid,
-        quizGemReward,
-        'quiz_reward',
-        `Super Offer quiz reward (attempt #${attempt.attemptNumber})`,
-        String(attemptId)
-      );
-      gemsEarned = quizGemReward;
-    }
-
-    logger.info('Super Offer quiz passed', { uid, attemptId, correctAnswers, gemsEarned });
+    logger.info('Super Offer quiz passed', { uid, attemptId, correctAnswers });
   } else {
     logger.info('Super Offer quiz failed', { uid, attemptId, correctAnswers });
   }
 
-  return { correctAnswers, totalQuestions, passed, gemsEarned };
+  return { correctAnswers, totalQuestions, passed, gemsEarned: 0 };
 }
