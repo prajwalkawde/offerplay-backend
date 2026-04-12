@@ -142,21 +142,31 @@ export async function startStage(uid: string, _deviceId?: string): Promise<Start
     });
   }
 
-  // Active stage check — auto-expire stuck sessions that have passed their expiry
+  // Active stage check — auto-expire if past expiry, resume if still valid
   const activeStage = await prisma.quizStage.findFirst({
     where: { uid, status: 'started' },
-    select: { stageId: true, expiresAt: true },
+    select: { stageId: true, stageToken: true, expiresAt: true },
   });
   if (activeStage) {
     if (activeStage.expiresAt < now) {
-      // Session has expired — auto-expire it and continue
+      // Session has expired — auto-expire it and fall through to create a new one
       await prisma.quizStage.update({
         where: { stageId: activeStage.stageId },
         data: { status: 'expired' },
       });
       logger.info('Auto-expired stuck quiz stage', { uid, stageId: activeStage.stageId });
     } else {
-      throw Object.assign(new Error('You have an active stage in progress'), { code: 'ACTIVE_STAGE' });
+      // Session is still valid — resume it instead of blocking the user
+      logger.info('Resuming active quiz stage', { uid, stageId: activeStage.stageId });
+      return {
+        stageId: activeStage.stageId,
+        stageToken: activeStage.stageToken,
+        dailyGemsEarned: dailyTicketsEarned,
+        dailyGemsLimit: settings.dailyTicketLimit,
+        remainingDailyGems: settings.dailyTicketLimit - dailyTicketsEarned,
+        cooldownMinutes: 0,
+        hintsPerStage: settings.maxHintsPerStage,
+      };
     }
   }
 
