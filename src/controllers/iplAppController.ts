@@ -692,15 +692,22 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
 
     const now = new Date();
 
-    // Fetch any unclaimed gift/inventory prize claims for this user in bulk
+    // Fetch gift/inventory prize claims for this user in bulk.
+    // We keep only the latest claim per contest (orderBy createdAt desc → first wins in the Map).
+    // Rank validation happens per-entry below before setting hasInventoryPrize.
     const contestIds = entries.map(e => e.contestId);
     const prizeClaims = contestIds.length > 0
       ? await prisma.iplPrizeClaim.findMany({
           where: { userId, iplContestId: { in: contestIds } },
-          select: { iplContestId: true, prizeType: true, prizeName: true, prizeImageUrl: true, status: true },
+          select: { iplContestId: true, rank: true, prizeType: true, prizeName: true, prizeImageUrl: true, status: true },
+          orderBy: { createdAt: 'desc' },
         })
       : [];
-    const prizeClaimMap = new Map(prizeClaims.map(c => [c.iplContestId, c]));
+    // Keep only the first (latest) claim per contest
+    const prizeClaimMap = new Map<string, typeof prizeClaims[0]>();
+    for (const c of prizeClaims) {
+      if (!prizeClaimMap.has(c.iplContestId)) prizeClaimMap.set(c.iplContestId, c);
+    }
 
     // Count user predictions per matchId in bulk
     const matchIds = [...new Set(entries.map(e => e.contest.matchId))];
@@ -753,7 +760,8 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       let wonPrizeImage: string | null = null;
 
       const claim = prizeClaimMap.get(contest.id);
-      if (claim) {
+      // Only accept the claim if it actually belongs to this user's rank
+      if (claim && entry.rank !== null && claim.rank === entry.rank) {
         hasInventoryPrize = true;
         wonPrizeName = claim.prizeName || null;
         wonPrizeImage = claim.prizeImageUrl || null;
@@ -871,18 +879,59 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
   }
 }
 
+// ─── Helper: find a valid prize claim for a user in a contest ────────────────
+// Returns the claim only if the user's actual contest rank earns a non-COINS prize.
+// Prevents spurious records (from re-runs / bugs) from leaking to the wrong user.
+async function findValidPrizeClaim(userId: string, contestId: string) {
+  // 1. Get user's actual rank in this contest
+  const entry = await prisma.iplContestEntry.findFirst({
+    where: { userId, contestId },
+    select: { rank: true },
+  });
+  if (!entry || entry.rank === null) return null;
+
+  // 2. Load contest prize tiers to verify rank earns a claimable (non-COINS) prize
+  const contest = await prisma.iplContest.findUnique({
+    where: { id: contestId },
+    select: { prizeTiersConfig: true },
+  });
+  if (!contest) return null;
+
+  const rawTiers = typeof contest.prizeTiersConfig === 'string'
+    ? JSON.parse(contest.prizeTiersConfig as string)
+    : contest.prizeTiersConfig;
+  const tiers: any[] = Array.isArray(rawTiers) ? rawTiers : [];
+
+  const userRank = entry.rank;
+  const matchingTier = tiers.find((t: any) => {
+    const from = t.rank ?? t.rankFrom ?? 1;
+    const to = t.rankTo ?? t.rank ?? from;
+    return userRank >= from && userRank <= to;
+  });
+
+  // Only claimable prize types need a claim record (INVENTORY, GIFT, XOXODAY)
+  const claimableTypes = ['INVENTORY', 'GIFT', 'XOXODAY'];
+  if (!matchingTier || !claimableTypes.includes(matchingTier.type)) return null;
+
+  // 3. Find the claim record that matches this user's rank (latest if duplicates)
+  const claim = await prisma.iplPrizeClaim.findFirst({
+    where: { userId, iplContestId: contestId, rank: userRank },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return claim ?? null;
+}
+
 // ─── GET /api/ipl/contests/:contestId/my-prize ───────────────────────────────
 export async function getMyPrize(req: Request, res: Response): Promise<void> {
   const userId = req.userId!;
   const { contestId } = req.params as { contestId: string };
 
   try {
-    const claim = await prisma.iplPrizeClaim.findFirst({
-      where: { userId, iplContestId: contestId },
-    });
+    const claim = await findValidPrizeClaim(userId, contestId);
 
     if (!claim) {
-      // No gift prize — user may have only won coins
+      // No claimable prize for this user in this contest
       success(res, { claim: null });
       return;
     }
@@ -930,9 +979,7 @@ export async function claimPrize(req: Request, res: Response): Promise<void> {
   const { name, phone, address, email } = req.body;
 
   try {
-    const claim = await prisma.iplPrizeClaim.findFirst({
-      where: { userId, iplContestId: contestId },
-    });
+    const claim = await findValidPrizeClaim(userId, contestId);
 
     if (!claim) {
       error(res, 'No prize claim found for this contest', 404);
