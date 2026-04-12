@@ -25,16 +25,25 @@ export async function adminUpdateSettings(req: Request, res: Response): Promise<
       cooldownHours: number;
       tiers: Array<{
         attemptNumber: number;
-        ticketCost: number;
+        gemsCost: number;
         coinReward: number;
+        rewardType: string;
+        quizGemReward: number;
         hasAppInstallStep: boolean;
         requiredUsageMinutes: number;
         isDefault: boolean;
       }>;
     };
 
-    if (typeof isActive !== 'boolean' || !cooldownHours || !Array.isArray(tiers)) {
-      error(res, 'isActive, cooldownHours and tiers are required', 400);
+    if (typeof isActive !== 'boolean' || !cooldownHours || !Array.isArray(tiers) || tiers.length === 0) {
+      error(res, 'isActive, cooldownHours and at least one tier are required', 400);
+      return;
+    }
+
+    // Ensure exactly one default tier
+    const defaultTiers = tiers.filter((t) => t.isDefault);
+    if (defaultTiers.length !== 1) {
+      error(res, 'Exactly one tier must be marked as default (for attempt 3+)', 400);
       return;
     }
 
@@ -50,12 +59,14 @@ export async function adminUpdateSettings(req: Request, res: Response): Promise<
       await tx.superOfferTier.createMany({
         data: tiers.map((t) => ({
           superOfferSettingsId: 1,
-          attemptNumber: t.attemptNumber,
-          ticketCost: t.ticketCost,
-          coinReward: t.coinReward,
-          hasAppInstallStep: t.hasAppInstallStep,
-          requiredUsageMinutes: t.requiredUsageMinutes,
-          isDefault: t.isDefault,
+          attemptNumber: t.isDefault ? 0 : t.attemptNumber,
+          gemsCost: t.gemsCost ?? 20,
+          coinReward: t.coinReward ?? 100,
+          rewardType: t.rewardType ?? 'COINS',
+          quizGemReward: t.quizGemReward ?? 5,
+          hasAppInstallStep: t.hasAppInstallStep ?? false,
+          requiredUsageMinutes: t.requiredUsageMinutes ?? 2,
+          isDefault: t.isDefault ?? false,
         })),
       });
     });
@@ -130,7 +141,7 @@ export async function adminGetAnalytics(_req: Request, res: Response): Promise<v
       prisma.superOfferAttempt.count({ where: { status: 'failed' } }),
       prisma.superOfferAttempt.count({ where: { status: { in: ['pending', 'ad_watched', 'installed', 'verifying'] } } }),
       prisma.superOfferAttempt.aggregate({ where: { status: 'completed' }, _sum: { coinsAwarded: true } }),
-      prisma.superOfferAttempt.aggregate({ _sum: { ticketCost: true } }),
+      prisma.superOfferAttempt.aggregate({ _sum: { gemsCost: true } }),
       prisma.superOfferAttempt.groupBy({ by: ['status'], _count: { id: true } }),
       prisma.superOfferAttempt.findMany({
         where: { createdAt: { gte: thirtyDaysAgo } },
@@ -189,7 +200,7 @@ export async function adminGetAnalytics(_req: Request, res: Response): Promise<v
       failed: failedCount,
       in_progress: inProgressCount,
       total_coins_awarded: coinsAgg._sum.coinsAwarded ?? 0,
-      total_tickets_spent: ticketsAgg._sum.ticketCost ?? 0,
+      total_gems_spent: ticketsAgg._sum.gemsCost ?? 0,
       completion_rate_percent: Math.round(completionRate * 10) / 10,
       avg_completion_time_hours: Math.round(avgCompletionHours * 10) / 10,
       funnel: funnelMap,

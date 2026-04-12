@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import * as superOfferService from '../services/superOffer.service';
-import { getTicketHistory, getTicketBalance } from '../services/ticket.service';
+import { getGemHistory, getGemTotals } from '../services/gems.service';
 import { prisma } from '../config/database';
 import { sendFCMToUsers } from '../services/fcmService';
 
@@ -23,17 +23,19 @@ export async function getSuperOfferStatus(req: Request, res: Response): Promise<
 export async function enterSuperOffer(req: Request, res: Response): Promise<void> {
   try {
     const attempt = await superOfferService.enterOffer(req.userId!);
-    const balanceAfter = await getTicketBalance(req.userId!);
+    const { balance: gemBalanceAfter } = await import('../services/gems.service').then(m => m.getGemTotals(req.userId!));
 
     success(res, {
       error: 'false',
       attempt_id: attempt.id,
       attempt_number: attempt.attemptNumber,
-      ticket_cost: attempt.ticketCost,
+      gems_cost: (attempt as any).gemsCost,
       coin_reward: attempt.coinReward,
+      reward_type: (attempt as any).rewardType ?? 'COINS',
+      quiz_gem_reward: (attempt as any).quizGemReward ?? 0,
       has_app_install_step: attempt.hasAppInstallStep,
       required_usage_minutes: attempt.requiredUsageMinutes,
-      ticket_balance_after: balanceAfter,
+      gem_balance_after: gemBalanceAfter,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to enter Super Offer';
@@ -133,15 +135,29 @@ export async function completeSuperOffer(req: Request, res: Response): Promise<v
 
     const settings = await superOfferService.getSettings();
 
-    sendFCMToUsers([req.userId!], '🎯 Super Offer Complete!', `You earned ${result.coinsAwarded} coins! Next offer unlocks in ${settings.cooldownHours} hours.`, {
-      type: 'super_offer_completed',
-      coinsAwarded: String(result.coinsAwarded),
-    }).catch(e => logger.error('FCM superOffer complete error:', e));
+    const rewardLabel = result.rewardType === 'TICKETS'
+      ? `${result.ticketsAwarded} tickets`
+      : `${result.coinsAwarded} coins`;
+
+    sendFCMToUsers(
+      [req.userId!],
+      '🎯 Super Offer Complete!',
+      `You earned ${rewardLabel}! Next offer unlocks in ${settings.cooldownHours} hours.`,
+      {
+        type: 'super_offer_completed',
+        coins_awarded: String(result.coinsAwarded),
+        tickets_awarded: String(result.ticketsAwarded),
+        reward_type: result.rewardType,
+      }
+    ).catch(e => logger.error('FCM superOffer complete error:', e));
 
     success(res, {
       error: 'false',
       coins_awarded: result.coinsAwarded,
       new_coin_balance: result.newCoinBalance,
+      tickets_awarded: result.ticketsAwarded,
+      new_ticket_balance: result.newTicketBalance,
+      reward_type: result.rewardType,
       cooldown_hours: settings.cooldownHours,
       cooldown_ends_at: result.cooldownEndsAt,
     });
@@ -209,6 +225,7 @@ export async function superOfferQuizComplete(req: Request, res: Response): Promi
       correct_answers: result.correctAnswers,
       total_questions: result.totalQuestions,
       passed: result.passed,
+      gems_earned: result.gemsEarned,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to complete quiz';
@@ -217,7 +234,32 @@ export async function superOfferQuizComplete(req: Request, res: Response): Promi
   }
 }
 
-// ─── GET /api/superoffers/tickets ─────────────────────────────────────────────
+// ─── GET /api/superoffers/gems ────────────────────────────────────────────────
+
+export async function getMyGems(req: Request, res: Response): Promise<void> {
+  try {
+    const uid = req.userId!;
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(50, parseInt(String(req.query.limit || '20'), 10));
+
+    const { balance, totalEarned, totalSpent } = await getGemTotals(uid);
+    const { transactions, total } = await getGemHistory(uid, page, limit);
+
+    success(res, {
+      error: 'false',
+      balance,
+      total_earned: totalEarned,
+      total_spent: totalSpent,
+      recent_transactions: transactions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    logger.error('getMyGems error', { err, uid: req.userId });
+    error(res, 'Failed to get gem balance', 500);
+  }
+}
+
+// ─── GET /api/superoffers/tickets (legacy, kept for compatibility) ────────────
 
 export async function getMyTickets(req: Request, res: Response): Promise<void> {
   try {
@@ -230,6 +272,7 @@ export async function getMyTickets(req: Request, res: Response): Promise<void> {
       select: { ticketBalance: true },
     });
 
+    const { getTicketHistory } = await import('../services/ticket.service');
     const { transactions, total } = await getTicketHistory(uid, page, limit);
 
     const [earnedAgg, spentAgg] = await Promise.all([

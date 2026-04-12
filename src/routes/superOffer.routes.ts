@@ -13,6 +13,7 @@ import {
   completeSuperOffer,
   failSuperOffer,
   getMyTickets,
+  getMyGems,
   superOfferQuizStart,
   superOfferQuizComplete,
 } from '../controllers/superOffer.controller';
@@ -30,6 +31,7 @@ router.post('/verify-usage',     fraudCheck('offer_verify'),  verifyUsage);
 router.post('/complete',         fraudCheck('offer_complete'), integrityCheck, completeSuperOffer);
 router.post('/fail', failSuperOffer);
 router.get('/tickets', getMyTickets);
+router.get('/gems', getMyGems);
 router.post('/quiz-start',    fraudCheck('super_offer_quiz_start'),    superOfferQuizStart);
 router.post('/quiz-complete', fraudCheck('super_offer_quiz_complete'), superOfferQuizComplete);
 

@@ -81,6 +81,7 @@ model User {
   googleId       String?        @unique
   coinBalance    Int            @default(0)
   ticketBalance  Int            @default(0)
+  gemBalance     Int            @default(0)
   referralCode   String         @unique
   referredBy     String?
   referralCount  Int            @default(0)
@@ -126,6 +127,7 @@ model User {
   dailyQuestStreak      DailyQuestStreak?
   customOfferCompletions CustomOfferCompletion[]
   activityProfile        UserActivityProfile?
+  gemTransactions        GemTransaction[]
 }
 
 model Transaction {
@@ -669,6 +671,20 @@ model TicketTransaction {
   @@index([userId])
 }
 
+model GemTransaction {
+  id          Int      @id @default(autoincrement())
+  userId      String
+  amount      Int
+  type        String
+  description String?
+  refId       String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
 model ReferralMilestone {
   id                String                   @id @default(cuid())
   title             String
@@ -978,8 +994,10 @@ model SuperOfferTier {
   superOfferSettingsId Int                @default(1)
   settings             SuperOfferSettings @relation(fields: [superOfferSettingsId], references: [id])
   attemptNumber        Int
-  ticketCost           Int                @default(20)
+  gemsCost             Int                @default(20)
   coinReward           Int                @default(100)
+  rewardType           String             @default("COINS")
+  quizGemReward        Int                @default(5)
   hasAppInstallStep    Boolean            @default(false)
   requiredUsageMinutes Int                @default(2)
   isDefault            Boolean            @default(false)
@@ -989,8 +1007,10 @@ model SuperOfferAttempt {
   id                   Int       @id @default(autoincrement())
   uid                  String
   attemptNumber        Int
-  ticketCost           Int
+  gemsCost             Int
   coinReward           Int
+  rewardType           String    @default("COINS")
+  gemsFromQuiz         Int       @default(0)
   hasAppInstallStep    Boolean
   requiredUsageMinutes Int       @default(2)
   status               String    @default("pending")

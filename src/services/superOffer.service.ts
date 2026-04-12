@@ -1,23 +1,27 @@
 /**
  * Super Offer Service
  *
- * COINS = withdrawable reward currency (awarded on completion)
- * TICKETS = non-withdrawable loyalty points (spent to enter)
- * Never mix these two currencies.
+ * COINS = withdrawable reward currency (awarded on completion when rewardType=COINS)
+ * TICKETS = non-withdrawable loyalty points (awarded on completion when rewardType=TICKETS)
+ * GEMS = engagement currency (spent to enter, earned by passing quiz)
+ * Never mix these currencies.
  */
 
 import { TransactionType, SuperOfferAttempt } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
-import { creditTickets, debitTickets, getTicketBalance } from './ticket.service';
+import { creditTickets } from './ticket.service';
+import { creditGems, debitGems, getGemBalance } from './gems.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SuperOfferTier {
   id: number;
   attemptNumber: number;
-  ticketCost: number;
+  gemsCost: number;
   coinReward: number;
+  rewardType: string;
+  quizGemReward: number;
   hasAppInstallStep: boolean;
   requiredUsageMinutes: number;
   isDefault: boolean;
@@ -33,20 +37,24 @@ interface SuperOfferSettings {
 export interface SuperOfferStatusResult {
   isActive: boolean;
   attemptNumber: number;
-  ticketCost: number;
+  gemsCost: number;
   coinReward: number;
+  rewardType: string;
+  quizGemReward: number;
   hasAppInstallStep: boolean;
   requiredUsageMinutes: number;
   canEnter: boolean;
   cooldownRemainingHours: number;
   cooldownEndsAt: string | null;
-  currentTicketBalance: number;
-  hasEnoughTickets: boolean;
+  currentGemBalance: number;
+  hasEnoughGems: boolean;
   inProgressAttempt: {
     id: number;
     status: string;
     hasAppInstallStep: boolean;
     coinReward: number;
+    rewardType: string;
+    gemsFromQuiz: number;
     requiredUsageMinutes: number;
     detectedAppPackage: string | null;
     detectedAppName: string | null;
@@ -66,7 +74,7 @@ export async function getSettings(): Promise<SuperOfferSettings> {
     include: { tiers: { orderBy: { attemptNumber: 'asc' } } },
   });
 
-  if (existing) return existing;
+  if (existing) return existing as unknown as SuperOfferSettings;
 
   // First-time setup: create defaults so the admin panel works before seed runs
   await prisma.superOfferSettings.create({
@@ -76,18 +84,19 @@ export async function getSettings(): Promise<SuperOfferSettings> {
       cooldownHours: 24,
       tiers: {
         create: [
-          { attemptNumber: 1, ticketCost: 20, coinReward: 100, hasAppInstallStep: false, isDefault: false },
-          { attemptNumber: 2, ticketCost: 18, coinReward: 200, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: false },
-          { attemptNumber: 0, ticketCost: 15, coinReward: 200, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: true  },
+          { attemptNumber: 1, gemsCost: 20, coinReward: 100, rewardType: 'COINS', quizGemReward: 5, hasAppInstallStep: false, isDefault: false },
+          { attemptNumber: 2, gemsCost: 18, coinReward: 200, rewardType: 'COINS', quizGemReward: 10, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: false },
+          { attemptNumber: 0, gemsCost: 15, coinReward: 200, rewardType: 'COINS', quizGemReward: 10, hasAppInstallStep: true,  requiredUsageMinutes: 2, isDefault: true  },
         ],
       },
     },
   });
 
-  return prisma.superOfferSettings.findUniqueOrThrow({
+  const result = await prisma.superOfferSettings.findUniqueOrThrow({
     where: { id: 1 },
     include: { tiers: { orderBy: { attemptNumber: 'asc' } } },
   });
+  return result as unknown as SuperOfferSettings;
 }
 
 // ─── Tier Resolution ──────────────────────────────────────────────────────────
@@ -109,7 +118,7 @@ export function getTierForAttempt(
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
-  const [settings, completedCount, inProgressAttempt, activeCooldown, ticketBalance] =
+  const [settings, completedCount, inProgressAttempt, activeCooldown, gemBalance] =
     await Promise.all([
       getSettings(),
       prisma.superOfferAttempt.count({ where: { uid, status: 'completed' } }),
@@ -121,6 +130,8 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
           status: true,
           hasAppInstallStep: true,
           coinReward: true,
+          rewardType: true,
+          gemsFromQuiz: true,
           requiredUsageMinutes: true,
           detectedAppPackage: true,
           detectedAppName: true,
@@ -136,7 +147,7 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
         orderBy: { completedAt: 'desc' },
         select: { cooldownEndsAt: true },
       }),
-      getTicketBalance(uid),
+      getGemBalance(uid),
     ]);
 
   const nextAttemptNumber = completedCount + 1;
@@ -160,21 +171,25 @@ export async function getStatus(uid: string): Promise<SuperOfferStatusResult> {
   return {
     isActive: settings.isActive,
     attemptNumber: nextAttemptNumber,
-    ticketCost: tier.ticketCost,
+    gemsCost: tier.gemsCost,
     coinReward: tier.coinReward,
+    rewardType: tier.rewardType,
+    quizGemReward: tier.quizGemReward,
     hasAppInstallStep: tier.hasAppInstallStep,
     requiredUsageMinutes: tier.requiredUsageMinutes,
     canEnter,
     cooldownRemainingHours,
     cooldownEndsAt,
-    currentTicketBalance: ticketBalance,
-    hasEnoughTickets: ticketBalance >= tier.ticketCost,
+    currentGemBalance: gemBalance,
+    hasEnoughGems: gemBalance >= tier.gemsCost,
     inProgressAttempt: inProgressAttempt
       ? {
           id: inProgressAttempt.id,
           status: inProgressAttempt.status,
           hasAppInstallStep: inProgressAttempt.hasAppInstallStep,
           coinReward: inProgressAttempt.coinReward,
+          rewardType: (inProgressAttempt as any).rewardType ?? 'COINS',
+          gemsFromQuiz: (inProgressAttempt as any).gemsFromQuiz ?? 0,
           requiredUsageMinutes: inProgressAttempt.requiredUsageMinutes,
           detectedAppPackage: inProgressAttempt.detectedAppPackage ?? null,
           detectedAppName: inProgressAttempt.detectedAppName ?? null,
@@ -196,9 +211,9 @@ export async function enterOffer(
   if (status.cooldownRemainingHours > 0) {
     throw new Error(`Super Offer is on cooldown for ${status.cooldownRemainingHours} more hour(s)`);
   }
-  if (!status.hasEnoughTickets) {
+  if (!status.hasEnoughGems) {
     throw new Error(
-      `Insufficient tickets — required: ${status.ticketCost}, available: ${status.currentTicketBalance}`
+      `Insufficient gems — required: ${status.gemsCost}, available: ${status.currentGemBalance}`
     );
   }
 
@@ -206,10 +221,10 @@ export async function enterOffer(
   const tier = getTierForAttempt(settings, status.attemptNumber);
 
   const attempt = await prisma.$transaction(async (tx) => {
-    // Debit tickets — this will throw if balance is insufficient (double-check)
-    await debitTickets(
+    // Debit gems — this will throw if balance is insufficient (double-check)
+    await debitGems(
       uid,
-      tier.ticketCost,
+      tier.gemsCost,
       'spent_offer',
       `Super Offer attempt #${status.attemptNumber}`,
       undefined,
@@ -220,8 +235,10 @@ export async function enterOffer(
       data: {
         uid,
         attemptNumber: status.attemptNumber,
-        ticketCost: tier.ticketCost,
+        gemsCost: tier.gemsCost,
         coinReward: tier.coinReward,
+        rewardType: tier.rewardType,
+        gemsFromQuiz: 0,
         hasAppInstallStep: tier.hasAppInstallStep,
         requiredUsageMinutes: tier.requiredUsageMinutes,
         status: 'pending',
@@ -296,10 +313,6 @@ export async function verifyUsage(
 
   if (!attempt) throw new Error('Attempt not found or not in installed state');
 
-  // ── Server-side time enforcement ──────────────────────────────────────────
-  // We do NOT trust the usage_minutes value sent by the client — it can be
-  // intercepted and forged. Instead we check how much real-world time has
-  // elapsed since the server recorded appInstalledAt.
   if (!attempt.appInstalledAt) {
     throw new Error('Install time not recorded — cannot verify usage');
   }
@@ -329,7 +342,7 @@ export async function completeOffer(
   uid: string,
   attemptId: number,
   spendId: string
-): Promise<{ coinsAwarded: number; newCoinBalance: number; cooldownEndsAt: string }> {
+): Promise<{ coinsAwarded: number; newCoinBalance: number; ticketsAwarded: number; newTicketBalance: number; rewardType: string; cooldownEndsAt: string }> {
   const attempt = await prisma.superOfferAttempt.findFirst({
     where: { id: attemptId, uid, status: 'verifying' },
   });
@@ -338,16 +351,25 @@ export async function completeOffer(
 
   // Idempotency — already completed
   if (attempt.spendId !== null) {
-    const user = await prisma.user.findUnique({ where: { id: uid }, select: { coinBalance: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: uid },
+      select: { coinBalance: true, ticketBalance: true },
+    });
+    const rewardType = (attempt as any).rewardType ?? 'COINS';
     return {
-      coinsAwarded: attempt.coinsAwarded,
+      coinsAwarded: rewardType === 'COINS' ? attempt.coinsAwarded : 0,
       newCoinBalance: user?.coinBalance ?? 0,
+      ticketsAwarded: rewardType === 'TICKETS' ? attempt.coinsAwarded : 0,
+      newTicketBalance: user?.ticketBalance ?? 0,
+      rewardType,
       cooldownEndsAt: attempt.cooldownEndsAt?.toISOString() ?? new Date().toISOString(),
     };
   }
 
   const settings = await getSettings();
   const cooldownEndsAt = new Date(Date.now() + settings.cooldownHours * 60 * 60 * 1000);
+  const rewardType = (attempt as any).rewardType ?? 'COINS';
+  const rewardAmount = attempt.coinReward;
 
   const result = await prisma.$transaction(async (tx) => {
     // Lock with spendId first to prevent double-claim
@@ -356,47 +378,77 @@ export async function completeOffer(
       data: { spendId },
     });
 
-    // Award coins directly in the transaction (mirrors creditCoins logic)
-    const updatedUser = await tx.user.update({
-      where: { id: uid },
-      data: { coinBalance: { increment: attempt.coinReward } },
-      select: { coinBalance: true },
-    });
+    let newCoinBalance = 0;
+    let newTicketBalance = 0;
 
-    await tx.transaction.create({
-      data: {
-        userId: uid,
-        type: TransactionType.EARN_TASK,
-        amount: attempt.coinReward,
-        refId: String(attemptId),
-        description: `Super Offer attempt #${attempt.attemptNumber} reward`,
-        status: 'completed',
-      },
-    });
+    if (rewardType === 'TICKETS') {
+      // Award tickets
+      const updatedUser = await tx.user.update({
+        where: { id: uid },
+        data: { ticketBalance: { increment: rewardAmount } },
+        select: { coinBalance: true, ticketBalance: true },
+      });
+      newCoinBalance = updatedUser.coinBalance;
+      newTicketBalance = updatedUser.ticketBalance;
+
+      await tx.ticketTransaction.create({
+        data: {
+          userId: uid,
+          amount: rewardAmount,
+          type: 'super_offer_reward',
+          description: `Super Offer attempt #${attempt.attemptNumber} reward`,
+          refId: String(attemptId),
+        },
+      });
+    } else {
+      // Award coins (default)
+      const updatedUser = await tx.user.update({
+        where: { id: uid },
+        data: { coinBalance: { increment: rewardAmount } },
+        select: { coinBalance: true, ticketBalance: true },
+      });
+      newCoinBalance = updatedUser.coinBalance;
+      newTicketBalance = updatedUser.ticketBalance;
+
+      await tx.transaction.create({
+        data: {
+          userId: uid,
+          type: TransactionType.EARN_TASK,
+          amount: rewardAmount,
+          refId: String(attemptId),
+          description: `Super Offer attempt #${attempt.attemptNumber} reward`,
+          status: 'completed',
+        },
+      });
+    }
 
     await tx.superOfferAttempt.update({
       where: { id: attemptId },
       data: {
         status: 'completed',
         completedAt: new Date(),
-        coinsAwarded: attempt.coinReward,
+        coinsAwarded: rewardAmount,
         cooldownEndsAt,
       },
     });
 
-    return { newCoinBalance: updatedUser.coinBalance };
+    return { newCoinBalance, newTicketBalance };
   });
 
   logger.info('Super Offer completed', {
     uid,
     attemptId,
-    coinsAwarded: attempt.coinReward,
+    rewardType,
+    rewardAmount,
     spendId,
   });
 
   return {
-    coinsAwarded: attempt.coinReward,
+    coinsAwarded: rewardType === 'COINS' ? rewardAmount : 0,
     newCoinBalance: result.newCoinBalance,
+    ticketsAwarded: rewardType === 'TICKETS' ? rewardAmount : 0,
+    newTicketBalance: result.newTicketBalance,
+    rewardType,
     cooldownEndsAt: cooldownEndsAt.toISOString(),
   };
 }
@@ -423,20 +475,21 @@ export async function failAttempt(
     data: { status: 'failed' },
   });
 
-  // Refund tickets if any were spent
-  if (attempt.ticketCost > 0) {
-    await creditTickets(
+  // Refund gems if any were spent
+  const gemsCost = (attempt as any).gemsCost ?? 0;
+  if (gemsCost > 0) {
+    await creditGems(
       uid,
-      attempt.ticketCost,
+      gemsCost,
       'refund',
       `Refund for failed Super Offer attempt #${attempt.attemptNumber}${reason ? ': ' + reason : ''}`,
       String(attemptId)
     );
 
-    logger.info('Tickets refunded for failed Super Offer attempt', {
+    logger.info('Gems refunded for failed Super Offer attempt', {
       uid,
       attemptId,
-      ticketsRefunded: attempt.ticketCost,
+      gemsRefunded: gemsCost,
     });
   }
 }
@@ -484,7 +537,7 @@ export async function quizComplete(
   uid: string,
   attemptId: number,
   answers: Array<{ questionId: number; selectedOption: string }>
-): Promise<{ correctAnswers: number; totalQuestions: number; passed: boolean }> {
+): Promise<{ correctAnswers: number; totalQuestions: number; passed: boolean; gemsEarned: number }> {
   const attempt = await prisma.superOfferAttempt.findFirst({
     where: { id: attemptId, uid, status: 'pending' },
   });
@@ -506,16 +559,31 @@ export async function quizComplete(
 
   const totalQuestions = questionIds.length;
   const passed = correctAnswers >= 3;
+  const quizGemReward = (attempt as any).quizGemReward ?? 0;
+  let gemsEarned = 0;
 
   if (passed) {
     await prisma.superOfferAttempt.update({
       where: { id: attemptId },
-      data: { status: 'game_done', quizGameDoneAt: new Date() },
+      data: { status: 'game_done', quizGameDoneAt: new Date(), gemsFromQuiz: quizGemReward },
     });
-    logger.info('Super Offer quiz passed', { uid, attemptId, correctAnswers });
+
+    // Credit gems for passing quiz
+    if (quizGemReward > 0) {
+      await creditGems(
+        uid,
+        quizGemReward,
+        'quiz_reward',
+        `Super Offer quiz reward (attempt #${attempt.attemptNumber})`,
+        String(attemptId)
+      );
+      gemsEarned = quizGemReward;
+    }
+
+    logger.info('Super Offer quiz passed', { uid, attemptId, correctAnswers, gemsEarned });
   } else {
     logger.info('Super Offer quiz failed', { uid, attemptId, correctAnswers });
   }
 
-  return { correctAnswers, totalQuestions, passed };
+  return { correctAnswers, totalQuestions, passed, gemsEarned };
 }
