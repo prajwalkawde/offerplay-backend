@@ -1280,7 +1280,38 @@ export async function fetchTodayMatches(req: Request, res: Response): Promise<vo
 
 // ─── Generate AI questions for a match ────────────────────────────────────────
 const ALL_LANGUAGES = ['en', 'hi', 'hinglish', 'ta', 'te', 'bn', 'mr'];
-const generationLocks = new Set<string>(); // matchId lock to prevent double generation
+const generationLocks = new Set<string>();
+const generationErrors = new Map<string, { type: string; message: string; at: number }>();
+
+function classifyApiError(err: any): { type: string; message: string } {
+  const msg = (err?.message || err?.error?.message || String(err ?? '')).toLowerCase();
+  const status = err?.status ?? err?.response?.status ?? 0;
+  if (status === 401 || msg.includes('api key') || msg.includes('authentication_error')) {
+    return { type: 'claude_key_error', message: 'Invalid or expired Anthropic API key. Update ANTHROPIC_API_KEY in the server .env file.' };
+  }
+  if (status === 429 || msg.includes('rate_limit') || msg.includes('rate limit')) {
+    return { type: 'claude_rate_limit', message: 'Claude AI is rate limited. Wait a few minutes and try again.' };
+  }
+  if (msg.includes('credit') || msg.includes('billing') || msg.includes('quota') || msg.includes('insufficient')) {
+    return { type: 'claude_quota', message: 'Claude AI credits exhausted. Top up your Anthropic account at console.anthropic.com.' };
+  }
+  if (status >= 500 || msg.includes('overload') || msg.includes('service unavailable')) {
+    return { type: 'claude_overloaded', message: 'Claude AI servers are overloaded. Wait a few minutes and try again.' };
+  }
+  return { type: 'claude_error', message: `Claude generation failed: ${err?.message || 'Unknown error'}` };
+}
+
+// Expose any stored generation error for a match (consumed once then cleared)
+export async function getGenerationStatus(req: Request, res: Response): Promise<void> {
+  const { matchId } = req.params as { matchId: string };
+  const stored = generationErrors.get(matchId);
+  if (stored) {
+    generationErrors.delete(matchId);
+    success(res, { hasError: true, type: stored.type, message: stored.message });
+  } else {
+    success(res, { hasError: false });
+  }
+}
 
 export async function generateIPLQuestions(req: Request, res: Response): Promise<void> {
   const { matchId, questionCount, language } = req.body as {
@@ -1329,12 +1360,17 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
   if ((match as any).cricApiId) {
     rawScorecard = await fetchMatchScorecard((match as any).cricApiId as string);
 
+    // null means CricAPI returned nothing — rate limit hit or bad key
+    if (rawScorecard === null) {
+      error(res, '❌ CricAPI did not respond. Your daily limit (100 calls/day) may be exhausted, or the CRICAPI_KEY in .env is invalid.', 503);
+      return;
+    }
+
     const scoreArr: any[] = rawScorecard?.score || [];
     const scorecardArr: any[] = rawScorecard?.scorecard || [];
 
     if (scoreArr.length === 0 && scorecardArr.length === 0) {
       error(res, '❌ Match has not started yet. Please wait for 1st innings to complete.', 400);
-      generationLocks.delete(lockKey);
       return;
     }
 
@@ -1346,8 +1382,7 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
     );
 
     if (!firstInningsComplete) {
-      error(res, '❌ 1st innings is still in progress. Please wait for 1st innings to complete before generating questions.', 400);
-      generationLocks.delete(lockKey);
+      error(res, '❌ 1st innings is still in progress. Please wait for it to complete before generating questions.', 400);
       return;
     }
   }
@@ -1408,7 +1443,9 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
         try {
           englishQuestions = await generateQuestionsFromScorecard(scorecard, { matchDate: matchDateStr, venue: venueName }, 'en');
           logger.info(`[QuestionGen] ${englishQuestions.length} English questions generated from scorecard`);
-        } catch (err) {
+        } catch (err: any) {
+          const classified = classifyApiError(err);
+          generationErrors.set(match.id, { ...classified, at: Date.now() });
           logger.error('[QuestionGen] English scorecard generation failed:', err);
         }
 
@@ -1493,7 +1530,11 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
             );
             totalCreated += questions.length;
             logger.info(`Saved ${questions.length} questions (pre-match) for language: ${lang}`);
-          } catch (langErr) {
+          } catch (langErr: any) {
+            const classified = classifyApiError(langErr);
+            if (!generationErrors.has(match.id)) {
+              generationErrors.set(match.id, { ...classified, at: Date.now() });
+            }
             logger.error(`Failed for language ${lang}:`, langErr);
           }
         }
@@ -1501,7 +1542,11 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
 
       await prisma.iplMatch.update({ where: { id: matchId }, data: { questionsGenerated: true } });
       logger.info(`✅ Generation complete: ${totalCreated} questions created for match ${match.id}`);
-    } catch (err) {
+    } catch (err: any) {
+      const classified = classifyApiError(err);
+      if (!generationErrors.has(match.id)) {
+        generationErrors.set(match.id, { ...classified, at: Date.now() });
+      }
       logger.error('Background question generation failed:', err);
     } finally {
       generationLocks.delete(lockKey);

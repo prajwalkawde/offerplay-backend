@@ -24,7 +24,7 @@ import {
   publishIPLContest, processIPLContestResults, getContestParticipants, fixBotScores,
   fetchTodayMatches, updateIPLMatch, processIPLResults,
   saveEditedQuestions, generateResultReport,
-  generateIPLQuestions, getIPLAnalytics, deleteAdminIPLMatch,
+  generateIPLQuestions, getGenerationStatus, getIPLAnalytics, deleteAdminIPLMatch,
   fetchIPLSchedule,
   syncTeamLogos,
   deleteMatchAllQuestions,
@@ -135,6 +135,7 @@ router.post('/ipl/matches/:matchId/save-questions', saveEditedQuestions);
 
 // IPL — Contest lifecycle
 router.post('/ipl/generate-questions', generateIPLQuestions);
+router.get('/ipl/matches/:matchId/generation-status', getGenerationStatus);
 router.post('/ipl/generate-result-report', generateResultReport);
 router.post('/ipl/publish-contest', publishContest);
 router.post('/ipl/process-results', processIPLResults);
