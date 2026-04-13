@@ -1015,11 +1015,13 @@ export async function claimPrize(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const deliveryDetails: Record<string, string> = {};
-    if (name) deliveryDetails.name = name;
-    if (phone) deliveryDetails.phone = phone;
+    // Merge user-provided fields into existing deliveryDetails (preserves _xoxodayProductId etc.)
+    const existingDetails = (claim.deliveryDetails as Record<string, string>) || {};
+    const deliveryDetails: Record<string, string> = { ...existingDetails };
+    if (name)    deliveryDetails.name    = name;
+    if (phone)   deliveryDetails.phone   = phone;
     if (address) deliveryDetails.address = address;
-    if (email) deliveryDetails.email = email;
+    if (email)   deliveryDetails.email   = email;
 
     await prisma.iplPrizeClaim.update({
       where: { id: claim.id },
