@@ -1324,7 +1324,35 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
     questionCount: count,
   };
 
-  // Respond immediately
+  // ── Hard check: verify 1st innings is complete before responding ────────────
+  let rawScorecard: any = null;
+  if ((match as any).cricApiId) {
+    rawScorecard = await fetchMatchScorecard((match as any).cricApiId as string);
+
+    const scoreArr: any[] = rawScorecard?.score || [];
+    const scorecardArr: any[] = rawScorecard?.scorecard || [];
+
+    if (scoreArr.length === 0 && scorecardArr.length === 0) {
+      error(res, '❌ Match has not started yet. Please wait for 1st innings to complete.', 400);
+      generationLocks.delete(lockKey);
+      return;
+    }
+
+    const first = scoreArr[0];
+    const firstInningsComplete = first && (
+      parseInt(String(first.w ?? 0)) >= 10 ||
+      parseFloat(String(first.o ?? 0)) >= 20 ||
+      scoreArr.length >= 2
+    );
+
+    if (!firstInningsComplete) {
+      error(res, '❌ 1st innings is still in progress. Please wait for 1st innings to complete before generating questions.', 400);
+      generationLocks.delete(lockKey);
+      return;
+    }
+  }
+
+  // Respond immediately — innings check passed (or no cricApiId → fallback flow)
   success(res, { status: 'generating', matchId, languages: targetLanguages, countPerLang: count },
     `Generation started for ${targetLanguages.length} language(s), ${count} questions each.`);
 
@@ -1356,17 +1384,16 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
 
       logger.info(`Generating ${count} questions × ${targetLanguages.length} language(s) for match ${match.id}`);
 
-      // ── Try to fetch real scorecard from CricAPI ──────────────────────────
+      // ── Parse scorecard (already fetched + validated above) ─────────────
       let scorecard: Awaited<ReturnType<typeof parseCricApiScorecard>> = null;
-      if ((match as any).cricApiId) {
+      if ((match as any).cricApiId && rawScorecard) {
         try {
-          const raw = await fetchMatchScorecard((match as any).cricApiId as string);
-          scorecard = parseCricApiScorecard(raw, match.team1, match.team2);
-          if (scorecard?.matchStatus) {
-            logger.info(`[QuestionGen] Scorecard fetched for match ${match.id}: ${scorecard.matchStatus}`);
+          scorecard = parseCricApiScorecard(rawScorecard, match.team1, match.team2);
+          if (scorecard?.innings[0]) {
+            logger.info(`[QuestionGen] 1st innings: ${scorecard.innings[0].team} ${scorecard.innings[0].total}/${scorecard.innings[0].wickets}`);
           }
         } catch (scErr) {
-          logger.warn('[QuestionGen] Scorecard fetch failed, using pre-match flow:', scErr);
+          logger.warn('[QuestionGen] Scorecard parse failed, using pre-match flow:', scErr);
         }
       }
 

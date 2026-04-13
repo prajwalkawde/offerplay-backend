@@ -193,64 +193,93 @@ async function callHaiku(prompt: string): Promise<GeneratedQuestion[]> {
   return parsed;
 }
 
-// ─── Generate post-match questions from real scorecard (correctAnswer filled) ─
+function formatFirstInningsForPrompt(sc: ScorecardData): string {
+  const inn = sc.innings[0];
+  if (!inn) return 'No 1st innings data available';
+
+  const lines: string[] = [
+    `BATTING TEAM: ${inn.team}`,
+    `TOTAL: ${inn.total}/${inn.wickets} in ${inn.overs} overs`,
+    inn.powerplayRuns !== undefined ? `POWERPLAY (overs 1-6): ${inn.powerplayRuns}/${inn.powerplayWickets ?? 0}` : '',
+    '',
+  ];
+
+  const batters = inn.batting.filter(b => b.runs > 0 || b.balls > 0).sort((a, b) => b.runs - a.runs);
+  if (batters.length) {
+    lines.push('BATTING:');
+    for (const b of batters) {
+      lines.push(`  ${b.name}: ${b.runs}(${b.balls}) ${b.fours}×4 ${b.sixes}×6 SR:${b.strikeRate} [${b.dismissal}]`);
+    }
+    lines.push('');
+  }
+
+  const bowlers = inn.bowling.sort((a, b) => b.wickets - a.wickets || a.economy - b.economy);
+  if (bowlers.length) {
+    lines.push('BOWLING:');
+    for (const b of bowlers) {
+      lines.push(`  ${b.name}: ${b.overs}ov-${b.runs}r-${b.wickets}wkts eco:${b.economy}`);
+    }
+  }
+
+  return lines.filter(l => l !== '').join('\n').trim();
+}
+
+// ─── Generate 1st-innings questions from real scorecard (correctAnswer filled) ─
 export async function generateQuestionsFromScorecard(
   scorecard: ScorecardData,
   matchMeta: { matchDate: string; venue?: string },
   language: string = 'en',
 ): Promise<GeneratedQuestion[]> {
   const langInstruction = LANGUAGE_INSTRUCTIONS[language] ?? LANGUAGE_INSTRUCTIONS.en;
-  const scorecardText = formatScorecardForPrompt(scorecard);
+  const firstInningsText = formatFirstInningsForPrompt(scorecard);
+  const inn1 = scorecard.innings[0];
 
-  const prompt = `You are an IPL cricket quiz master. Create exactly 20 engaging trivia questions based on the REAL match scorecard below.
-ALL questions must have the CORRECT ANSWER filled in — this is a post-match quiz, not predictions.
+  const prompt = `You are an IPL cricket quiz master. Create exactly 15 engaging trivia questions based ONLY on the 1st innings scorecard below.
+ALL questions must have the CORRECT ANSWER filled in — this is a live quiz during the 2nd innings.
 
-${scorecardText}
+1ST INNINGS SCORECARD:
+${firstInningsText}
 
 MATCH DATE: ${matchMeta.matchDate}
 VENUE: ${matchMeta.venue ?? 'TBD'}
 
-CREATE EXACTLY 20 QUESTIONS across these categories:
+CREATE EXACTLY 15 QUESTIONS across these categories:
 
-🏆 MATCH RESULT (4 questions, 100 pts each):
-Q1: Who won the match?
-Q2: What was the winning margin?
-Q3: Who won the toss and what did they choose?
-Q4: Combined runs scored in the match?
+🏏 BATTING (6 questions, 150 pts each):
+Q1: Who scored the most runs in the 1st innings?
+Q2: Who had the highest strike rate in the 1st innings? (min 15 balls faced)
+Q3: Which batter hit the most sixes in the 1st innings?
+Q4: Which batter hit the most fours (4s) in the 1st innings?
+Q5: How many batters scored 30 or more runs in the 1st innings?
+Q6: What was the highest individual score in the 1st innings?
 
-🏏 BATTING HIGHLIGHTS (6 questions, 150 pts each):
-Q5: Top scorer of the match (most runs)?
-Q6: Which batter had the best strike rate (min 20 balls)?
-Q7: Which player hit the most sixes?
-Q8: How many players scored 30+ runs in the match?
-Q9: What was the highest individual score?
-Q10: Who was dismissed first in the match?
+⚡ BOWLING (5 questions, 150 pts each):
+Q7: Who took the most wickets in the 1st innings?
+Q8: Which bowler had the best economy rate in the 1st innings? (min 2 overs)
+Q9: How many wickets fell in the 1st innings?
+Q10: Who was the most expensive bowler in the 1st innings? (most runs conceded)
+Q11: Which bowler took 2 or more wickets in the 1st innings?
 
-⚡ BOWLING HIGHLIGHTS (5 questions, 150 pts each):
-Q11: Who took the most wickets in the match?
-Q12: Which bowler had the best economy (min 3 overs)?
-Q13: How many total wickets fell in the match?
-Q14: How many total sixes were hit?
-Q15: Which team scored more in the powerplay (overs 1-6)?
-
-🌟 STAR MOMENTS (5 questions, 200 pts each):
-Q16: Who was the Man of the Match?
-Q17: What was the winning team's powerplay score?
-Q18: Which team hit more boundaries (4s) in the match?
-Q19: Who bowled the most economical spell for the winning team?
-Q20: What was the total combined score (runs) of both innings?
+📊 INNINGS SUMMARY (4 questions, 100 pts each):
+Q12: What was the total score in the 1st innings?
+Q13: How many sixes were hit in the 1st innings total?
+Q14: What was the 1st innings powerplay score (overs 1-6)?
+Q15: How many boundaries (4s) were hit in the 1st innings total?
 
 STRICT RULES:
 1. LANGUAGE: ${langInstruction}
-2. correctAnswer MUST be the actual answer based on the scorecard
-3. correctAnswer MUST exactly match one of the 4 options (copy it exactly)
-4. All 4 options must be specific plausible values (no vague options)
-5. Add IPL excitement emojis to questions
-6. isPreMatch MUST be false for all questions
-7. Return ONLY valid JSON array — no markdown, no extra text
+2. ALL questions must be answerable from the 1st innings scorecard above ONLY
+3. NO questions about match winner, winning margin, Man of the Match, 2nd innings, or combined stats
+4. correctAnswer MUST be the actual correct value from the scorecard
+5. correctAnswer MUST exactly match one of the 4 options (copy it word-for-word)
+6. All 4 options must be specific plausible values — no "none of the above" or vague answers
+7. For Q13/Q15 (totals): calculate the sum from the batting scorecard above
+8. Add IPL excitement emojis to questions
+9. isPreMatch MUST be false
+10. Return ONLY valid JSON array — no markdown, no extra text
 
 JSON format:
-{"question":"...","options":["...","...","...","..."],"correctAnswer":"exact option text","points":100,"difficulty":"easy|medium|hard","category":"trivia","explanation":"brief explanation with the fact","isPreMatch":false,"questionContext":"one hype sentence"}`;
+{"question":"...","options":["...","...","...","..."],"correctAnswer":"exact option text","points":150,"difficulty":"easy|medium|hard","category":"trivia","explanation":"brief explanation with the fact","isPreMatch":false,"questionContext":"one hype sentence"}`;
 
   return callHaiku(prompt);
 }
