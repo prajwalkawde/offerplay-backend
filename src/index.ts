@@ -375,11 +375,14 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 <script>
   // ── Firebase init ──────────────────────────────────────────────────────────
   firebase.initializeApp({
-    apiKey:            'AIzaSyBOuF4HD7srfpKLPXLmrWeNIo3dtV2nB-0',
+    apiKey:            'AIzaSyAQdjFdIEwxBcZXwLpIW4q7qKyZ0zKQdoY',
     authDomain:        'offerpay-87906.firebaseapp.com',
+    databaseURL:       'https://offerpay-87906-default-rtdb.firebaseio.com',
     projectId:         'offerpay-87906',
     storageBucket:     'offerpay-87906.appspot.com',
     messagingSenderId: '449341693766',
+    appId:             '1:449341693766:web:01930c72af552d1fb34f47',
+    measurementId:     'G-YPCYXS94E9',
   });
   const auth = firebase.auth();
   auth.languageCode = 'en';
