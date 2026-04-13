@@ -500,23 +500,6 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
     pos = end;
   }
 
-  // ── Prize ranking — real users only ───────────────────────────────────────
-  const realUserScores = Object.entries(userScores)
-    .filter(([uid]) => !botUserIds.has(uid))
-    .sort(([, a], [, b]) => b - a);
-  const prizeRankings: { userId: string; score: number; prizeRank: number }[] = [];
-  let rpos = 0;
-  while (rpos < realUserScores.length) {
-    const tieScore = realUserScores[rpos][1];
-    let rend = rpos;
-    while (rend < realUserScores.length && realUserScores[rend][1] === tieScore) rend++;
-    const sharedPrizeRank = rpos + 1;
-    for (let k = rpos; k < rend; k++) {
-      prizeRankings.push({ userId: realUserScores[k][0], score: tieScore, prizeRank: sharedPrizeRank });
-    }
-    rpos = rend;
-  }
-
   const prizeTiers = (
     (contest.prizeTiersConfig as unknown as PrizeTier[])?.length > 0
       ? (contest.prizeTiersConfig as unknown as PrizeTier[])
@@ -531,71 +514,63 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
   let giftClaimsCreated = 0;
   const { creditTickets } = await import('../services/ticket.service');
 
-  // Update bot display ranks (no prizes)
-  for (const { userId, displayRank, score } of allRankings) {
-    if (botUserIds.has(userId)) {
-      await prisma.iplContestEntry.updateMany({
-        where: { contestId, userId },
-        data: { rank: displayRank, totalPoints: score },
-      });
-    }
-  }
+  const findTier = (r: number) => prizeTiers.find(t => {
+    const lo = t.rankFrom ?? t.rank;
+    const hi = t.rankTo ?? t.rank;
+    if (lo !== undefined && hi !== undefined) return r >= lo && r <= hi;
+    return false;
+  });
 
-  // Build a map: userId → displayRank (actual position in full leaderboard including bots)
-  const displayRankMap = new Map(allRankings.map(r => [r.userId, r.displayRank]));
-
-  // Distribute prizes to real users
-  for (const { userId, prizeRank, score } of prizeRankings) {
-    const rank = prizeRank;
+  // ── Distribute prizes by actual (display) rank — bots + real users ranked together ──
+  // Bots occupy their earned ranks (consuming those prize tiers) but receive no actual rewards.
+  // Real users get the prize for their actual display rank.
+  for (const { userId, score, displayRank } of allRankings) {
+    const isBot = botUserIds.has(userId);
     let coinsAward = 0;
     let ticketsAward = 0;
     let giftTier: PrizeTier | undefined;
 
-    const findTier = (r: number) => prizeTiers.find(t => {
-      const lo = t.rankFrom ?? t.rank;
-      const hi = t.rankTo ?? t.rank;
-      if (lo !== undefined && hi !== undefined) return r >= lo && r <= hi;
-      return false;
-    });
-
-    if (hasPrizeTiers) {
-      const tier = findTier(rank);
-      if (tier) {
-        const tType = (tier.type ?? '').toUpperCase();
-        if (tType === 'TICKETS') {
-          ticketsAward = tier.tickets ?? 0;
-        } else if (tType === 'GIFT' || tType === 'INVENTORY' || tType === 'XOXODAY') {
-          giftTier = tier;
-        } else {
-          coinsAward = tier.coins ?? 0;
+    if (!isBot) {
+      // Determine what prize this display rank earns
+      if (hasPrizeTiers) {
+        const tier = findTier(displayRank);
+        if (tier) {
+          const tType = (tier.type ?? '').toUpperCase();
+          if (tType === 'TICKETS') {
+            ticketsAward = tier.tickets ?? 0;
+          } else if (tType === 'GIFT' || tType === 'INVENTORY' || tType === 'XOXODAY') {
+            giftTier = tier;
+          } else {
+            coinsAward = tier.coins ?? 0;
+          }
         }
+      } else if (contest.prizeType === 'COINS' && contest.prizeCoins && displayRank === 1) {
+        coinsAward = contest.prizeCoins;
+      } else {
+        if (displayRank === 1)       coinsAward = Math.floor(prizePool * (dist['1']    ?? 40) / 100);
+        else if (displayRank === 2)  coinsAward = Math.floor(prizePool * (dist['2']    ?? 25) / 100);
+        else if (displayRank === 3)  coinsAward = Math.floor(prizePool * (dist['3']    ?? 15) / 100);
+        else if (displayRank <= 10)  coinsAward = Math.floor(prizePool * (dist['4-10'] ?? 20) / 100 / 7);
       }
-    } else if (contest.prizeType === 'COINS' && contest.prizeCoins && rank === 1) {
-      coinsAward = contest.prizeCoins;
-    } else {
-      if (rank === 1)       coinsAward = Math.floor(prizePool * (dist['1']    ?? 40) / 100);
-      else if (rank === 2)  coinsAward = Math.floor(prizePool * (dist['2']    ?? 25) / 100);
-      else if (rank === 3)  coinsAward = Math.floor(prizePool * (dist['3']    ?? 15) / 100);
-      else if (rank <= 10)  coinsAward = Math.floor(prizePool * (dist['4-10'] ?? 20) / 100 / 7);
     }
 
     if (coinsAward > 0) {
       await creditCoins(userId, coinsAward, TransactionType.EARN_IPL_WIN, contestId,
-        `IPL Contest Win — ${contest.name} — Rank #${rank}`);
+        `IPL Contest Win — ${contest.name} — Rank #${displayRank}`);
       coinsDistributed += coinsAward;
     }
 
     if (ticketsAward > 0) {
       try {
         await creditTickets(userId, ticketsAward, 'ipl_contest_win',
-          `IPL Contest Win — ${contest.name} — Rank #${rank}`, contestId);
+          `IPL Contest Win — ${contest.name} — Rank #${displayRank}`, contestId);
       } catch (ticketErr) {
-        logger.error('Failed to credit IPL contest tickets', { userId, rank, ticketsAward, ticketErr });
+        logger.error('Failed to credit IPL contest tickets', { userId, displayRank, ticketsAward, ticketErr });
       }
     }
 
     if (giftTier) {
-      // Check if claim already exists (idempotent)
+      // Idempotent: only create one claim per user per contest
       const existing = await prisma.iplPrizeClaim.findFirst({ where: { userId, iplContestId: contestId } });
       if (!existing) {
         const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
@@ -605,7 +580,7 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
           data: {
             userId,
             iplContestId: contestId,
-            rank,
+            rank: displayRank,            // display rank — same as entry.rank
             prizeType: claimPrizeType,
             prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
             prizeValue: (giftTier as any).denominationValue ?? giftTier.value ?? 0,
@@ -619,20 +594,17 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
       }
     }
 
-    // Store the actual display rank (position including bots) so MyContests and the
-    // leaderboard show the same number. Prize is still determined by prizeRank.
-    const actualDisplayRank = displayRankMap.get(userId) ?? prizeRank;
+    // Store rank and score for everyone (bots + real)
     await prisma.iplContestEntry.updateMany({
       where: { contestId, userId },
-      data: { rank: actualDisplayRank, coinsWon: coinsAward, totalPoints: score },
+      data: { rank: displayRank, coinsWon: coinsAward, totalPoints: score },
     });
 
-    // Push notification for winner — only when called from per-contest endpoint.
-    // processIPLResults sends its own bulk notifications so we skip here to avoid duplicates.
-    if (notifyOnComplete) {
+    // Notify real winners only (when called from per-contest endpoint)
+    if (!isBot && notifyOnComplete) {
       let notifTitle = '';
       let notifBody = '';
-      const rankLabel = `Rank #${actualDisplayRank}`;
+      const rankLabel = `Rank #${displayRank}`;
       if (giftTier) {
         const prizeName = (giftTier as any).itemName || giftTier.name || 'a gift prize';
         notifTitle = `🏆 You won ${prizeName}!`;
@@ -648,7 +620,7 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
         sendFCMToUsers([userId], notifTitle, notifBody, {
           type: 'contest_win',
           contestId,
-          rank: String(actualDisplayRank),
+          rank: String(displayRank),
         }).catch(e => logger.error('Contest win FCM error:', e));
       }
     }
@@ -665,7 +637,10 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
     botsCount: botUserIds.size,
     coinsDistributed,
     giftClaimsCreated,
-    rankings: prizeRankings.slice(0, 10).map(r => ({ ...r, rank: r.prizeRank })),
+    rankings: allRankings
+      .filter(r => !botUserIds.has(r.userId))
+      .slice(0, 10)
+      .map(r => ({ userId: r.userId, score: r.score, rank: r.displayRank })),
   };
 }
 
