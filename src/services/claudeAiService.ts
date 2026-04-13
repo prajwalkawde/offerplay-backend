@@ -224,6 +224,20 @@ function formatFirstInningsForPrompt(sc: ScorecardData): string {
   return lines.filter(l => l !== '').join('\n').trim();
 }
 
+// ─── Compute dynamic match conditions from scorecard ─────────────────────────
+function getMatchConditions(inn: InningData): string {
+  const totalSixes = inn.batting.reduce((s, b) => s + b.sixes, 0);
+  const fiftyPlusScorers = inn.batting.filter(b => b.runs >= 50).map(b => b.name);
+  const lines: string[] = [];
+
+  if (inn.total > 180) lines.push('HIGH SCORE MATCH (>180): favour batting-specific questions, ask about individual milestones');
+  if (inn.total < 140) lines.push('LOW SCORE MATCH (<140): favour bowling-specific questions, ask about wicket-taking details');
+  if (totalSixes > 4)  lines.push(`SIXES MATCH (${totalSixes} sixes hit): MUST include at least 2 questions about sixes`);
+  if (fiftyPlusScorers.length > 0) lines.push(`FIFTY+ SCORERS: ${fiftyPlusScorers.join(', ')} — MUST include at least 1 question about their innings`);
+
+  return lines.length > 0 ? lines.join('\n') : 'NORMAL MATCH: balanced question selection';
+}
+
 // ─── Generate 1st-innings questions from real scorecard (correctAnswer filled) ─
 export async function generateQuestionsFromScorecard(
   scorecard: ScorecardData,
@@ -233,53 +247,146 @@ export async function generateQuestionsFromScorecard(
   const langInstruction = LANGUAGE_INSTRUCTIONS[language] ?? LANGUAGE_INSTRUCTIONS.en;
   const firstInningsText = formatFirstInningsForPrompt(scorecard);
   const inn1 = scorecard.innings[0];
+  const matchConditions = inn1 ? getMatchConditions(inn1) : 'NORMAL MATCH';
 
-  const prompt = `You are an IPL cricket quiz master. Create exactly 15 engaging trivia questions based ONLY on the 1st innings scorecard below.
-ALL questions must have the CORRECT ANSWER filled in — this is a live quiz during the 2nd innings.
+  const prompt = `You are an IPL cricket quiz master. Generate exactly 20 unique questions from the 1st innings scorecard below.
+Every question must have the CORRECT ANSWER pre-filled from real scorecard data.
 
+═══════════════════════════════════════
 1ST INNINGS SCORECARD:
 ${firstInningsText}
 
 MATCH DATE: ${matchMeta.matchDate}
 VENUE: ${matchMeta.venue ?? 'TBD'}
+═══════════════════════════════════════
 
-CREATE EXACTLY 15 QUESTIONS across these categories:
+DYNAMIC CONDITIONS — apply these rules:
+${matchConditions}
 
-🏏 BATTING (6 questions, 150 pts each):
-Q1: Who scored the most runs in the 1st innings?
-Q2: Who had the highest strike rate in the 1st innings? (min 15 balls faced)
-Q3: Which batter hit the most sixes in the 1st innings?
-Q4: Which batter hit the most fours (4s) in the 1st innings?
-Q5: How many batters scored 30 or more runs in the 1st innings?
-Q6: What was the highest individual score in the 1st innings?
+═══════════════════════════════════════
+QUESTION POOLS — randomly pick from each:
+═══════════════════════════════════════
 
-⚡ BOWLING (5 questions, 150 pts each):
-Q7: Who took the most wickets in the 1st innings?
-Q8: Which bowler had the best economy rate in the 1st innings? (min 2 overs)
-Q9: How many wickets fell in the 1st innings?
-Q10: Who was the most expensive bowler in the 1st innings? (most runs conceded)
-Q11: Which bowler took 2 or more wickets in the 1st innings?
+BATTING POOL (pick 7 randomly — skip if data unavailable):
+• Who scored the most runs?
+• Who faced the most balls?
+• Who had the highest strike rate? (min 10 balls)
+• Who hit the most sixes?
+• Who hit the most fours?
+• How many batters scored 30+ runs?
+• How many batters scored 50+ runs?
+• How many batters got out for a duck?
+• Who scored the slowest? (lowest SR, min 10 balls)
+• How many batters faced 20+ balls?
+• Who scored between 20 and 30 runs?
+• How many runs were scored in the last 5 overs (16-20)?
+• How many runs were scored in the first 5 overs (1-5)?
+• How many batters reached double figures (10+)?
+• How many batters got caught out?
+• How many batters got bowled out?
+• Who was the last batter dismissed?
+• What was the highest individual score?
 
-📊 INNINGS SUMMARY (4 questions, 100 pts each):
-Q12: What was the total score in the 1st innings?
-Q13: How many sixes were hit in the 1st innings total?
-Q14: What was the 1st innings powerplay score (overs 1-6)?
-Q15: How many boundaries (4s) were hit in the 1st innings total?
+BOWLING POOL (pick 7 randomly — skip if data unavailable):
+• Who took the most wickets?
+• Who had the best economy rate? (min 2 overs)
+• Who was the most expensive bowler? (most runs conceded)
+• How many bowlers took 2+ wickets?
+• How many bowlers were used in total?
+• How many bowlers went wicketless?
+• How many wides were bowled in total?
+• Which bowler gave the most runs in their spell?
+• Who bowled the most economical spell? (fewest runs, min 3 overs)
+• How many wickets fell to pace bowlers vs spinners?
 
-STRICT RULES:
-1. LANGUAGE: ${langInstruction}
-2. ALL questions must be answerable from the 1st innings scorecard above ONLY
-3. NO questions about match winner, winning margin, Man of the Match, 2nd innings, or combined stats
-4. correctAnswer MUST be the actual correct value from the scorecard
-5. correctAnswer MUST exactly match one of the 4 options (copy it word-for-word)
-6. All 4 options must be specific plausible values — no "none of the above" or vague answers
-7. For Q13/Q15 (totals): calculate the sum from the batting scorecard above
-8. Add IPL excitement emojis to questions
-9. isPreMatch MUST be false
-10. Return ONLY valid JSON array — no markdown, no extra text
+SUMMARY POOL (pick 4 randomly — skip if data unavailable):
+• What was the total innings score?
+• What was the powerplay score? (overs 1-6)
+• What was the death overs score? (overs 16-20)
+• How many total sixes were hit?
+• How many total fours were hit?
+• How many total extras were conceded?
+• How many total wickets fell?
+• What was the overall run rate?
+• How many runs in middle overs (7-15)?
+• How many wickets fell in the powerplay?
 
-JSON format:
-{"question":"...","options":["...","...","...","..."],"correctAnswer":"exact option text","points":150,"difficulty":"easy|medium|hard","category":"trivia","explanation":"brief explanation with the fact","isPreMatch":false,"questionContext":"one hype sentence"}`;
+PARTNERSHIP POOL (pick 1 randomly — skip if data unavailable):
+• What was the highest partnership score?
+• How many partnerships crossed 30 runs?
+• What was the opening partnership score?
+• How many runs did the top 3 batters score combined?
+
+TRICKY POOL (pick 1 randomly — hard questions):
+• How many bowlers had economy under 8?
+• Which batter had strike rate above 150? (min 10 balls)
+• How many runs were scored after the 15th over?
+• How many wickets fell in the death overs (16-20)?
+• What percentage bracket do sixes represent of total score? (under 20% / 20-30% / 30-40% / above 40%)
+• How many batters had a strike rate above 130? (min 10 balls)
+• How many runs came from extras vs last batter?
+
+═══════════════════════════════════════
+ANSWER GENERATION RULES:
+═══════════════════════════════════════
+
+STEP 1 — Find the correct answer from the scorecard data above.
+STEP 2 — Set correctAnswer to that exact value.
+STEP 3 — Generate 3 WRONG options using these rules:
+
+For NUMBER questions (runs, wickets, count):
+  Wrong option 1 = correct ± small number (2-8)
+  Wrong option 2 = correct ± medium number (8-15)
+  Wrong option 3 = a different realistic number in the same range
+  Example: correct=67 → options: "67", "72", "58", "81"
+
+For PLAYER NAME questions:
+  Wrong options = other players who ACTUALLY batted or bowled in this innings
+  NEVER use players not in the scorecard
+  Example: correct="Rohit Sharma" → wrong="SKY", "Hardik", "Ishan" (all from same innings)
+
+For SCORE questions (e.g. 52/1):
+  Wrong options = realistic scores within ±15 runs and ±1 wicket
+  Example: correct="52/1" → wrong="48/2", "58/0", "44/1"
+
+VALIDATION — before finalising each question:
+  ✓ correctAnswer exactly matches one of the 4 options (word for word)
+  ✓ All 4 options are different from each other
+  ✓ Wrong options are NOT accidentally correct based on scorecard
+  ✓ Wrong options are realistic and plausible (not obviously wrong)
+
+═══════════════════════════════════════
+DIFFICULTY & POINTS:
+═══════════════════════════════════════
+Easy   (6 questions) → 100 pts  — straightforward facts (total score, top scorer)
+Medium (9 questions) → 150 pts  — requires looking at scorecard carefully
+Hard   (5 questions) → 200 pts  — tricky calculations or less obvious stats
+
+═══════════════════════════════════════
+LANGUAGE: ${langInstruction}
+═══════════════════════════════════════
+
+STRICT OUTPUT RULES:
+1. Return EXACTLY 20 questions
+2. ALL questions from 1st innings data only — no match result, no 2nd innings
+3. Never repeat the same question type twice
+4. isPreMatch MUST be false for all
+5. Add IPL excitement emojis to questions
+6. Return ONLY valid JSON array — no markdown, no explanation
+
+JSON format for each question:
+{
+  "question": "🏏 Who scored the most runs in the 1st innings?",
+  "options": ["Rohit Sharma", "Suryakumar Yadav", "Ishan Kishan", "Hardik Pandya"],
+  "correctAnswer": "Rohit Sharma",
+  "points": 100,
+  "difficulty": "easy",
+  "category": "batting",
+  "explanation": "Rohit Sharma top scored with 75 runs off 45 balls",
+  "isPreMatch": false,
+  "questionContext": "The run machine at his best!",
+  "answerSource": "Rohit Sharma: 75(45) in batting scorecard"
+}`;
 
   return callHaiku(prompt);
 }
@@ -296,10 +403,11 @@ ${langInstruction}
 
 IMPORTANT RULES:
 - Keep all numbers, player names, and team names exactly as-is (do not translate proper nouns)
-- Translate question text, options text, explanation, and questionContext
+- Translate: question text, options text, explanation, questionContext
+- Do NOT translate: answerSource field (keep it in English as-is)
 - correctAnswer MUST match one of the translated options EXACTLY (copy it exactly)
 - Keep all emojis as-is
-- Keep all other fields (points, difficulty, category, isPreMatch) unchanged
+- Keep all other fields (points, difficulty, category, isPreMatch, answerSource) unchanged
 - Return ONLY valid JSON array in the same structure, no markdown
 
 QUESTIONS TO TRANSLATE:
@@ -342,6 +450,7 @@ export interface GeneratedQuestion {
   explanation: string;
   isPreMatch: boolean;
   questionContext?: string;
+  answerSource?: string; // explains where the answer came from in scorecard
 }
 
 // ─── Language instructions ────────────────────────────────────────────────────
