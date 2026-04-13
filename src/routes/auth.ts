@@ -7,6 +7,7 @@ import { otpRateLimit } from '../middleware/rateLimit';
 import {
   sendOtp, verifyPhone, googleAuth, googleLogin, phoneFirebaseVerify, logout, getMe,
   completeProfile, updateFCMToken, updateProfile, updateLanguage,
+  requestAccountDeletion, confirmAccountDeletion,
 } from '../controllers/authController';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
@@ -56,7 +57,7 @@ router.patch('/language',         authMiddleware, updateLanguage);
 router.post('/logout',            authMiddleware,                               logout);
 router.get('/me',                 authMiddleware,                               getMe);
 
-// ─── Delete account (Google Play requirement) ─────────────────────────────────
+// ─── Delete account (Google Play requirement) — in-app (JWT) ──────────────────
 router.delete('/account', authMiddleware, async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
@@ -76,6 +77,10 @@ router.delete('/account', authMiddleware, async (req: Request, res: Response) =>
     return error(res, 'Failed to delete account', 500);
   }
 });
+
+// ─── Delete account via web page (no JWT needed) ─────────────────────────────
+router.post('/delete-account/request', requestAccountDeletion);
+router.post('/delete-account/confirm', confirmAccountDeletion);
 
 // ─── Dev-only login (generates real JWT for test accounts) ───────────────────
 if (process.env.NODE_ENV !== 'production') {

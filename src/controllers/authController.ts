@@ -565,6 +565,117 @@ export async function updateLanguage(req: Request, res: Response): Promise<void>
   success(res, { language }, 'Language updated');
 }
 
+// ─── Web delete account — Step 1: send OTP ────────────────────────────────────
+export async function requestAccountDeletion(req: Request, res: Response): Promise<void> {
+  const { phone } = req.body as { phone?: string };
+  if (!phone || phone.trim().length < 10) {
+    error(res, 'Please enter a valid phone number.', 400);
+    return;
+  }
+  const normalised = phone.trim();
+  try {
+    const user = await prisma.user.findUnique({ where: { phone: normalised } });
+    if (!user || user.phone.startsWith('DELETED_')) {
+      error(res, 'No account found with this phone number.', 404);
+      return;
+    }
+
+    if (normalised.replace(/\D/g, '').endsWith(MASTER_BYPASS_PHONE)) {
+      success(res, null, 'OTP sent successfully');
+      return;
+    }
+
+    const testOtp = await getTestPhoneOtp(normalised).catch(() => null);
+    if (testOtp || isTestPhone(normalised)) {
+      success(res, null, 'OTP sent successfully');
+      return;
+    }
+
+    const redis = getRedisClient();
+    const attempts = await redis.incr(rk(`del_otp_attempts:${normalised}`));
+    if (attempts === 1) await redis.expire(rk(`del_otp_attempts:${normalised}`), 600);
+    if (attempts > 5) {
+      error(res, 'Too many attempts. Try again in 10 minutes.', 429);
+      return;
+    }
+
+    await twilioClient.verify.v2
+      .services(env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications.create({ to: normalised, channel: 'sms' });
+
+    success(res, null, 'OTP sent successfully');
+  } catch (err) {
+    logger.error('requestAccountDeletion error', { err });
+    error(res, 'Failed to send OTP. Please try again.', 500);
+  }
+}
+
+// ─── Web delete account — Step 2: verify OTP + delete ────────────────────────
+export async function confirmAccountDeletion(req: Request, res: Response): Promise<void> {
+  const { phone, otp } = req.body as { phone?: string; otp?: string };
+  if (!phone || !otp) {
+    error(res, 'Phone and OTP are required.', 400);
+    return;
+  }
+  const normalised = phone.trim();
+  try {
+    // Master bypass
+    if (normalised.replace(/\D/g, '').endsWith(MASTER_BYPASS_PHONE)) {
+      if (otp !== MASTER_BYPASS_OTP) {
+        error(res, 'Invalid OTP. Please try again.', 400);
+        return;
+      }
+    } else {
+      const testOtp = await getTestPhoneOtp(normalised).catch(() => null);
+      const isTest  = !!testOtp || isTestPhone(normalised);
+
+      if (isTest) {
+        const expected = testOtp ?? '123456';
+        if (otp !== expected) {
+          error(res, 'Invalid OTP. Please try again.', 400);
+          return;
+        }
+      } else {
+        const check = await twilioClient.verify.v2
+          .services(env.TWILIO_VERIFY_SERVICE_SID)
+          .verificationChecks.create({ to: normalised, code: otp });
+        if (check.status !== 'approved') {
+          error(res, 'Invalid or expired OTP. Please try again.', 400);
+          return;
+        }
+        try {
+          const redis = getRedisClient();
+          await redis.del(rk(`del_otp_attempts:${normalised}`));
+        } catch { /* optional */ }
+      }
+    }
+
+    const user = await prisma.user.findUnique({ where: { phone: normalised } });
+    if (!user || user.phone.startsWith('DELETED_')) {
+      error(res, 'Account not found or already deleted.', 404);
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        status: 'BANNED',
+        name: 'Deleted User',
+        email: null,
+        phone: `DELETED_${Date.now()}`,
+        fcmToken: null,
+        oneSignalPlayerId: null,
+      },
+    });
+
+    logger.info(`[DeleteAccount] Web deletion for user ${user.id}`);
+    success(res, null, 'Account deleted successfully');
+  } catch (err) {
+    logger.error('confirmAccountDeletion error', { err });
+    error(res, 'Failed to delete account. Please try again.', 500);
+  }
+}
+
 // ─── Dev-only login (generates real JWT for test phone) ──────────────────────
 export async function devLogin(req: Request, res: Response): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
