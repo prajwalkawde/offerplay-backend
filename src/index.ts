@@ -229,19 +229,24 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     h1{color:#FF6666;font-size:22px;font-weight:800}
     .sub{color:#ffffff60;font-size:13px;margin-top:6px}
     main{flex:1;display:flex;align-items:center;justify-content:center;padding:32px 16px}
-    .card{background:#1a0a2e;border-radius:24px;padding:28px;width:100%;max-width:420px;border:1px solid #FF444420}
+    .card{background:#1a0a2e;border-radius:24px;padding:28px;width:100%;max-width:440px;border:1px solid #FF444420}
+    .tabs{display:flex;gap:0;margin-bottom:24px;border-radius:12px;overflow:hidden;border:1px solid #ffffff15}
+    .tab{flex:1;padding:12px;text-align:center;cursor:pointer;font-size:14px;font-weight:600;background:#0d0818;color:#ffffff60;border:none;transition:all .2s}
+    .tab.active{background:#7B2FBE;color:white}
+    .panel{display:none}.panel.active{display:block}
     .step{display:none}.step.active{display:block}
     .icon{font-size:48px;text-align:center;margin-bottom:16px}
     h2{color:white;font-size:18px;font-weight:700;text-align:center;margin-bottom:8px}
     p{color:#ffffff70;font-size:14px;text-align:center;line-height:1.6;margin-bottom:20px}
     label{color:#ffffff80;font-size:13px;display:block;margin-bottom:6px}
-    input{width:100%;background:#0d0818;border:1px solid #ffffff15;border-radius:12px;padding:14px 16px;color:white;font-size:15px;outline:none;transition:border .2s}
-    input:focus{border-color:#7B2FBE50}
+    input[type=tel]{width:100%;background:#0d0818;border:1px solid #ffffff15;border-radius:12px;padding:14px 16px;color:white;font-size:15px;outline:none;transition:border .2s}
+    input[type=tel]:focus{border-color:#7B2FBE50}
     .otp-row{display:flex;gap:8px;justify-content:center;margin:16px 0}
     .otp-box{width:44px;height:52px;background:#0d0818;border:1px solid #ffffff15;border-radius:10px;color:white;font-size:20px;font-weight:bold;text-align:center;outline:none;transition:border .2s}
     .otp-box:focus{border-color:#7B2FBE}
     .btn{width:100%;border:none;border-radius:14px;padding:16px;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .2s;margin-top:12px}
     .btn-primary{background:linear-gradient(135deg,#7B2FBE,#9B4FDE);color:white}
+    .btn-google{background:white;color:#333;display:flex;align-items:center;justify-content:center;gap:10px;font-size:15px}
     .btn-danger{background:linear-gradient(135deg,#FF4444,#CC2222);color:white}
     .btn-ghost{background:#ffffff10;color:#ffffff60;font-size:14px;margin-top:8px}
     .btn:disabled{opacity:.5;cursor:not-allowed}
@@ -249,14 +254,16 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     .warn-box{background:#FF444415;border:1px solid #FF444430;border-radius:12px;padding:14px;margin-bottom:18px}
     .warn-box li{color:#FF9999;font-size:13px;line-height:1.8;margin-left:16px}
     .check-row{display:flex;gap:10px;align-items:flex-start;background:#ffffff08;border:1px solid #ffffff10;border-radius:12px;padding:14px;margin-bottom:16px;cursor:pointer}
-    .check-box{width:20px;height:20px;border-radius:5px;border:2px solid #ffffff30;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .2s}
-    .check-box.checked{background:#FF4444;border-color:#FF4444}
+    .check-box{width:20px;height:20px;border-radius:5px;border:2px solid #ffffff30;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:13px;transition:all .2s}
+    .check-box.checked{background:#FF4444;border-color:#FF4444;color:white}
     .check-label{color:#ffffff80;font-size:13px;line-height:1.5}
     .success-icon{font-size:72px;text-align:center;margin:8px 0 16px}
     .resend{color:#7B2FBE;font-size:13px;text-align:center;margin-top:14px;cursor:pointer;background:none;border:none;width:100%}
     .resend:disabled{color:#ffffff30;cursor:not-allowed}
     .spinner{display:inline-block;width:18px;height:18px;border:2px solid #ffffff30;border-top:2px solid white;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
     @keyframes spin{to{transform:rotate(360deg)}}
+    .google-icon{width:20px;height:20px}
+    #recaptcha-container{margin:8px 0}
     footer{text-align:center;padding:16px;color:#ffffff20;font-size:12px}
     a{color:#7B2FBE}
   </style>
@@ -271,37 +278,16 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 <main>
   <div class="card">
 
-    <!-- Step 1: Enter phone -->
-    <div class="step active" id="step1">
-      <div class="icon">📱</div>
-      <h2>Enter Your Phone Number</h2>
-      <p>We'll send an OTP to verify it's really you before deleting your account.</p>
-      <label>Phone Number (with country code)</label>
-      <input id="phoneInput" type="tel" placeholder="+91 9876543210" autocomplete="tel"/>
-      <div class="err" id="err1"></div>
-      <button class="btn btn-primary" id="sendOtpBtn" onclick="sendOtp()">Send OTP</button>
+    <!-- Shared success step (shown after deletion regardless of method) -->
+    <div class="step" id="stepSuccess">
+      <div class="success-icon">✅</div>
+      <h2>Account Deleted</h2>
+      <p>Your OfferPlay account has been permanently deleted. All your data has been removed from our servers.</p>
+      <p style="margin-top:12px;color:#ffffff40;font-size:12px">If you have any questions, contact us at support@offerplay.in</p>
     </div>
 
-    <!-- Step 2: Verify OTP -->
-    <div class="step" id="step2">
-      <div class="icon">🔐</div>
-      <h2>Enter OTP</h2>
-      <p id="otpSentTo">Enter the 6-digit OTP sent to your number.</p>
-      <div class="otp-row" id="otpRow">
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-        <input class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
-      </div>
-      <div class="err" id="err2"></div>
-      <button class="btn btn-primary" id="verifyOtpBtn" onclick="verifyOtp()">Verify OTP</button>
-      <button class="resend" id="resendBtn" disabled onclick="resendOtp()">Resend OTP in <span id="resendTimer">30</span>s</button>
-    </div>
-
-    <!-- Step 3: Confirm deletion -->
-    <div class="step" id="step3">
+    <!-- Shared confirm step -->
+    <div class="step" id="stepConfirm">
       <div class="icon">⚠️</div>
       <h2>Confirm Account Deletion</h2>
       <div class="warn-box">
@@ -312,71 +298,177 @@ app.get('/delete-account', (_req: Request, res: Response) => {
           <li>This action cannot be undone</li>
         </ul>
       </div>
-      <div class="check-row" id="confirmRow" onclick="toggleConfirm()">
+      <div class="check-row" onclick="toggleConfirm()">
         <div class="check-box" id="confirmBox"></div>
         <span class="check-label">I understand that deleting my account is permanent and cannot be reversed.</span>
       </div>
-      <div class="err" id="err3"></div>
+      <div class="err" id="errConfirm"></div>
       <button class="btn btn-danger" id="deleteBtn" onclick="deleteAccount()" disabled>Delete My Account Permanently</button>
-      <button class="btn btn-ghost" onclick="goBack()">Cancel — Keep My Account</button>
+      <button class="btn btn-ghost" onclick="cancelDelete()">Cancel — Keep My Account</button>
     </div>
 
-    <!-- Step 4: Success -->
-    <div class="step" id="step4">
-      <div class="success-icon">✅</div>
-      <h2>Account Deleted</h2>
-      <p>Your OfferPlay account has been permanently deleted. All your data has been removed from our servers.</p>
-      <p style="margin-top:12px;color:#ffffff40;font-size:12px">If you have any questions, contact us at support@offerplay.in</p>
-    </div>
+    <!-- Main flow (tabs + steps) -->
+    <div id="mainFlow">
+      <!-- Tab switcher -->
+      <div class="tabs">
+        <button class="tab active" id="tabPhone" onclick="switchTab('phone')">📱 Phone Number</button>
+        <button class="tab" id="tabGoogle" onclick="switchTab('google')">🔵 Google Account</button>
+      </div>
+
+      <!-- ── PHONE PANEL ── -->
+      <div class="panel active" id="panelPhone">
+
+        <!-- Phone Step 1: Enter number -->
+        <div class="step active" id="phoneStep1">
+          <div class="icon">📱</div>
+          <h2>Enter Your Phone Number</h2>
+          <p>We'll send an OTP via Firebase to verify it's really you.</p>
+          <label>Phone Number (with country code)</label>
+          <input id="phoneInput" type="tel" placeholder="+91 9876543210" autocomplete="tel"/>
+          <div id="recaptcha-container"></div>
+          <div class="err" id="errPhone1"></div>
+          <button class="btn btn-primary" id="sendOtpBtn" onclick="sendPhoneOtp()">Send OTP</button>
+        </div>
+
+        <!-- Phone Step 2: Enter OTP -->
+        <div class="step" id="phoneStep2">
+          <div class="icon">🔐</div>
+          <h2>Enter OTP</h2>
+          <p id="otpSentTo">Enter the 6-digit OTP sent to your number.</p>
+          <div class="otp-row">
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+            <input class="otp-box" maxlength="1" inputmode="numeric"/>
+          </div>
+          <div class="err" id="errPhone2"></div>
+          <button class="btn btn-primary" id="verifyOtpBtn" onclick="verifyPhoneOtp()">Verify &amp; Continue</button>
+          <button class="resend" id="resendBtn" disabled onclick="resendOtp()">Resend OTP in <span id="resendTimer">60</span>s</button>
+        </div>
+
+      </div><!-- /panelPhone -->
+
+      <!-- ── GOOGLE PANEL ── -->
+      <div class="panel" id="panelGoogle">
+        <div class="icon">🔵</div>
+        <h2>Sign in with Google</h2>
+        <p>Sign in with the Google account linked to your OfferPlay profile to verify your identity.</p>
+        <div class="err" id="errGoogle"></div>
+        <button class="btn btn-google" id="googleSignInBtn" onclick="signInWithGoogle()">
+          <svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+          Continue with Google
+        </button>
+      </div><!-- /panelGoogle -->
+
+    </div><!-- /mainFlow -->
 
   </div>
 </main>
 
 <footer>&copy; ${new Date().getFullYear()} OfferPlay &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms">Terms</a></footer>
 
+<!-- Firebase JS SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script>
+  // ── Firebase init ──────────────────────────────────────────────────────────
+  firebase.initializeApp({
+    apiKey:            'AIzaSyBOuF4HD7srfpKLPXLmrWeNIo3dtV2nB-0',
+    authDomain:        'offerpay-87906.firebaseapp.com',
+    projectId:         'offerpay-87906',
+    storageBucket:     'offerpay-87906.appspot.com',
+    messagingSenderId: '449341693766',
+    appId:             '1:449341693766:web:05800bc75c56ed71b34f47',
+  });
+  const auth = firebase.auth();
+  auth.languageCode = 'en';
+
+  // ── State ──────────────────────────────────────────────────────────────────
   const API = '${API}';
-  let phone = '';
-  let confirmed = false;
-  let resendInterval = null;
+  let currentTab      = 'phone';
+  let confirmed       = false;
+  let pendingIdToken  = null;   // idToken waiting for confirm step
+  let confirmResult   = null;   // Firebase phone confirmationResult
+  let recaptchaVerifier = null;
+  let resendInterval  = null;
 
-  function showStep(n) {
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function showStep(id) {
+    // Hide all global steps + all panel steps
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-    document.getElementById('step' + n).classList.add('active');
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+    // Hide/show the main flow wrapper
+    const mainFlow = document.getElementById('mainFlow');
+    if (id === 'stepSuccess' || id === 'stepConfirm') {
+      mainFlow.style.display = 'none';
+      el.style.display = 'block';
+    } else {
+      mainFlow.style.display = 'block';
+    }
   }
 
-  function setLoading(btnId, loading, defaultText) {
+  function setLoading(btnId, loading, defaultHtml) {
     const btn = document.getElementById(btnId);
+    if (!btn) return;
     btn.disabled = loading;
-    btn.innerHTML = loading ? '<span class="spinner"></span>Please wait...' : defaultText;
+    btn.innerHTML = loading ? '<span class="spinner"></span>Please wait...' : defaultHtml;
   }
 
-  async function sendOtp() {
-    const input = document.getElementById('phoneInput').value.trim();
-    const errEl = document.getElementById('err1');
+  function clearErrors() {
+    document.querySelectorAll('.err').forEach(e => e.textContent = '');
+  }
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tabPhone').classList.toggle('active', tab === 'phone');
+    document.getElementById('tabGoogle').classList.toggle('active', tab === 'google');
+    document.getElementById('panelPhone').classList.toggle('active', tab === 'phone');
+    document.getElementById('panelGoogle').classList.toggle('active', tab === 'google');
+    clearErrors();
+    // Reset phone steps back to step 1 when switching back
+    if (tab === 'phone') {
+      document.querySelectorAll('#panelPhone .step').forEach(s => s.classList.remove('active'));
+      document.getElementById('phoneStep1').classList.add('active');
+    }
+  }
+
+  // ── reCAPTCHA setup ────────────────────────────────────────────────────────
+  function initRecaptcha() {
+    if (recaptchaVerifier) { try { recaptchaVerifier.clear(); } catch(_) {} }
+    recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+      size: 'invisible',
+      callback: () => {},
+    });
+  }
+
+  // ── PHONE FLOW ─────────────────────────────────────────────────────────────
+  async function sendPhoneOtp() {
+    const raw = document.getElementById('phoneInput').value.trim();
+    const errEl = document.getElementById('errPhone1');
     errEl.textContent = '';
-    if (!input || input.replace(/\\D/g,'').length < 10) {
+    if (!raw || raw.replace(/\\D/g,'').length < 10) {
       errEl.textContent = 'Please enter a valid phone number with country code (e.g. +91 9876543210)';
       return;
     }
-    phone = input;
+    // Ensure starts with +
+    const phone = raw.startsWith('+') ? raw : '+' + raw.replace(/\\D/g,'');
     setLoading('sendOtpBtn', true, 'Send OTP');
     try {
-      const res = await fetch(API + '/api/auth/delete-account/request', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ phone })
-      });
-      const data = await res.json();
-      if (!res.ok || data.error === 'true' || data.error === true) {
-        errEl.textContent = data.message || 'Failed to send OTP. Please try again.';
-        return;
-      }
+      initRecaptcha();
+      confirmResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
       document.getElementById('otpSentTo').textContent = 'Enter the 6-digit OTP sent to ' + phone;
-      showStep(2);
+      // Switch to OTP step
+      document.querySelectorAll('#panelPhone .step').forEach(s => s.classList.remove('active'));
+      document.getElementById('phoneStep2').classList.add('active');
       startResendTimer();
       document.querySelectorAll('.otp-box')[0].focus();
-    } catch {
-      errEl.textContent = 'Network error. Please check your connection.';
+    } catch(e) {
+      errEl.textContent = friendlyFirebaseError(e);
+      try { recaptchaVerifier.clear(); recaptchaVerifier = null; } catch(_) {}
     } finally {
       setLoading('sendOtpBtn', false, 'Send OTP');
     }
@@ -386,81 +478,52 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     return Array.from(document.querySelectorAll('.otp-box')).map(i => i.value).join('');
   }
 
-  async function verifyOtp() {
+  async function verifyPhoneOtp() {
     const otp = getOtp();
-    const errEl = document.getElementById('err2');
+    const errEl = document.getElementById('errPhone2');
     errEl.textContent = '';
     if (otp.length !== 6) { errEl.textContent = 'Please enter all 6 digits.'; return; }
-    setLoading('verifyOtpBtn', true, 'Verify OTP');
-    const errEl2 = document.getElementById('err2');
+    if (!confirmResult) { errEl.textContent = 'Session expired. Please go back and request a new OTP.'; return; }
+    setLoading('verifyOtpBtn', true, 'Verify &amp; Continue');
     try {
-      // Validate format only — actual deletion + OTP check happens in step 3
-      if (otp.length === 6 && /^[0-9]{6}$/.test(otp)) {
-        clearInterval(resendInterval);
-        showStep(3);
-      } else {
-        errEl2.textContent = 'Please enter a valid 6-digit OTP.';
-      }
+      const cred = await confirmResult.confirm(otp);
+      pendingIdToken = await cred.user.getIdToken();
+      clearInterval(resendInterval);
+      showConfirmStep();
+    } catch(e) {
+      errEl.textContent = friendlyFirebaseError(e);
     } finally {
-      setLoading('verifyOtpBtn', false, 'Verify OTP');
+      setLoading('verifyOtpBtn', false, 'Verify &amp; Continue');
     }
   }
-
-  function toggleConfirm() {
-    confirmed = !confirmed;
-    document.getElementById('confirmBox').classList.toggle('checked', confirmed);
-    document.getElementById('confirmBox').innerHTML = confirmed ? '✓' : '';
-    document.getElementById('deleteBtn').disabled = !confirmed;
-  }
-
-  async function deleteAccount() {
-    if (!confirmed) return;
-    const otp = getOtp();
-    const errEl = document.getElementById('err3');
-    errEl.textContent = '';
-    setLoading('deleteBtn', true, 'Delete My Account Permanently');
-    try {
-      const res = await fetch(API + '/api/auth/delete-account/confirm', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ phone, otp })
-      });
-      const data = await res.json();
-      if (!res.ok || data.error === 'true' || data.error === true) {
-        errEl.textContent = data.message || 'Failed to delete account. Please try again.';
-        return;
-      }
-      showStep(4);
-    } catch {
-      errEl.textContent = 'Network error. Please check your connection.';
-    } finally {
-      setLoading('deleteBtn', false, 'Delete My Account Permanently');
-    }
-  }
-
-  function goBack() { showStep(1); }
 
   async function resendOtp() {
-    document.getElementById('err2').textContent = '';
+    const raw = document.getElementById('phoneInput').value.trim();
+    const phone = raw.startsWith('+') ? raw : '+' + raw.replace(/\\D/g,'');
     const btn = document.getElementById('resendBtn');
     btn.disabled = true;
+    document.getElementById('errPhone2').textContent = '';
     try {
-      await fetch(API + '/api/auth/delete-account/request', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ phone })
-      });
+      initRecaptcha();
+      confirmResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
       startResendTimer();
-    } catch { btn.disabled = false; }
+    } catch(e) {
+      document.getElementById('errPhone2').textContent = friendlyFirebaseError(e);
+      btn.disabled = false;
+    }
   }
 
   function startResendTimer() {
-    let t = 30;
+    let t = 60;
     clearInterval(resendInterval);
     const btn = document.getElementById('resendBtn');
     const timer = document.getElementById('resendTimer');
     btn.disabled = true;
+    btn.innerHTML = 'Resend OTP in <span id="resendTimer">' + t + '</span>s';
     resendInterval = setInterval(() => {
       t--;
-      timer.textContent = t;
+      const timerEl = document.getElementById('resendTimer');
+      if (timerEl) timerEl.textContent = t;
       if (t <= 0) {
         clearInterval(resendInterval);
         btn.innerHTML = 'Resend OTP';
@@ -469,18 +532,102 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }, 1000);
   }
 
-  // OTP box auto-advance
+  // ── GOOGLE FLOW ────────────────────────────────────────────────────────────
+  async function signInWithGoogle() {
+    const errEl = document.getElementById('errGoogle');
+    errEl.textContent = '';
+    setLoading('googleSignInBtn', true, '<svg class="google-icon" viewBox="0 0 48 48">...</svg> Continue with Google');
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      const result = await auth.signInWithPopup(provider);
+      pendingIdToken = await result.user.getIdToken();
+      showConfirmStep();
+    } catch(e) {
+      errEl.textContent = friendlyFirebaseError(e);
+    } finally {
+      setLoading('googleSignInBtn', false,
+        '<svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg> Continue with Google');
+    }
+  }
+
+  // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
+  function showConfirmStep() {
+    confirmed = false;
+    document.getElementById('confirmBox').classList.remove('checked');
+    document.getElementById('confirmBox').textContent = '';
+    document.getElementById('deleteBtn').disabled = true;
+    document.getElementById('errConfirm').textContent = '';
+    showStep('stepConfirm');
+  }
+
+  function toggleConfirm() {
+    confirmed = !confirmed;
+    const box = document.getElementById('confirmBox');
+    box.classList.toggle('checked', confirmed);
+    box.textContent = confirmed ? '✓' : '';
+    document.getElementById('deleteBtn').disabled = !confirmed;
+  }
+
+  async function deleteAccount() {
+    if (!confirmed || !pendingIdToken) return;
+    const errEl = document.getElementById('errConfirm');
+    errEl.textContent = '';
+    setLoading('deleteBtn', true, 'Delete My Account Permanently');
+    try {
+      const res = await fetch(API + '/api/auth/delete-account/firebase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: pendingIdToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        errEl.textContent = data.message || 'Failed to delete account. Please try again.';
+        return;
+      }
+      pendingIdToken = null;
+      showStep('stepSuccess');
+    } catch {
+      errEl.textContent = 'Network error. Please check your connection.';
+    } finally {
+      setLoading('deleteBtn', false, 'Delete My Account Permanently');
+    }
+  }
+
+  function cancelDelete() {
+    pendingIdToken = null;
+    confirmed = false;
+    // Restore main flow
+    document.getElementById('mainFlow').style.display = 'block';
+    document.getElementById('stepConfirm').style.display = 'none';
+    // Reset to tab step 1
+    switchTab(currentTab);
+  }
+
+  // ── Error messages ─────────────────────────────────────────────────────────
+  function friendlyFirebaseError(e) {
+    const code = e && e.code ? e.code : '';
+    if (code === 'auth/invalid-phone-number')    return 'Invalid phone number. Include country code (e.g. +91 9876543210).';
+    if (code === 'auth/too-many-requests')        return 'Too many attempts. Please try again later.';
+    if (code === 'auth/invalid-verification-code') return 'Incorrect OTP. Please check and try again.';
+    if (code === 'auth/code-expired')             return 'OTP expired. Please request a new one.';
+    if (code === 'auth/popup-closed-by-user')     return 'Sign-in popup was closed. Please try again.';
+    if (code === 'auth/popup-blocked')            return 'Popup was blocked by your browser. Please allow popups for this site.';
+    if (code === 'auth/account-exists-with-different-credential') return 'This Google account is not linked to an OfferPlay account.';
+    return e.message || 'Something went wrong. Please try again.';
+  }
+
+  // ── OTP box auto-advance ───────────────────────────────────────────────────
   document.querySelectorAll('.otp-box').forEach((box, i, boxes) => {
     box.addEventListener('input', () => {
-      box.value = box.value.replace(/[^0-9]/g,'');
-      if (box.value && i < boxes.length - 1) boxes[i+1].focus();
+      box.value = box.value.replace(/[^0-9]/g, '');
+      if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
     });
     box.addEventListener('keydown', e => {
-      if (e.key === 'Backspace' && !box.value && i > 0) boxes[i-1].focus();
+      if (e.key === 'Backspace' && !box.value && i > 0) boxes[i - 1].focus();
     });
     box.addEventListener('paste', e => {
       e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g,'');
+      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
       boxes.forEach((b, j) => { b.value = text[j] || ''; });
       const last = Math.min(text.length, boxes.length) - 1;
       if (last >= 0) boxes[last].focus();
@@ -488,7 +635,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   });
 
   document.getElementById('phoneInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') sendOtp();
+    if (e.key === 'Enter') sendPhoneOtp();
   });
 </script>
 </body>

@@ -565,6 +565,58 @@ export async function updateLanguage(req: Request, res: Response): Promise<void>
   success(res, { language }, 'Language updated');
 }
 
+// ─── Web delete account — verify Firebase idToken + delete ────────────────────
+export async function deleteAccountViaFirebase(req: Request, res: Response): Promise<void> {
+  const { idToken } = req.body as { idToken?: string };
+  if (!idToken) {
+    error(res, 'Firebase ID token is required.', 400);
+    return;
+  }
+  try {
+    const { verifyFirebaseToken } = await import('../config/firebase');
+    const decoded = await verifyFirebaseToken(idToken);
+
+    // Find user by phone (phone auth) OR googleId/email (Google auth)
+    const phone    = decoded.phone_number ?? null;
+    const googleId = decoded.uid;
+    const email    = decoded.email ?? null;
+
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(phone    ? [{ phone }]    : []),
+          ...(googleId ? [{ googleId }] : []),
+          ...(email    ? [{ email }]    : []),
+        ],
+      },
+    });
+
+    if (!user || (user.phone ?? '').startsWith('DELETED_')) {
+      error(res, 'No account found for this login.', 404);
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        status: 'BANNED',
+        name: 'Deleted User',
+        email: null,
+        phone: `DELETED_${Date.now()}`,
+        googleId: null,
+        fcmToken: null,
+        oneSignalPlayerId: null,
+      },
+    });
+
+    logger.info(`[DeleteAccount] Web Firebase deletion for user ${user.id}`);
+    success(res, null, 'Account deleted successfully');
+  } catch (err) {
+    logger.error('deleteAccountViaFirebase error', { err });
+    error(res, 'Verification failed. Please try again.', 401);
+  }
+}
+
 // ─── Web delete account — Step 1: send OTP ────────────────────────────────────
 export async function requestAccountDeletion(req: Request, res: Response): Promise<void> {
   const { phone } = req.body as { phone?: string };
