@@ -251,18 +251,15 @@ export function scheduleQuestionNotifications(): void {
       });
 
       for (const contest of contests) {
-        if (contest.entries.length === 0) continue;
-        const userIds = contest.entries.map(e => e.userId);
         try {
-          const { sendBulkNotification } = await import('../services/notificationService');
-          await sendBulkNotification(
-            userIds,
-            'Questions are LIVE!',
-            `Predict now for ${contest.match.team1} vs ${contest.match.team2}! Contest: ${contest.name}`,
+          const { sendToAll } = await import('../services/notificationService');
+          await sendToAll(
+            '🏏 Questions are LIVE!',
+            `Predict now for ${contest.match.team1} vs ${contest.match.team2}! Join the contest & win big! 🏆`,
             'IPL_QUESTIONS_LIVE'
           );
         } catch { /* non-critical */ }
-        logger.info(`Question notifications sent for contest: ${contest.name}`);
+        logger.info(`Question notifications sent to ALL users for contest: ${contest.name}`);
       }
     } catch (err) {
       logger.error('Question notification job error:', err);
