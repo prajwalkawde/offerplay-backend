@@ -64,6 +64,41 @@ const loginSchema = z.object({ email: z.string().email(), password: z.string().m
 router.post('/auth/login', validate(loginSchema), adminLogin);
 router.post('/login', validate(loginSchema), adminLogin);
 
+// ─── Public: age verification screen config ───────────────────────────────────
+router.get('/settings/age-verification', async (_req, res) => {
+  try {
+    const setting = await prisma.appSettings.findUnique({ where: { key: 'AGE_VERIFY_CONFIG' } });
+    const defaults = {
+      headline: 'Before you start',
+      subline: 'OfferPlay involves real money withdrawals. Please confirm you meet our requirements.',
+      features: [
+        'Earn real money by completing tasks & offers',
+        'Predict IPL matches and win free prizes',
+        'Skill-based contests — no deposits ever',
+        'Secure UPI/bank withdrawals',
+      ],
+      terms: [
+        'Coins earned are virtual rewards redeemable for real money',
+        'One account per user — fraud leads to permanent ban',
+        'Redemptions processed within 24–48 hours',
+        'We never sell your personal data to third parties',
+        'Must be 18+ to withdraw earnings or join contests',
+      ],
+      checkboxLabel: 'I confirm I am 18 years or older and agree to the Terms of Service & Privacy Policy',
+      disclaimer: 'By tapping "I Agree" you confirm you are 18+ and accept our Terms of Service and Privacy Policy. Misrepresentation of age is prohibited.',
+    };
+    if (setting?.value) {
+      try {
+        const saved = JSON.parse(setting.value);
+        return apiSuccess(res, { ...defaults, ...saved, updatedAt: setting.updatedAt });
+      } catch { /* fall through to defaults */ }
+    }
+    return apiSuccess(res, defaults);
+  } catch {
+    return apiError(res, 'Failed', 500);
+  }
+});
+
 // ─── Public: policy content for mobile app ────────────────────────────────────
 router.get('/settings/policy/:type', async (req, res) => {
   try {
