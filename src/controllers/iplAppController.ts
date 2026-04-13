@@ -1010,8 +1010,10 @@ export async function claimPrize(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (claim.status === 'claimed') {
-      success(res, { message: 'Prize already claimed', alreadyClaimed: true });
+    // Locked once admin starts processing — cannot change after verified
+    const lockedStatuses = ['verified', 'shipped', 'delivered'];
+    if (lockedStatuses.includes(claim.status)) {
+      error(res, 'Your claim is already being processed and cannot be changed.', 400);
       return;
     }
 
@@ -1023,16 +1025,20 @@ export async function claimPrize(req: Request, res: Response): Promise<void> {
     if (address) deliveryDetails.address = address;
     if (email)   deliveryDetails.email   = email;
 
+    const isUpdate = claim.status === 'claimed';
     await prisma.iplPrizeClaim.update({
       where: { id: claim.id },
       data: {
         status: 'claimed',
         deliveryDetails,
-        claimedAt: new Date(),
+        claimedAt: isUpdate ? claim.claimedAt : new Date(),
       },
     });
 
-    success(res, { message: 'Prize claim submitted! Our team will contact you shortly.' });
+    const msg = isUpdate
+      ? 'Details updated successfully!'
+      : 'Prize claim submitted! Our team will contact you shortly.';
+    success(res, { message: msg, updated: isUpdate });
   } catch (err) {
     logger.error('claimPrize error:', err);
     error(res, 'Failed to submit claim', 500);
