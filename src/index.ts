@@ -130,6 +130,88 @@ app.use('/api/quiz', quizRoutes);
 app.use('/api/admin/quiz', adminQuizRoutes);
 app.use('/api/admin/security', adminSecurityRoutes);
 
+// ─── Public policy pages (offerplay.in/privacy, /terms, /payment-policy) ──────
+
+function renderPolicyHtml(type: string, title: string, icon: string, content: string, updatedAt?: Date): string {
+  const mdToHtml = (md: string) =>
+    md
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .split('\n')
+      .map(line => {
+        if (line.startsWith('# '))  return `<h1>${line.slice(2)}</h1>`;
+        if (line.startsWith('## ')) return `<h2>${line.slice(3)}</h2>`;
+        if (line.startsWith('- '))  return `<li>${line.slice(2)}</li>`;
+        if (line.trim() === '')     return '<br>';
+        return `<p>${line}</p>`;
+      })
+      .join('\n');
+
+  const updated = updatedAt ? new Date(updatedAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title} — OfferPlay</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0818; color: #e0e0e0; min-height: 100vh; }
+    header { background: linear-gradient(135deg, #1a0a2e, #2d0a5e); padding: 24px 20px; text-align: center; border-bottom: 1px solid #7B2FBE30; }
+    .brand { color: #7B2FBE; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+    .page-icon { font-size: 40px; display: block; margin-bottom: 8px; }
+    h1.page-title { color: #fff; font-size: 24px; font-weight: 800; }
+    .updated { color: #ffffff50; font-size: 12px; margin-top: 8px; }
+    main { max-width: 780px; margin: 0 auto; padding: 32px 20px 60px; }
+    .card { background: #1a0a2e; border-radius: 20px; padding: 28px; border: 1px solid #ffffff10; }
+    h1 { color: #fff; font-size: 22px; font-weight: 800; margin: 24px 0 14px; }
+    h2 { color: #FFD700; font-size: 16px; font-weight: 700; margin: 22px 0 10px; padding-left: 10px; border-left: 3px solid #FFD700; }
+    p { color: #ffffffcc; font-size: 14px; line-height: 1.7; margin-bottom: 8px; }
+    li { color: #ffffffcc; font-size: 14px; line-height: 1.7; margin: 4px 0 4px 20px; list-style: disc; }
+    br { display: block; height: 6px; }
+    footer { text-align: center; padding: 20px; color: #ffffff30; font-size: 12px; border-top: 1px solid #ffffff10; }
+    a { color: #7B2FBE; text-decoration: none; }
+    @media (max-width: 600px) { main { padding: 20px 14px 48px; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">OfferPlay</div>
+    <span class="page-icon">${icon}</span>
+    <h1 class="page-title">${title}</h1>
+    ${updated ? `<div class="updated">Last updated: ${updated}</div>` : ''}
+  </header>
+  <main>
+    <div class="card">
+      ${mdToHtml(content)}
+    </div>
+  </main>
+  <footer>
+    &copy; ${new Date().getFullYear()} OfferPlay &nbsp;·&nbsp;
+    <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="/terms">Terms &amp; Conditions</a> &nbsp;·&nbsp;
+    <a href="/payment-policy">Payment Policy</a>
+  </footer>
+</body>
+</html>`;
+}
+
+async function servePolicyPage(req: Request, res: Response, type: string, title: string, icon: string) {
+  try {
+    const key = `POLICY_${type}`;
+    const setting = await prisma.appSettings.findUnique({ where: { key } });
+    const content = setting?.value || `# ${title}\n\nContent coming soon.`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderPolicyHtml(type, title, icon, content, setting?.updatedAt));
+  } catch {
+    res.status(500).send('<h1>Error loading page</h1>');
+  }
+}
+
+app.get('/privacy',        (req, res) => servePolicyPage(req, res, 'PRIVACY', 'Privacy Policy',    '🔒'));
+app.get('/terms',          (req, res) => servePolicyPage(req, res, 'TERMS',   'Terms & Conditions','📋'));
+app.get('/payment-policy', (req, res) => servePolicyPage(req, res, 'PAYMENT', 'Payment Policy',    '💳'));
+
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
   error(res, 'Route not found', 404);

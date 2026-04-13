@@ -102,9 +102,17 @@ async function _bulkSave(
 ): Promise<void> {
   for (const s of settings) {
     if (!s.key || s.value === undefined || s.value === '') continue;
-    await prisma.appSettings.updateMany({
+    await prisma.appSettings.upsert({
       where: { key: s.key },
-      data: { value: String(s.value), updatedBy: adminId },
+      update: { value: String(s.value), updatedBy: adminId },
+      create: {
+        key: s.key,
+        value: String(s.value),
+        label: s.key,
+        category: 'LEGAL',
+        isSecret: false,
+        updatedBy: adminId,
+      },
     });
     process.env[s.key] = String(s.value);
   }
