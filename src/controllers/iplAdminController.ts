@@ -576,18 +576,30 @@ export async function distributeIPLContestPrizes(contestId: string, notifyOnComp
         const tierTypeRaw = (giftTier.type ?? '').toUpperCase();
         const claimPrizeType = tierTypeRaw === 'XOXODAY' ? 'XOXODAY' : 'INVENTORY';
         const itemCategory = (giftTier as any).itemCategory || '';
+        // For XOXODAY tiers, store product/denomination so backend can auto-deliver on verify
+        const xoxodayMeta: Record<string, string> = {};
+        if (claimPrizeType === 'XOXODAY') {
+          if ((giftTier as any).xoxodayProductId)  xoxodayMeta._xoxodayProductId  = String((giftTier as any).xoxodayProductId);
+          if ((giftTier as any).denominationId)     xoxodayMeta._denominationId    = String((giftTier as any).denominationId);
+          if ((giftTier as any).denominationValue)  xoxodayMeta._denominationValue = String((giftTier as any).denominationValue);
+          if ((giftTier as any).productName)        xoxodayMeta._productName       = String((giftTier as any).productName);
+        }
+        const initialDeliveryDetails = {
+          ...(itemCategory ? { _itemCategory: itemCategory } : {}),
+          ...xoxodayMeta,
+        };
         await prisma.iplPrizeClaim.create({
           data: {
             userId,
             iplContestId: contestId,
             rank: displayRank,            // display rank — same as entry.rank
             prizeType: claimPrizeType,
-            prizeName: (giftTier as any).itemName || giftTier.name || 'Gift Prize',
+            prizeName: (giftTier as any).itemName || giftTier.name || (giftTier as any).productName || 'Gift Prize',
             prizeValue: (giftTier as any).denominationValue ?? giftTier.value ?? 0,
             prizeImageUrl: (giftTier as any).itemImage || giftTier.imageUrl || '',
             inventoryId: giftTier.inventoryId || giftTier.inventoryItemId || null,
             status: 'pending',
-            deliveryDetails: itemCategory ? { _itemCategory: itemCategory } : undefined,
+            deliveryDetails: Object.keys(initialDeliveryDetails).length > 0 ? initialDeliveryDetails : undefined,
           },
         });
         giftClaimsCreated++;

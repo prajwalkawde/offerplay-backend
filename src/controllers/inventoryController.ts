@@ -3,6 +3,7 @@ import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { sendFCMToUsers } from '../services/fcmService';
+import { placeXoxodayOrder } from '../services/xoxodayService';
 
 const PRIZE_STATUS_MESSAGES: Record<string, { title: string; body: (prizeName: string) => string }> = {
   verified:  { title: '✅ Prize Verified!',    body: (p) => `Your ${p} claim has been verified. We're processing your delivery.` },
@@ -198,23 +199,121 @@ export async function updateIplPrizeClaim(req: Request, res: Response): Promise<
     const { id } = req.params as { id: string };
     const { status, voucherCode, voucherPin, voucherExpiry, voucherBrand, adminNote } = req.body;
 
-    // Build update payload
+    // Load current claim (need prizeType, deliveryDetails, userId for auto-delivery)
+    const existing = await prisma.iplPrizeClaim.findUnique({
+      where: { id },
+      include: { user: { select: { email: true, name: true } } },
+    });
+    if (!existing) { error(res, 'Claim not found', 404); return; }
+
+    const dd = (existing.deliveryDetails as Record<string, string>) || {};
+
+    // ── Auto-deliver XOXODAY gift card when admin verifies ───────────────────
+    if (status === 'verified' && existing.prizeType === 'XOXODAY') {
+      const productId    = dd._xoxodayProductId;
+      const denomId      = dd._denominationId;
+
+      if (productId && denomId) {
+        const userEmail = dd.email || existing.user?.email || `${existing.userId}@offerplay.in`;
+        const orderId   = `IPL_${id.slice(0, 8)}_${Date.now()}`;
+
+        logger.info(`[IPL Prize] Auto-delivering Xoxoday gift card: claim=${id} product=${productId} denom=${denomId} email=${userEmail}`);
+        const result = await placeXoxodayOrder(productId, denomId, 1, existing.userId, userEmail, orderId);
+
+        if (result.success) {
+          const updatedDd: Record<string, string> = {
+            ...dd,
+            _xoxodayOrderId:  orderId,
+            _autoProcessed:   'true',
+            _processedAt:     new Date().toISOString(),
+            _voucherCode:     result.voucherCode  || '',
+            _voucherPin:      result.voucherPin   || '',
+            _voucherLink:     result.voucherLink  || '',
+            _voucherExpiry:   result.validity     || '',
+            _voucherBrand:    dd._productName     || existing.prizeName || '',
+          };
+
+          const delivered = await prisma.iplPrizeClaim.update({
+            where: { id },
+            data: { status: 'delivered', deliveryDetails: updatedDd },
+          });
+
+          // Create a RedemptionRequest so it appears in the user's redeem history
+          await prisma.redemptionRequest.create({
+            data: {
+              userId:        existing.userId,
+              type:          'GIFT_CARD',
+              status:        'completed',
+              coinsRedeemed: 0,
+              amountInr:     existing.prizeValue || 0,
+              productId,
+              productName:   existing.prizeName || 'Gift Card',
+              denominationId: denomId,
+              voucherCode:   result.voucherCode || '',
+              voucherLink:   result.voucherLink || '',
+              xoxodayOrderId: orderId,
+              processedAt:   new Date(),
+              adminNote:     `Auto-issued for IPL prize claim ${id}`,
+              customFieldValues: {
+                pin:         result.voucherPin  || '',
+                validity:    result.validity    || '',
+                source:      'ipl_prize',
+                iplContestId: existing.iplContestId,
+                claimId:     id,
+              },
+            },
+          });
+
+          // FCM — let user know their code is ready
+          const prizeName = existing.prizeName || 'gift card';
+          const fcmBody   = result.voucherCode
+            ? `Your ${prizeName} code is ready! Open the app to copy it.`
+            : `Your ${prizeName} is ready! Open the app to access it.`;
+          sendFCMToUsers([existing.userId], '🎁 Gift Card Ready!', fcmBody, {
+            type:    'prize_delivered',
+            claimId: id,
+            status:  'delivered',
+          }).catch(e => logger.error('Prize auto-deliver FCM error:', e));
+
+          success(res, delivered, `Gift card auto-delivered via Xoxoday! ${result.voucherCode ? `Code: ${result.voucherCode}` : 'Link sent to user.'}`);
+          return;
+        }
+
+        // Xoxoday call failed — keep status as verified so admin can retry
+        logger.error(`[IPL Prize] Xoxoday auto-deliver failed for claim ${id}: ${result.error}`);
+        const withError = await prisma.iplPrizeClaim.update({
+          where: { id },
+          data: {
+            status: 'verified',
+            deliveryDetails: {
+              ...dd,
+              _xoxodayError:   result.error || 'Auto-delivery failed',
+              _xoxodayErrorAt: new Date().toISOString(),
+            },
+          },
+        });
+        success(res, withError, `⚠️ Xoxoday error: ${result.error}. Claim set to verified — click Verify again to retry.`);
+        return;
+      }
+
+      // productId / denomId missing — fall through to manual update
+      logger.warn(`[IPL Prize] XOXODAY claim ${id} missing product or denomination — skipping auto-deliver`);
+    }
+
+    // ── Standard manual update (non-XOXODAY or manual voucher entry) ─────────
     const updateData: any = {};
     if (status) updateData.status = status;
 
-    // If voucher details provided, merge into deliveryDetails
     if (voucherCode || voucherPin || voucherExpiry || voucherBrand || adminNote) {
-      const existing = await prisma.iplPrizeClaim.findUnique({ where: { id }, select: { deliveryDetails: true } });
-      const currentDetails = (existing?.deliveryDetails as Record<string, any>) || {};
       updateData.deliveryDetails = {
-        ...currentDetails,
+        ...dd,
         ...(voucherCode   && { _voucherCode:   voucherCode }),
         ...(voucherPin    && { _voucherPin:     voucherPin }),
         ...(voucherExpiry && { _voucherExpiry:  voucherExpiry }),
         ...(voucherBrand  && { _voucherBrand:   voucherBrand }),
         ...(adminNote     && { _adminNote:      adminNote }),
       };
-      // Auto-set status to delivered when code is added, if not explicitly set
+      // Auto-set status to delivered when code is manually added
       if (voucherCode && !status) updateData.status = 'delivered';
     }
 
