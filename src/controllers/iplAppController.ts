@@ -5,15 +5,25 @@ import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { getTeam } from '../config/iplTeams';
 
-// ─── Fake display names assigned to bots per-contest (resets each contest) ───
+// ─── Fake display names assigned to bots per-contest ─────────────────────────
+// Each contest gets a deterministic offset derived from its ID so that:
+//   • Bots in the same contest always show the same names (consistent view)
+//   • Different contests show different names (no obvious pattern across contests)
+//   • Each new match = new contest IDs = fresh name rotation
 const BOT_DISPLAY_NAMES = [
   'Arjun K.', 'Priya S.', 'Rahul M.', 'Sneha T.', 'Vikram P.',
   'Ananya R.', 'Kiran B.', 'Deepak V.', 'Meera J.', 'Suresh N.',
   'Kavita L.', 'Ravi G.', 'Pooja D.', 'Amit H.', 'Neha C.',
   'Aakash Y.', 'Divya F.', 'Sanjay W.', 'Lata Q.', 'Nikhil Z.',
 ];
-function getBotDisplayName(botIndexInContest: number): string {
-  return BOT_DISPLAY_NAMES[botIndexInContest % BOT_DISPLAY_NAMES.length];
+function contestBotOffset(contestId: string): number {
+  // Simple hash: sum of char codes mod list length → deterministic per contest
+  let h = 0;
+  for (let i = 0; i < contestId.length; i++) h = (h + contestId.charCodeAt(i)) % BOT_DISPLAY_NAMES.length;
+  return h;
+}
+function getBotDisplayName(botIndexInContest: number, contestId: string): string {
+  return BOT_DISPLAY_NAMES[(contestBotOffset(contestId) + botIndexInContest) % BOT_DISPLAY_NAMES.length];
 }
 
 // ─── Team logo URL cache (refreshed every 10 min from DB settings) ────────────
@@ -605,7 +615,7 @@ export async function getContestLeaderboard(req: Request, res: Response): Promis
       let displayName: string;
       let displayAvatar: string;
       if (isBot) {
-        displayName = getBotDisplayName(botIndexInContest++);
+        displayName = getBotDisplayName(botIndexInContest++, contest.id);
         displayAvatar = displayName.charAt(0).toUpperCase();
       } else {
         displayName = entry.user.name?.split(' ')[0] ?? `User${entry.userId.slice(0, 4)}`;
@@ -843,7 +853,7 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         // If rank-1 is a bot, show a fake name so real bot usernames aren't exposed
         const isBot = w.user.isBot ?? false;
         const winnerName = isBot
-          ? getBotDisplayName(0)   // rank-1 bot is always the "first" bot in contest
+          ? getBotDisplayName(0, w.contestId)   // rank-1 bot — offset anchored to this contest
           : (w.user.name?.split(' ')[0] ?? 'Winner');
         topWinnerMap.set(w.contestId, {
           name: winnerName,
