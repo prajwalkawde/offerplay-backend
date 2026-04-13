@@ -85,6 +85,213 @@ function playerOptions(
   return pickRandom([...new Set(pool)], 4);
 }
 
+// ─── Scorecard types ─────────────────────────────────────────────────────────
+interface BatterStats { name: string; runs: number; balls: number; fours: number; sixes: number; strikeRate: number; dismissal: string }
+interface BowlerStats { name: string; overs: string; runs: number; wickets: number; economy: number }
+interface InningData {
+  team: string; total: number; wickets: number; overs: string;
+  batting: BatterStats[]; bowling: BowlerStats[];
+  powerplayRuns?: number; powerplayWickets?: number;
+}
+export interface ScorecardData {
+  team1: string; team2: string; winner: string; matchStatus: string;
+  tossWinner?: string; tossDecision?: string; manOfMatch?: string;
+  innings: InningData[];
+}
+
+// Parse raw CricAPI match_scorecard response (already unwrapped — data.data)
+export function parseCricApiScorecard(raw: any, team1: string, team2: string): ScorecardData | null {
+  if (!raw) return null;
+  try {
+    const innings: InningData[] = (raw.scorecard || []).map((inn: any) => {
+      const score = (raw.score || []).find((s: any) => s.inning === inn.inning) || {};
+      const batting: BatterStats[] = (inn.batting || []).map((b: any) => ({
+        name:       b.batsman?.name || String(b.batsman || ''),
+        runs:       b.r ?? 0,
+        balls:      b.b ?? 0,
+        fours:      b['4s'] ?? 0,
+        sixes:      b['6s'] ?? 0,
+        strikeRate: parseFloat(b.sr ?? '0'),
+        dismissal:  b['dismissal-wicket'] || 'not out',
+      }));
+      const bowling: BowlerStats[] = (inn.bowling || []).map((b: any) => ({
+        name:    b.bowler?.name || String(b.bowler || ''),
+        overs:   String(b.o ?? '0'),
+        runs:    b.r ?? 0,
+        wickets: b.w ?? 0,
+        economy: parseFloat(b.eco ?? '0'),
+      }));
+      const pp = (inn.powerplay || [])[0];
+      const teamName = (inn.inning || '').replace(/\s+Innings?\s*\d+$/i, '').trim();
+      return {
+        team:            teamName || team1,
+        total:           score.r ?? 0,
+        wickets:         score.w ?? 10,
+        overs:           String(score.o ?? '20'),
+        batting, bowling,
+        powerplayRuns:    pp?.r,
+        powerplayWickets: pp?.w,
+      };
+    });
+
+    return {
+      team1, team2,
+      winner:       (raw.status || '').includes(' won') ? (raw.status as string).split(' won')[0].trim() : '',
+      matchStatus:  raw.status || '',
+      tossWinner:   raw.toss?.winner || '',
+      tossDecision: raw.toss?.decision || '',
+      manOfMatch:   raw.manOfMatch || '',
+      innings,
+    };
+  } catch (err) {
+    logger.error('parseCricApiScorecard error:', err);
+    return null;
+  }
+}
+
+function formatScorecardForPrompt(sc: ScorecardData): string {
+  const lines: string[] = [
+    `MATCH: ${sc.team1} vs ${sc.team2}`,
+    `RESULT: ${sc.matchStatus}`,
+    sc.tossWinner ? `TOSS: ${sc.tossWinner} won and chose to ${sc.tossDecision}` : '',
+    sc.manOfMatch ? `MAN OF THE MATCH: ${sc.manOfMatch}` : '',
+    '',
+  ];
+  for (const inn of sc.innings) {
+    lines.push(`--- ${inn.team}: ${inn.total}/${inn.wickets} in ${inn.overs} overs ---`);
+    if (inn.powerplayRuns !== undefined) lines.push(`  Powerplay (1-6): ${inn.powerplayRuns}/${inn.powerplayWickets ?? 0}`);
+    const topBatters = inn.batting.filter(b => b.runs > 0).sort((a, b) => b.runs - a.runs).slice(0, 6);
+    if (topBatters.length) {
+      lines.push('  Batting:');
+      for (const b of topBatters) lines.push(`    ${b.name}: ${b.runs}(${b.balls}) ${b.fours}×4 ${b.sixes}×6 SR:${b.strikeRate} [${b.dismissal}]`);
+    }
+    const topBowlers = inn.bowling.sort((a, b) => b.wickets - a.wickets || a.economy - b.economy).slice(0, 5);
+    if (topBowlers.length) {
+      lines.push('  Bowling:');
+      for (const b of topBowlers) lines.push(`    ${b.name}: ${b.overs}-${b.runs}-${b.wickets}wkts (eco:${b.economy})`);
+    }
+    lines.push('');
+  }
+  return lines.filter(l => l !== '').join('\n').trim();
+}
+
+// ─── Claude Haiku call (for post-match questions) ─────────────────────────────
+async function callHaiku(prompt: string): Promise<GeneratedQuestion[]> {
+  const response = await claude.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 6000,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = response.content[0].type === 'text' ? response.content[0].text : '';
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    logger.error(`[Haiku] No JSON in response. First 300: ${text.slice(0, 300)}`);
+    throw new Error('No JSON array in Haiku response');
+  }
+  const parsed = JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
+  logger.info(`[Haiku] Parsed ${parsed.length} questions`);
+  return parsed;
+}
+
+// ─── Generate post-match questions from real scorecard (correctAnswer filled) ─
+export async function generateQuestionsFromScorecard(
+  scorecard: ScorecardData,
+  matchMeta: { matchDate: string; venue?: string },
+  language: string = 'en',
+): Promise<GeneratedQuestion[]> {
+  const langInstruction = LANGUAGE_INSTRUCTIONS[language] ?? LANGUAGE_INSTRUCTIONS.en;
+  const scorecardText = formatScorecardForPrompt(scorecard);
+
+  const prompt = `You are an IPL cricket quiz master. Create exactly 20 engaging trivia questions based on the REAL match scorecard below.
+ALL questions must have the CORRECT ANSWER filled in — this is a post-match quiz, not predictions.
+
+${scorecardText}
+
+MATCH DATE: ${matchMeta.matchDate}
+VENUE: ${matchMeta.venue ?? 'TBD'}
+
+CREATE EXACTLY 20 QUESTIONS across these categories:
+
+🏆 MATCH RESULT (4 questions, 100 pts each):
+Q1: Who won the match?
+Q2: What was the winning margin?
+Q3: Who won the toss and what did they choose?
+Q4: Combined runs scored in the match?
+
+🏏 BATTING HIGHLIGHTS (6 questions, 150 pts each):
+Q5: Top scorer of the match (most runs)?
+Q6: Which batter had the best strike rate (min 20 balls)?
+Q7: Which player hit the most sixes?
+Q8: How many players scored 30+ runs in the match?
+Q9: What was the highest individual score?
+Q10: Who was dismissed first in the match?
+
+⚡ BOWLING HIGHLIGHTS (5 questions, 150 pts each):
+Q11: Who took the most wickets in the match?
+Q12: Which bowler had the best economy (min 3 overs)?
+Q13: How many total wickets fell in the match?
+Q14: How many total sixes were hit?
+Q15: Which team scored more in the powerplay (overs 1-6)?
+
+🌟 STAR MOMENTS (5 questions, 200 pts each):
+Q16: Who was the Man of the Match?
+Q17: What was the winning team's powerplay score?
+Q18: Which team hit more boundaries (4s) in the match?
+Q19: Who bowled the most economical spell for the winning team?
+Q20: What was the total combined score (runs) of both innings?
+
+STRICT RULES:
+1. LANGUAGE: ${langInstruction}
+2. correctAnswer MUST be the actual answer based on the scorecard
+3. correctAnswer MUST exactly match one of the 4 options (copy it exactly)
+4. All 4 options must be specific plausible values (no vague options)
+5. Add IPL excitement emojis to questions
+6. isPreMatch MUST be false for all questions
+7. Return ONLY valid JSON array — no markdown, no extra text
+
+JSON format:
+{"question":"...","options":["...","...","...","..."],"correctAnswer":"exact option text","points":100,"difficulty":"easy|medium|hard","category":"trivia","explanation":"brief explanation with the fact","isPreMatch":false,"questionContext":"one hype sentence"}`;
+
+  return callHaiku(prompt);
+}
+
+// ─── Translate English questions to another language via Haiku ─────────────────
+export async function translateQuestions(
+  questions: GeneratedQuestion[],
+  targetLang: string,
+): Promise<GeneratedQuestion[]> {
+  const langInstruction = LANGUAGE_INSTRUCTIONS[targetLang] ?? LANGUAGE_INSTRUCTIONS.en;
+
+  const prompt = `Translate the following IPL cricket quiz questions.
+${langInstruction}
+
+IMPORTANT RULES:
+- Keep all numbers, player names, and team names exactly as-is (do not translate proper nouns)
+- Translate question text, options text, explanation, and questionContext
+- correctAnswer MUST match one of the translated options EXACTLY (copy it exactly)
+- Keep all emojis as-is
+- Keep all other fields (points, difficulty, category, isPreMatch) unchanged
+- Return ONLY valid JSON array in the same structure, no markdown
+
+QUESTIONS TO TRANSLATE:
+${JSON.stringify(questions, null, 2)}`;
+
+  try {
+    const response = await claude.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('No JSON in translation response');
+    return JSON.parse(jsonMatch[0]) as GeneratedQuestion[];
+  } catch (err) {
+    logger.error(`[Haiku] Translation to ${targetLang} failed:`, err);
+    return questions; // fallback: return English questions
+  }
+}
+
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 export interface IplMatchData {
   team1: string;
