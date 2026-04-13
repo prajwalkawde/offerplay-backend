@@ -575,7 +575,7 @@ export async function requestAccountDeletion(req: Request, res: Response): Promi
   const normalised = phone.trim();
   try {
     const user = await prisma.user.findUnique({ where: { phone: normalised } });
-    if (!user || user.phone.startsWith('DELETED_')) {
+    if (!user || (user.phone ?? '').startsWith('DELETED_')) {
       error(res, 'No account found with this phone number.', 404);
       return;
     }
@@ -651,7 +651,7 @@ export async function confirmAccountDeletion(req: Request, res: Response): Promi
     }
 
     const user = await prisma.user.findUnique({ where: { phone: normalised } });
-    if (!user || user.phone.startsWith('DELETED_')) {
+    if (!user || (user.phone ?? '').startsWith('DELETED_')) {
       error(res, 'Account not found or already deleted.', 404);
       return;
     }
