@@ -1314,10 +1314,11 @@ export async function getGenerationStatus(req: Request, res: Response): Promise<
 }
 
 export async function generateIPLQuestions(req: Request, res: Response): Promise<void> {
-  const { matchId, questionCount, language } = req.body as {
+  const { matchId, questionCount, language, mockScorecard } = req.body as {
     matchId?: string;
     questionCount?: number;
     language?: string; // specific lang code OR 'all'/undefined = all 7 languages
+    mockScorecard?: boolean; // bypass CricAPI + use fake data for testing
   };
 
   if (!matchId) { error(res, 'matchId required', 400); return; }
@@ -1357,7 +1358,35 @@ export async function generateIPLQuestions(req: Request, res: Response): Promise
 
   // ── Hard check: verify 1st innings is complete before responding ────────────
   let rawScorecard: any = null;
-  if ((match as any).cricApiId) {
+
+  if (mockScorecard) {
+    // ── DEMO MODE: bypass CricAPI, inject fake 1st innings scorecard ──────────
+    const t1 = match.team1;
+    rawScorecard = {
+      status: `${t1} innings completed`,
+      toss: { winner: t1, decision: 'bat' },
+      score: [{ r: 187, w: 5, o: 20, inning: `${t1} Inning 1` }],
+      scorecard: [{
+        inning: `${t1} Inning 1`,
+        batting: [
+          { batsman: { name: 'Rohit Sharma' },   r: 75, b: 45, '4s': 7, '6s': 3, sr: '166.67', 'dismissal-wicket': 'c sub b Chahar' },
+          { batsman: { name: 'Suryakumar Yadav'},r: 54, b: 32, '4s': 5, '6s': 2, sr: '168.75', 'dismissal-wicket': 'b Jadeja' },
+          { batsman: { name: 'Ishan Kishan' },   r: 28, b: 18, '4s': 2, '6s': 1, sr: '155.56', 'dismissal-wicket': 'c sub b Simarjeet' },
+          { batsman: { name: 'Hardik Pandya' },  r: 20, b: 12, '4s': 1, '6s': 1, sr: '166.67', 'dismissal-wicket': 'not out' },
+          { batsman: { name: 'Tim David' },       r: 10, b: 8,  '4s': 1, '6s': 0, sr: '125.00', 'dismissal-wicket': 'not out' },
+        ],
+        bowling: [
+          { bowler: { name: 'Deepak Chahar' },    o: '4', r: 32, w: 2, eco: '8.00' },
+          { bowler: { name: 'Ravindra Jadeja' },  o: '4', r: 28, w: 1, eco: '7.00' },
+          { bowler: { name: 'Pathirana' },         o: '4', r: 38, w: 1, eco: '9.50' },
+          { bowler: { name: 'Simarjeet Singh' },  o: '4', r: 42, w: 1, eco: '10.50' },
+          { bowler: { name: 'Tushar Deshpande' }, o: '4', r: 47, w: 0, eco: '11.75' },
+        ],
+        powerplay: [{ r: 58, w: 1, overs: '1-6' }],
+      }],
+    };
+    logger.info(`[QuestionGen] DEMO MODE — using mock scorecard for match ${match.id}`);
+  } else if ((match as any).cricApiId) {
     rawScorecard = await fetchMatchScorecard((match as any).cricApiId as string);
 
     // null means CricAPI returned nothing — rate limit hit or bad key
