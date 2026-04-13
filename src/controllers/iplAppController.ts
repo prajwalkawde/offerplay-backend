@@ -761,6 +761,7 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
       let hasInventoryPrize = false;
       let wonPrizeName: string | null = null;
       let wonPrizeImage: string | null = null;
+      let claimStatus: string | null = null; // pending/claimed/verified/shipped/delivered
 
       // Prize lookup by display rank — entry.rank is the actual rank (bots included)
       // which is the same rank used during prize distribution.
@@ -781,6 +782,7 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         hasInventoryPrize = true;
         wonPrizeName = claim.prizeName || (wonTier as any).itemName || null;
         wonPrizeImage = claim.prizeImageUrl || (wonTier as any).itemImage || null;
+        claimStatus = claim.status || 'pending';
       } else if ((wonTier?.type ?? '').toUpperCase() === 'TICKETS') {
         ticketsWon = (wonTier as any).tickets || 0;
       }
@@ -803,6 +805,7 @@ export async function getMyContests(req: Request, res: Response): Promise<void> 
         ticketsWon,
         wonPrizeName,
         wonPrizeImage,
+        claimStatus,
         status: contest.status,
         matchId: contest.matchId,
         matchTeam1: contest.match.team1,
