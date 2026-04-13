@@ -380,7 +380,6 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     projectId:         'offerpay-87906',
     storageBucket:     'offerpay-87906.appspot.com',
     messagingSenderId: '449341693766',
-    appId:             '1:449341693766:web:05800bc75c56ed71b34f47',
   });
   const auth = firebase.auth();
   auth.languageCode = 'en';
