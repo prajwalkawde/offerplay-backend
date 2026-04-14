@@ -553,7 +553,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }, 1000);
   }
 
-  // ── GOOGLE FLOW via GIS (no Firebase OAuth — bypasses auth/internal-error) ───
+  // ── GOOGLE FLOW — redirect (avoids popup communication issues) ───────────────
   // pendingToken holds { type, token } for whichever auth method was used
   let pendingToken = null;
 
@@ -562,20 +562,32 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     const btn = document.getElementById('googleSignInBtn');
     errEl.textContent = '';
     btn.disabled = true;
-    btn.textContent = 'Opening Google…';
+    btn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/> Redirecting…';
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      const result = await auth.signInWithPopup(provider);
-      const idToken = await result.user.getIdToken();
-      pendingToken = { type: 'google', token: idToken };
-      showConfirmStep();
+      await auth.signInWithRedirect(provider);
+      // page will redirect — execution stops here
     } catch (err) {
       errEl.textContent = err.message || 'Google sign-in failed. Please try again.';
-    } finally {
       btn.disabled = false;
       btn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/> Continue with Google';
     }
   }
+
+  // On page load — check if we're returning from a Google redirect
+  auth.getRedirectResult().then(async (result) => {
+    if (!result || !result.user) return;
+    const idToken = await result.user.getIdToken();
+    pendingToken = { type: 'google', token: idToken };
+    // If user was on Google tab, go straight to confirm
+    showStep('stepConfirm');
+    showConfirmStep();
+  }).catch((err) => {
+    if (err.code !== 'auth/no-auth-event') {
+      const errEl = document.getElementById('errGoogle');
+      if (errEl) errEl.textContent = err.message || 'Google sign-in failed.';
+    }
+  });
 
   // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
   function showConfirmStep() {
