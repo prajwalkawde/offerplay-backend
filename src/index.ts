@@ -217,11 +217,11 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   // Override helmet's strict CSP — this page needs inline JS + Firebase CDN + Google popup
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com https://apis.google.com; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com https://apis.google.com https://*.firebaseapp.com; " +
+    "style-src 'self' 'unsafe-inline' https://www.gstatic.com; " +
     "img-src 'self' data: https:; " +
-    "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.gstatic.com; " +
-    "frame-src 'self' https://offerpay-87906.firebaseapp.com https://accounts.google.com https://www.google.com https://recaptcha.google.com https://www.recaptcha.net https://*.firebaseapp.com;"
+    "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://www.gstatic.com https://apis.google.com; " +
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.google.com https://recaptcha.google.com https://www.recaptcha.net https://apis.google.com;"
   );
   const API = 'https://api.offerplay.in';
   const html = `<!DOCTYPE html>
