@@ -217,7 +217,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   // Override helmet's strict CSP — this page needs inline JS + Firebase CDN + Google popup
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com; " +
+    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com https://apis.google.com; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: https:; " +
     "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.gstatic.com; " +
