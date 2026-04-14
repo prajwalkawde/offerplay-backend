@@ -617,6 +617,69 @@ export async function deleteAccountViaFirebase(req: Request, res: Response): Pro
   }
 }
 
+// ─── Web delete account — verify Google ID token directly (bypasses Firebase OAuth) ──
+export async function deleteAccountViaGoogle(req: Request, res: Response): Promise<void> {
+  const { googleIdToken } = req.body as { googleIdToken?: string };
+  if (!googleIdToken) {
+    error(res, 'Google ID token is required.', 400);
+    return;
+  }
+  try {
+    // Verify via Google's tokeninfo endpoint (no Firebase OAuth needed)
+    const tokenRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(googleIdToken)}`);
+    const tokenInfo = await tokenRes.json() as { sub?: string; email?: string; aud?: string };
+
+    if (!tokenRes.ok || !tokenInfo.sub) {
+      error(res, 'Invalid Google token. Please try again.', 401);
+      return;
+    }
+
+    // Ensure token belongs to our app (any registered client ID)
+    const VALID_AUDIENCES = [
+      '449341693766-r6krhctj4lvoq6u8984on0d5l724acme.apps.googleusercontent.com',
+      '449341693766-9ep4p1jrfh1sj0tlq3ublhkar70nl036.apps.googleusercontent.com',
+      '449341693766-9igqqfqjdlfio99eqvl5e5s1h9tv6c94.apps.googleusercontent.com',
+      '449341693766-hkerclk0anu608uujc01m9gocdk077pg.apps.googleusercontent.com',
+      '449341693766-v25stanqh7soccmoqivrj0b1grpve6a5.apps.googleusercontent.com',
+    ];
+    if (!VALID_AUDIENCES.includes(tokenInfo.aud ?? '')) {
+      error(res, 'Token not authorized for this app.', 401);
+      return;
+    }
+
+    const googleId = tokenInfo.sub;
+    const email    = tokenInfo.email ?? null;
+
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ googleId }, ...(email ? [{ email }] : [])] },
+    });
+
+    if (!user || (user.phone ?? '').startsWith('DELETED_')) {
+      error(res, 'No OfferPlay account found for this Google account.', 404);
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        status: 'BANNED',
+        name: 'Deleted User',
+        email: null,
+        phone: `DELETED_${Date.now()}`,
+        googleId: null,
+        fcmToken: null,
+        oneSignalPlayerId: null,
+      },
+    });
+
+    logger.info(`[DeleteAccount] Google token deletion for user ${user.id}`);
+    success(res, null, 'Account deleted successfully');
+  } catch (err) {
+    logger.error('deleteAccountViaGoogle error', { err });
+    error(res, 'Verification failed. Please try again.', 500);
+  }
+}
+
 // ─── Web delete account — Step 1: send OTP ────────────────────────────────────
 export async function requestAccountDeletion(req: Request, res: Response): Promise<void> {
   const { phone } = req.body as { phone?: string };

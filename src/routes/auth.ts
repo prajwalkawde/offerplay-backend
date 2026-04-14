@@ -7,7 +7,7 @@ import { otpRateLimit } from '../middleware/rateLimit';
 import {
   sendOtp, verifyPhone, googleAuth, googleLogin, phoneFirebaseVerify, logout, getMe,
   completeProfile, updateFCMToken, updateProfile, updateLanguage,
-  requestAccountDeletion, confirmAccountDeletion, deleteAccountViaFirebase,
+  requestAccountDeletion, confirmAccountDeletion, deleteAccountViaFirebase, deleteAccountViaGoogle,
 } from '../controllers/authController';
 import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
@@ -80,6 +80,7 @@ router.delete('/account', authMiddleware, async (req: Request, res: Response) =>
 
 // ─── Delete account via web page (no JWT needed) ─────────────────────────────
 router.post('/delete-account/firebase', deleteAccountViaFirebase);
+router.post('/delete-account/google',   deleteAccountViaGoogle);
 // Legacy Twilio endpoints kept for backward compat but not used
 router.post('/delete-account/request', requestAccountDeletion);
 router.post('/delete-account/confirm', confirmAccountDeletion);

@@ -217,7 +217,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   // Override helmet's strict CSP — this page needs inline JS + Firebase CDN + Google popup
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net; " +
+    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: https:; " +
     "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; " +
@@ -365,11 +365,8 @@ app.get('/delete-account', (_req: Request, res: Response) => {
         <h2>Sign in with Google</h2>
         <p>Sign in with the Google account linked to your OfferPlay profile to verify your identity.</p>
         <div class="err" id="errGoogle"></div>
-        <button class="btn btn-google" id="googleSignInBtn" onclick="signInWithGoogle()">
-          <svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
-          Continue with Google
-        </button>
-        <p style="color:#ffffff40;font-size:12px;text-align:center;margin-top:10px">You will be redirected to Google to sign in, then brought back here.</p>
+        <div id="googleBtnContainer" style="display:flex;justify-content:center;margin-top:8px;min-height:44px"></div>
+        <p style="color:#ffffff40;font-size:12px;text-align:center;margin-top:10px">A Google sign-in window will open to verify your account.</p>
       </div><!-- /panelGoogle -->
 
     </div><!-- /mainFlow -->
@@ -379,9 +376,11 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 
 <footer>&copy; ${new Date().getFullYear()} OfferPlay &nbsp;·&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms">Terms</a></footer>
 
-<!-- Firebase JS SDK (compat) -->
+<!-- Firebase JS SDK (phone auth only) -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<!-- Google Identity Services (Google sign-in — bypasses Firebase OAuth) -->
+<script src="https://accounts.google.com/gsi/client" async onload="initGIS()"></script>
 <script>
   // ── Firebase init ──────────────────────────────────────────────────────────
   firebase.initializeApp({
@@ -399,10 +398,9 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
   const API = '${API}';
-  let currentTab      = 'phone';
-  let confirmed       = false;
-  let pendingIdToken  = null;   // idToken waiting for confirm step
-  let confirmResult   = null;   // Firebase phone confirmationResult
+  let currentTab    = 'phone';
+  let confirmed     = false;
+  let confirmResult = null;   // Firebase phone confirmationResult
   let recaptchaVerifier = null;
   let resendInterval  = null;
 
@@ -507,7 +505,8 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     setLoading('verifyOtpBtn', true, 'Verify &amp; Continue');
     try {
       const cred = await confirmResult.confirm(otp);
-      pendingIdToken = await cred.user.getIdToken();
+      const token = await cred.user.getIdToken();
+      pendingToken = { type: 'firebase', token };
       clearInterval(resendInterval);
       showConfirmStep();
     } catch(e) {
@@ -552,35 +551,33 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }, 1000);
   }
 
-  // ── GOOGLE FLOW (redirect — more reliable than popup on all browsers) ────────
-  // On page load: check if we're returning from a Google redirect
-  auth.getRedirectResult().then(result => {
-    if (result && result.user) {
-      result.user.getIdToken().then(token => {
-        pendingIdToken = token;
-        // Switch to Google tab so confirm step shows correctly
-        switchTab('google');
-        showConfirmStep();
-      });
-    }
-  }).catch(e => {
-    const code = e && e.code;
-    if (code && code !== 'auth/no-current-user' && code !== 'auth/null-user') {
-      switchTab('google');
-      document.getElementById('errGoogle').textContent = friendlyFirebaseError(e);
-    }
-  });
+  // ── GOOGLE FLOW via GIS (no Firebase OAuth — bypasses auth/internal-error) ───
+  // pendingToken holds { type, token } for whichever auth method was used
+  let pendingToken = null;
 
-  function signInWithGoogle() {
+  function initGIS() {
+    if (typeof google === 'undefined') return;
+    google.accounts.id.initialize({
+      client_id: '449341693766-r6krhctj4lvoq6u8984on0d5l724acme.apps.googleusercontent.com',
+      callback: handleGoogleCredential,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
+    google.accounts.id.renderButton(
+      document.getElementById('googleBtnContainer'),
+      { theme: 'outline', size: 'large', text: 'continue_with', width: 340 }
+    );
+  }
+
+  async function handleGoogleCredential(response) {
     const errEl = document.getElementById('errGoogle');
     errEl.textContent = '';
-    const provider = new firebase.auth.GoogleAuthProvider();
-    setLoading('googleSignInBtn', true, 'Redirecting to Google...');
-    auth.signInWithRedirect(provider).catch(e => {
-      errEl.textContent = friendlyFirebaseError(e);
-      setLoading('googleSignInBtn', false,
-        '<svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg> Continue with Google');
-    });
+    if (!response || !response.credential) {
+      errEl.textContent = 'Google sign-in failed. Please try again.';
+      return;
+    }
+    pendingToken = { type: 'google', token: response.credential };
+    showConfirmStep();
   }
 
   // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
@@ -602,22 +599,25 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   }
 
   async function deleteAccount() {
-    if (!confirmed || !pendingIdToken) return;
+    if (!confirmed || !pendingToken) return;
     const errEl = document.getElementById('errConfirm');
     errEl.textContent = '';
     setLoading('deleteBtn', true, 'Delete My Account Permanently');
     try {
-      const res = await fetch(API + '/api/auth/delete-account/firebase', {
+      const isGoogle  = pendingToken.type === 'google';
+      const endpoint  = isGoogle ? '/api/auth/delete-account/google' : '/api/auth/delete-account/firebase';
+      const body      = isGoogle ? { googleIdToken: pendingToken.token } : { idToken: pendingToken.token };
+      const res = await fetch(API + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: pendingIdToken }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok || data.success === false) {
         errEl.textContent = data.message || 'Failed to delete account. Please try again.';
         return;
       }
-      pendingIdToken = null;
+      pendingToken = null;
       showStep('stepSuccess');
     } catch {
       errEl.textContent = 'Network error. Please check your connection.';
@@ -627,7 +627,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   }
 
   function cancelDelete() {
-    pendingIdToken = null;
+    pendingToken = null;
     confirmed = false;
     // Restore main flow
     document.getElementById('mainFlow').style.display = 'block';
