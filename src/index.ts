@@ -369,6 +369,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
           <svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
           Continue with Google
         </button>
+        <p style="color:#ffffff40;font-size:12px;text-align:center;margin-top:10px">You will be redirected to Google to sign in, then brought back here.</p>
       </div><!-- /panelGoogle -->
 
     </div><!-- /mainFlow -->
@@ -551,22 +552,35 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }, 1000);
   }
 
-  // ── GOOGLE FLOW ────────────────────────────────────────────────────────────
-  async function signInWithGoogle() {
+  // ── GOOGLE FLOW (redirect — more reliable than popup on all browsers) ────────
+  // On page load: check if we're returning from a Google redirect
+  auth.getRedirectResult().then(result => {
+    if (result && result.user) {
+      result.user.getIdToken().then(token => {
+        pendingIdToken = token;
+        // Switch to Google tab so confirm step shows correctly
+        switchTab('google');
+        showConfirmStep();
+      });
+    }
+  }).catch(e => {
+    const code = e && e.code;
+    if (code && code !== 'auth/no-current-user' && code !== 'auth/null-user') {
+      switchTab('google');
+      document.getElementById('errGoogle').textContent = friendlyFirebaseError(e);
+    }
+  });
+
+  function signInWithGoogle() {
     const errEl = document.getElementById('errGoogle');
     errEl.textContent = '';
-    setLoading('googleSignInBtn', true, '<svg class="google-icon" viewBox="0 0 48 48">...</svg> Continue with Google');
-    try {
-      const provider = new firebase.auth.GoogleAuthProvider();
-      const result = await auth.signInWithPopup(provider);
-      pendingIdToken = await result.user.getIdToken();
-      showConfirmStep();
-    } catch(e) {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    setLoading('googleSignInBtn', true, 'Redirecting to Google...');
+    auth.signInWithRedirect(provider).catch(e => {
       errEl.textContent = friendlyFirebaseError(e);
-    } finally {
       setLoading('googleSignInBtn', false,
         '<svg class="google-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.8 0 6.9 5.4 2.9 13.3l7.8 6C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h12.4c-.5 2.8-2.1 5.2-4.5 6.8l7 5.4c4.1-3.8 6.5-9.4 6.5-16.3z"/><path fill="#FBBC05" d="M10.7 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l8.1-6z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7-5.4c-2 1.4-4.6 2.2-8.2 2.2-6.2 0-11.5-4.2-13.4-9.8l-8 6.1C6.8 42.5 14.8 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg> Continue with Google');
-    }
+    });
   }
 
   // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
