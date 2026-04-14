@@ -220,7 +220,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://accounts.google.com; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: https:; " +
-    "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com; " +
+    "connect-src 'self' https://api.offerplay.in https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.gstatic.com; " +
     "frame-src 'self' https://offerpay-87906.firebaseapp.com https://accounts.google.com https://www.google.com https://recaptcha.google.com https://www.recaptcha.net https://*.firebaseapp.com;"
   );
   const API = 'https://api.offerplay.in';
