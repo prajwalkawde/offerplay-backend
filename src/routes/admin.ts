@@ -40,6 +40,7 @@ import {
   getSponsors, createSponsor, updateSponsor,
   getIplPrizeClaims, updateIplPrizeClaim,
 } from '../controllers/inventoryController';
+import { listDeletionRequests, approveDeletionRequest, rejectDeletionRequest } from '../controllers/adminController';
 import { getCoinRates, updateCoinRate, createCoinRate } from '../controllers/coinRateController';
 import { getSettings, updateSetting, updateMultipleSettings, updateBulkPut } from '../controllers/settingsController';
 import {
@@ -439,6 +440,11 @@ router.use('/notifications', adminNotifRoutes);
 
 // ─── File Upload ───────────────────────────────────────────────────────────────
 import { success as apiSuccess, error as apiError } from '../utils/response';
+
+// ─── Account Deletion Requests ────────────────────────────────────────────────
+router.get('/deletion-requests',           adminAuthMiddleware, listDeletionRequests);
+router.put('/deletion-requests/:id/approve', adminAuthMiddleware, approveDeletionRequest);
+router.put('/deletion-requests/:id/reject',  adminAuthMiddleware, rejectDeletionRequest);
 
 router.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) { apiError(res, 'No file uploaded', 400); return; }

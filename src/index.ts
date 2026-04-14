@@ -361,15 +361,21 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 
       <!-- ── GOOGLE PANEL ── -->
       <div class="panel" id="panelGoogle">
-        <div class="icon">🔵</div>
-        <h2>Sign in with Google</h2>
-        <p>Sign in with the Google account linked to your OfferPlay profile to verify your identity.</p>
+        <div class="icon">📧</div>
+        <h2>Request Account Deletion</h2>
+        <p>Enter your Google account email and a reason. We'll review and delete your account within 48 hours.</p>
         <div class="err" id="errGoogle"></div>
-        <button class="btn btn-primary" id="googleSignInBtn" onclick="signInWithGoogle()" style="display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#333;border:1px solid #ddd;font-weight:600;">
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/>
-          Continue with Google
-        </button>
-        <p style="color:#ffffff40;font-size:12px;text-align:center;margin-top:10px">A Google sign-in window will open to verify your account.</p>
+        <input class="inp" id="googleEmail" type="email" placeholder="Your Google email address" autocomplete="email"/>
+        <select class="inp" id="googleReason" style="background:#1a1a2e;color:#fff;cursor:pointer;">
+          <option value="">— Select a reason —</option>
+          <option value="Not using the app anymore">Not using the app anymore</option>
+          <option value="Privacy concerns">Privacy concerns</option>
+          <option value="Switching to another account">Switching to another account</option>
+          <option value="Too many notifications">Too many notifications</option>
+          <option value="Other">Other</option>
+        </select>
+        <textarea class="inp" id="googleNote" placeholder="Additional details (optional)" rows="3" style="resize:vertical;font-family:inherit;"></textarea>
+        <button class="btn btn-primary" id="googleSubmitBtn" onclick="submitGoogleDeletionRequest()">Submit Deletion Request</button>
       </div><!-- /panelGoogle -->
 
     </div><!-- /mainFlow -->
@@ -382,7 +388,6 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 <!-- Firebase JS SDK (phone auth only) -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
-<!-- No GIS script needed — using Firebase signInWithPopup -->
 <script>
   // ── Firebase init ──────────────────────────────────────────────────────────
   firebase.initializeApp({
@@ -553,41 +558,40 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }, 1000);
   }
 
-  // ── GOOGLE FLOW — redirect (avoids popup communication issues) ───────────────
-  // pendingToken holds { type, token } for whichever auth method was used
+  // ── GOOGLE FLOW — email + reason form ────────────────────────────────────────
   let pendingToken = null;
 
-  async function signInWithGoogle() {
-    const errEl = document.getElementById('errGoogle');
-    const btn = document.getElementById('googleSignInBtn');
+  async function submitGoogleDeletionRequest() {
+    const errEl  = document.getElementById('errGoogle');
+    const btn    = document.getElementById('googleSubmitBtn');
+    const email  = document.getElementById('googleEmail').value.trim();
+    const reason = document.getElementById('googleReason').value;
+    const note   = document.getElementById('googleNote').value.trim();
+
     errEl.textContent = '';
+    if (!email || !email.includes('@')) { errEl.textContent = 'Please enter a valid email address.'; return; }
+    if (!reason) { errEl.textContent = 'Please select a reason for deletion.'; return; }
+
     btn.disabled = true;
-    btn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/> Redirecting…';
+    btn.textContent = 'Submitting…';
     try {
-      const provider = new firebase.auth.GoogleAuthProvider();
-      await auth.signInWithRedirect(provider);
-      // page will redirect — execution stops here
+      const res = await fetch(API + '/api/auth/delete-account/google-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, reason, note }),
+      });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.message || 'Failed to submit. Please try again.'; return; }
+      // Show success screen
+      showStep('stepDone');
+      document.getElementById('doneMsg').textContent = 'Your deletion request has been submitted. We will process it within 48 hours.';
     } catch (err) {
-      errEl.textContent = err.message || 'Google sign-in failed. Please try again.';
+      errEl.textContent = 'Network error. Please try again.';
+    } finally {
       btn.disabled = false;
-      btn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/> Continue with Google';
+      btn.textContent = 'Submit Deletion Request';
     }
   }
-
-  // On page load — check if we're returning from a Google redirect
-  auth.getRedirectResult().then(async (result) => {
-    if (!result || !result.user) return;
-    const idToken = await result.user.getIdToken();
-    pendingToken = { type: 'google', token: idToken };
-    // If user was on Google tab, go straight to confirm
-    showStep('stepConfirm');
-    showConfirmStep();
-  }).catch((err) => {
-    if (err.code !== 'auth/no-auth-event') {
-      const errEl = document.getElementById('errGoogle');
-      if (errEl) errEl.textContent = err.message || 'Google sign-in failed.';
-    }
-  });
 
   // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
   function showConfirmStep() {

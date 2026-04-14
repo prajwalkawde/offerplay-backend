@@ -29,6 +29,12 @@ enum ContestStatus {
   CANCELLED
 }
 
+enum DeletionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PrizeType {
   COINS
   DIGITAL_GIFT
@@ -1231,4 +1237,18 @@ model DeviceFingerprint {
   trustScore  Int      @default(100)
 
   @@index([fingerprint])
+}
+
+model AccountDeletionRequest {
+  id         Int                   @id @default(autoincrement())
+  email      String
+  reason     String
+  note       String?
+  status     DeletionRequestStatus @default(PENDING)
+  reviewNote String?
+  createdAt  DateTime              @default(now())
+  reviewedAt DateTime?
+
+  @@index([status])
+  @@index([email])
 }

@@ -791,6 +791,28 @@ export async function confirmAccountDeletion(req: Request, res: Response): Promi
   }
 }
 
+// ─── Web delete account — Google users: submit deletion request ───────────────
+export async function submitGoogleDeletionRequest(req: Request, res: Response): Promise<void> {
+  const { email, reason, note } = req.body as { email?: string; reason?: string; note?: string };
+  if (!email || !email.includes('@')) {
+    error(res, 'Please enter a valid email address.', 400);
+    return;
+  }
+  if (!reason || reason.trim().length < 2) {
+    error(res, 'Please select a reason for deletion.', 400);
+    return;
+  }
+  try {
+    await prisma.accountDeletionRequest.create({
+      data: { email: email.trim().toLowerCase(), reason: reason.trim(), note: note?.trim() || null },
+    });
+    success(res, null, 'Deletion request submitted. We will process it within 48 hours.');
+  } catch (err) {
+    logger.error('submitGoogleDeletionRequest error', { err });
+    error(res, 'Failed to submit request. Please try again.', 500);
+  }
+}
+
 // ─── Dev-only login (generates real JWT for test phone) ──────────────────────
 export async function devLogin(req: Request, res: Response): Promise<void> {
   if (process.env.NODE_ENV === 'production') {

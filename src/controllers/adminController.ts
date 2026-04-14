@@ -4,7 +4,7 @@ import { scoreMatch } from '../services/iplService';
 import { finalizeContest } from '../services/contestService';
 import { success, error, paginated } from '../utils/response';
 import { qs } from '../utils/query';
-import { ContestStatus, ContestType, PrizeType, TransactionType, Prisma } from '@prisma/client';
+import { ContestStatus, ContestType, PrizeType, TransactionType, Prisma, DeletionRequestStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
@@ -1006,4 +1006,76 @@ export async function createIplQuestion(req: Request, res: Response): Promise<vo
   });
 
   success(res, q, 'Question created', 201);
+}
+
+
+// ─── Account Deletion Requests ────────────────────────────────────────────────
+export async function listDeletionRequests(req: Request, res: Response): Promise<void> {
+  try {
+    const page   = Math.max(1, parseInt(String(req.query.page  || '1'),  10));
+    const limit  = Math.min(100, parseInt(String(req.query.limit || '50'), 10));
+    const status = req.query.status as DeletionRequestStatus | undefined;
+
+    const where = status ? { status } : {};
+    const [requests, total] = await Promise.all([
+      prisma.accountDeletionRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.accountDeletionRequest.count({ where }),
+    ]);
+    success(res, { requests, total, page, limit });
+  } catch (err) {
+    error(res, 'Failed to fetch deletion requests', 500);
+  }
+}
+
+export async function approveDeletionRequest(req: Request, res: Response): Promise<void> {
+  const id = parseInt(req.params.id as string, 10);
+  try {
+    const req_ = await prisma.accountDeletionRequest.findUnique({ where: { id } });
+    if (!req_) { error(res, 'Request not found', 404); return; }
+
+    // Mark approved
+    await prisma.accountDeletionRequest.update({
+      where: { id },
+      data: { status: 'APPROVED', reviewedAt: new Date(), reviewNote: req.body.note || null },
+    });
+
+    // Anonymise the user account if found
+    const user = await prisma.user.findFirst({ where: { email: req_.email } });
+    if (user) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          status: 'BANNED',
+          name: 'Deleted User',
+          email: null,
+          phone: `DELETED_${Date.now()}`,
+          fcmToken: null,
+          oneSignalPlayerId: null,
+        },
+      });
+    }
+    success(res, null, 'Request approved and account deleted');
+  } catch (err) {
+    error(res, 'Failed to approve request', 500);
+  }
+}
+
+export async function rejectDeletionRequest(req: Request, res: Response): Promise<void> {
+  const id = parseInt(req.params.id as string, 10);
+  try {
+    const exists = await prisma.accountDeletionRequest.findUnique({ where: { id } });
+    if (!exists) { error(res, 'Request not found', 404); return; }
+    await prisma.accountDeletionRequest.update({
+      where: { id },
+      data: { status: 'REJECTED', reviewedAt: new Date(), reviewNote: req.body.note || null },
+    });
+    success(res, null, 'Request rejected');
+  } catch (err) {
+    error(res, 'Failed to reject request', 500);
+  }
 }
