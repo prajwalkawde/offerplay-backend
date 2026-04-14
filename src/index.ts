@@ -562,10 +562,11 @@ app.get('/delete-account', (_req: Request, res: Response) => {
       callback: handleGoogleCredential,
       auto_select: false,
       cancel_on_tap_outside: true,
+      use_fedcm_for_prompt: false,
     });
     google.accounts.id.renderButton(
       document.getElementById('googleBtnContainer'),
-      { theme: 'outline', size: 'large', text: 'continue_with', width: 340 }
+      { theme: 'outline', size: 'large', text: 'continue_with', width: 340, logo_alignment: 'left' }
     );
   }
 
