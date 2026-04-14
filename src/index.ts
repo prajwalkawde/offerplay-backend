@@ -590,8 +590,8 @@ app.get('/delete-account', (_req: Request, res: Response) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, reason, note }),
       });
-      let data: any = {};
-      try { data = await res.json(); } catch {}
+      let data = {};
+      try { data = await res.json(); } catch(e) {}
       if (!res.ok) { errEl.textContent = data.message || 'Failed to submit. Please try again.'; return; }
       // Show success step inside Google panel
       document.getElementById('googleFormStep').classList.remove('active');
