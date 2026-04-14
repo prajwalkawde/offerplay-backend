@@ -597,8 +597,8 @@ app.get('/delete-account', (_req: Request, res: Response) => {
       document.getElementById('googleFormStep').classList.remove('active');
       document.getElementById('googleSuccessStep').classList.add('active');
       return;
-    } catch (err: any) {
-      errEl.textContent = err?.message || 'Network error. Please try again.';
+    } catch (err) {
+      errEl.textContent = (err && err.message) ? err.message : 'Network error. Please try again.';
     } finally {
       btn.disabled = false;
       btn.textContent = 'Submit Deletion Request';
