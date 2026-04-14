@@ -334,9 +334,9 @@ app.get('/delete-account', (_req: Request, res: Response) => {
           <p>We'll send an OTP via Firebase to verify it's really you.</p>
           <label>Phone Number (with country code)</label>
           <input id="phoneInput" type="tel" placeholder="+91 9876543210" autocomplete="tel"/>
-          <div id="recaptcha-container"></div>
+          <div id="recaptcha-container" style="margin:14px 0"></div>
           <div class="err" id="errPhone1"></div>
-          <button class="btn btn-primary" id="sendOtpBtn" onclick="sendPhoneOtp()">Send OTP</button>
+          <button class="btn btn-primary" id="sendOtpBtn" onclick="sendPhoneOtp()" disabled>Send OTP</button>
         </div>
 
         <!-- Phone Step 2: Enter OTP -->
@@ -447,14 +447,22 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     }
   }
 
-  // ── reCAPTCHA setup ────────────────────────────────────────────────────────
-  function initRecaptcha() {
-    if (recaptchaVerifier) { try { recaptchaVerifier.clear(); } catch(_) {} }
+  // ── reCAPTCHA — render once on page load ──────────────────────────────────
+  let recaptchaWidgetId = null;
+  function setupRecaptcha() {
     recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
-      size: 'invisible',
-      callback: () => {},
+      size: 'normal',
+      callback: () => {
+        // reCAPTCHA solved — allow send
+        document.getElementById('sendOtpBtn').disabled = false;
+      },
+      'expired-callback': () => {
+        document.getElementById('sendOtpBtn').disabled = true;
+      },
     });
+    recaptchaVerifier.render().then(id => { recaptchaWidgetId = id; });
   }
+  setupRecaptcha();
 
   // ── PHONE FLOW ─────────────────────────────────────────────────────────────
   async function sendPhoneOtp() {
@@ -465,21 +473,21 @@ app.get('/delete-account', (_req: Request, res: Response) => {
       errEl.textContent = 'Please enter a valid phone number with country code (e.g. +91 9876543210)';
       return;
     }
-    // Ensure starts with +
     const phone = raw.startsWith('+') ? raw : '+' + raw.replace(/\\D/g,'');
     setLoading('sendOtpBtn', true, 'Send OTP');
     try {
-      initRecaptcha();
       confirmResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
       document.getElementById('otpSentTo').textContent = 'Enter the 6-digit OTP sent to ' + phone;
-      // Switch to OTP step
       document.querySelectorAll('#panelPhone .step').forEach(s => s.classList.remove('active'));
       document.getElementById('phoneStep2').classList.add('active');
       startResendTimer();
       document.querySelectorAll('.otp-box')[0].focus();
     } catch(e) {
       errEl.textContent = friendlyFirebaseError(e);
-      try { recaptchaVerifier.clear(); recaptchaVerifier = null; } catch(_) {}
+      // Reset reCAPTCHA so user can try again
+      if (window.grecaptcha && recaptchaWidgetId !== null) {
+        window.grecaptcha.reset(recaptchaWidgetId);
+      }
     } finally {
       setLoading('sendOtpBtn', false, 'Send OTP');
     }
@@ -515,12 +523,12 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     btn.disabled = true;
     document.getElementById('errPhone2').textContent = '';
     try {
-      initRecaptcha();
       confirmResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
       startResendTimer();
     } catch(e) {
       document.getElementById('errPhone2').textContent = friendlyFirebaseError(e);
       btn.disabled = false;
+      if (window.grecaptcha && recaptchaWidgetId !== null) window.grecaptcha.reset(recaptchaWidgetId);
     }
   }
 
