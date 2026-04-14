@@ -250,6 +250,9 @@ app.get('/delete-account', (_req: Request, res: Response) => {
     label{color:#ffffff80;font-size:13px;display:block;margin-bottom:6px}
     input[type=tel]{width:100%;background:#0d0818;border:1px solid #ffffff15;border-radius:12px;padding:14px 16px;color:white;font-size:15px;outline:none;transition:border .2s}
     input[type=tel]:focus{border-color:#7B2FBE50}
+    .inp{display:block;width:100%;box-sizing:border-box;background:#0d0818;border:1px solid #ffffff15;border-radius:12px;padding:14px 16px;color:white;font-size:15px;outline:none;transition:border .2s;margin-bottom:12px}
+    .inp:focus{border-color:#7B2FBE80}
+    .inp option{background:#1a0a2e;color:white}
     .otp-row{display:flex;gap:8px;justify-content:center;margin:16px 0}
     .otp-box{width:44px;height:52px;background:#0d0818;border:1px solid #ffffff15;border-radius:10px;color:white;font-size:20px;font-weight:bold;text-align:center;outline:none;transition:border .2s}
     .otp-box:focus{border-color:#7B2FBE}
@@ -361,21 +364,28 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 
       <!-- ── GOOGLE PANEL ── -->
       <div class="panel" id="panelGoogle">
-        <div class="icon">📧</div>
-        <h2>Request Account Deletion</h2>
-        <p>Enter your Google account email and a reason. We'll review and delete your account within 48 hours.</p>
-        <div class="err" id="errGoogle"></div>
-        <input class="inp" id="googleEmail" type="email" placeholder="Your Google email address" autocomplete="email"/>
-        <select class="inp" id="googleReason" style="background:#1a1a2e;color:#fff;cursor:pointer;">
-          <option value="">— Select a reason —</option>
-          <option value="Not using the app anymore">Not using the app anymore</option>
-          <option value="Privacy concerns">Privacy concerns</option>
-          <option value="Switching to another account">Switching to another account</option>
-          <option value="Too many notifications">Too many notifications</option>
-          <option value="Other">Other</option>
-        </select>
-        <textarea class="inp" id="googleNote" placeholder="Additional details (optional)" rows="3" style="resize:vertical;font-family:inherit;"></textarea>
-        <button class="btn btn-primary" id="googleSubmitBtn" onclick="submitGoogleDeletionRequest()">Submit Deletion Request</button>
+        <div class="step active" id="googleFormStep">
+          <div class="icon">🗑️</div>
+          <h2>Request Account Deletion</h2>
+          <p>Enter your Google account email and a reason. We'll review and delete your account within 48 hours.</p>
+          <div class="err" id="errGoogle"></div>
+          <input class="inp" id="googleEmail" type="email" placeholder="Your Google email address" autocomplete="email"/>
+          <select class="inp" id="googleReason">
+            <option value="">— Select a reason —</option>
+            <option value="Not using the app anymore">Not using the app anymore</option>
+            <option value="Privacy concerns">Privacy concerns</option>
+            <option value="Switching to another account">Switching to another account</option>
+            <option value="Too many notifications">Too many notifications</option>
+            <option value="Other">Other</option>
+          </select>
+          <textarea class="inp" id="googleNote" placeholder="Additional details (optional)" rows="3" style="resize:vertical;font-family:inherit;min-height:80px;"></textarea>
+          <button class="btn btn-primary" id="googleSubmitBtn" onclick="submitGoogleDeletionRequest()">Submit Deletion Request</button>
+        </div>
+        <div class="step" id="googleSuccessStep">
+          <div class="icon">✅</div>
+          <h2>Request Submitted</h2>
+          <p>We've received your deletion request and will process it within 48 hours. You'll be notified via email.</p>
+        </div>
       </div><!-- /panelGoogle -->
 
     </div><!-- /mainFlow -->
@@ -580,13 +590,15 @@ app.get('/delete-account', (_req: Request, res: Response) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, reason, note }),
       });
-      const data = await res.json();
+      let data: any = {};
+      try { data = await res.json(); } catch {}
       if (!res.ok) { errEl.textContent = data.message || 'Failed to submit. Please try again.'; return; }
-      // Show success screen
-      showStep('stepDone');
-      document.getElementById('doneMsg').textContent = 'Your deletion request has been submitted. We will process it within 48 hours.';
-    } catch (err) {
-      errEl.textContent = 'Network error. Please try again.';
+      // Show success step inside Google panel
+      document.getElementById('googleFormStep').classList.remove('active');
+      document.getElementById('googleSuccessStep').classList.add('active');
+      return;
+    } catch (err: any) {
+      errEl.textContent = err?.message || 'Network error. Please try again.';
     } finally {
       btn.disabled = false;
       btn.textContent = 'Submit Deletion Request';
