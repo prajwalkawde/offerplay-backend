@@ -365,7 +365,10 @@ app.get('/delete-account', (_req: Request, res: Response) => {
         <h2>Sign in with Google</h2>
         <p>Sign in with the Google account linked to your OfferPlay profile to verify your identity.</p>
         <div class="err" id="errGoogle"></div>
-        <div id="googleBtnContainer" style="display:flex;justify-content:center;margin-top:8px;min-height:44px"></div>
+        <button class="btn btn-primary" id="googleSignInBtn" onclick="signInWithGoogle()" style="display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#333;border:1px solid #ddd;font-weight:600;">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/>
+          Continue with Google
+        </button>
         <p style="color:#ffffff40;font-size:12px;text-align:center;margin-top:10px">A Google sign-in window will open to verify your account.</p>
       </div><!-- /panelGoogle -->
 
@@ -379,8 +382,7 @@ app.get('/delete-account', (_req: Request, res: Response) => {
 <!-- Firebase JS SDK (phone auth only) -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
-<!-- Google Identity Services (Google sign-in — bypasses Firebase OAuth) -->
-<script src="https://accounts.google.com/gsi/client" async onload="initGIS()"></script>
+<!-- No GIS script needed — using Firebase signInWithPopup -->
 <script>
   // ── Firebase init ──────────────────────────────────────────────────────────
   firebase.initializeApp({
@@ -555,30 +557,24 @@ app.get('/delete-account', (_req: Request, res: Response) => {
   // pendingToken holds { type, token } for whichever auth method was used
   let pendingToken = null;
 
-  function initGIS() {
-    if (typeof google === 'undefined') return;
-    google.accounts.id.initialize({
-      client_id: '449341693766-r6krhctj4lvoq6u8984on0d5l724acme.apps.googleusercontent.com',
-      callback: handleGoogleCredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-      use_fedcm_for_prompt: false,
-    });
-    google.accounts.id.renderButton(
-      document.getElementById('googleBtnContainer'),
-      { theme: 'outline', size: 'large', text: 'continue_with', width: 340, logo_alignment: 'left' }
-    );
-  }
-
-  async function handleGoogleCredential(response) {
+  async function signInWithGoogle() {
     const errEl = document.getElementById('errGoogle');
+    const btn = document.getElementById('googleSignInBtn');
     errEl.textContent = '';
-    if (!response || !response.credential) {
-      errEl.textContent = 'Google sign-in failed. Please try again.';
-      return;
+    btn.disabled = true;
+    btn.textContent = 'Opening Google…';
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      const result = await auth.signInWithPopup(provider);
+      const idToken = await result.user.getIdToken();
+      pendingToken = { type: 'google', token: idToken };
+      showConfirmStep();
+    } catch (err) {
+      errEl.textContent = err.message || 'Google sign-in failed. Please try again.';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" height="20" alt="Google"/> Continue with Google';
     }
-    pendingToken = { type: 'google', token: response.credential };
-    showConfirmStep();
   }
 
   // ── CONFIRM + DELETE ───────────────────────────────────────────────────────
