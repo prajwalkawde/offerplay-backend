@@ -71,22 +71,22 @@ router.get('/settings/age-verification', async (_req, res) => {
     const setting = await prisma.appSettings.findUnique({ where: { key: 'AGE_VERIFY_CONFIG' } });
     const defaults = {
       headline: 'Before you start',
-      subline: 'OfferPlay involves real money withdrawals. Please confirm you meet our requirements.',
+      subline: 'OfferPlay is a quiz & knowledge rewards platform. Please confirm you meet our requirements.',
       features: [
-        'Earn real money by completing tasks & offers',
-        'Predict IPL matches and win free prizes',
-        'Skill-based contests — no deposits ever',
-        'Secure UPI/bank withdrawals',
+        'Earn rewards by completing tasks & offers',
+        'Compete in IPL & sports quiz contests to win coins',
+        'Daily trivia, general knowledge & cricket quizzes',
+        'Redeem rewards for gift cards & prizes',
       ],
       terms: [
-        'Coins earned are virtual rewards redeemable for real money',
+        'Coins earned are virtual rewards redeemable for gift cards & prizes',
         'One account per user — fraud leads to permanent ban',
         'Redemptions processed within 24–48 hours',
         'We never sell your personal data to third parties',
-        'Must be 18+ to withdraw earnings or join contests',
+        'Must be 18+ to redeem rewards or join contests',
       ],
-      checkboxLabel: 'I confirm I am 18 years or older and agree to the Terms of Service & Privacy Policy',
-      disclaimer: 'By tapping "I Agree" you confirm you are 18+ and accept our Terms of Service and Privacy Policy. Misrepresentation of age is prohibited.',
+      checkboxLabel: 'I confirm I am 18 years or older and agree to the Terms & Conditions and Privacy Policy',
+      disclaimer: 'By tapping "I Agree" you confirm you are 18+ and accept our Terms & Conditions and Privacy Policy. Misrepresentation of age is prohibited.',
     };
     if (setting?.value) {
       try {

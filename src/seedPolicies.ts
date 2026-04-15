@@ -152,6 +152,26 @@ Users are responsible for any applicable taxes on rewards received. OfferPlay do
 For any reward or payout queries:
 support@offerplay.in`;
 
+const AGE_VERIFY_CONFIG = {
+  headline: 'Before you start',
+  subline: 'OfferPlay is a quiz & knowledge rewards platform. Please confirm you meet our requirements.',
+  features: [
+    'Earn rewards by completing tasks & offers',
+    'Compete in IPL & sports quiz contests to win coins',
+    'Daily trivia, general knowledge & cricket quizzes',
+    'Redeem rewards for gift cards & prizes',
+  ],
+  terms: [
+    'Coins earned are virtual rewards redeemable for gift cards & prizes',
+    'One account per user — fraud leads to permanent ban',
+    'Redemptions processed within 24–48 hours',
+    'We never sell your personal data to third parties',
+    'Must be 18+ to redeem rewards or join contests',
+  ],
+  checkboxLabel: 'I confirm I am 18 years or older and agree to the Terms & Conditions and Privacy Policy',
+  disclaimer: 'By tapping "I Agree" you confirm you are 18+ and accept our Terms & Conditions and Privacy Policy. Misrepresentation of age is prohibited.',
+};
+
 async function seedPolicies() {
   console.log('Seeding policy content...');
 
@@ -176,6 +196,13 @@ async function seedPolicies() {
       value: PAYMENT_CONTENT,
       category: 'LEGAL',
       description: 'Rewards & Payout Policy shown in the app and at offerplay.in/payment-policy',
+    },
+    {
+      key: 'AGE_VERIFY_CONFIG',
+      label: 'Age Verification Screen Config',
+      value: JSON.stringify(AGE_VERIFY_CONFIG),
+      category: 'APP_CONFIG',
+      description: 'Content shown on the age verification screen (features, terms summary, disclaimer)',
     },
   ];
 
