@@ -310,9 +310,12 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
     }
 
     // Block joining after registration deadline (all times compared in UTC)
-    // Fall back to match start time if no explicit regCloseTime is set
+    // questionsLockAt is used as the effective registration deadline when no
+    // explicit regCloseTime is set — admins set "predictions close at 10 PM"
+    // meaning users can join right up until that time.
     const deadline =
       contest.regCloseTime ||
+      contest.questionsLockAt ||
       contest.match.regCloseTime ||
       contest.match.registrationCloseTime ||
       contest.match.matchDate;
