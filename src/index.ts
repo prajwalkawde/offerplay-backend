@@ -190,7 +190,7 @@ function renderPolicyHtml(type: string, title: string, icon: string, content: st
     &copy; ${new Date().getFullYear()} OfferPlay &nbsp;·&nbsp;
     <a href="/privacy">Privacy Policy</a> &nbsp;·&nbsp;
     <a href="/terms">Terms &amp; Conditions</a> &nbsp;·&nbsp;
-    <a href="/payment-policy">Payment Policy</a>
+    <a href="/payment-policy">Rewards &amp; Payout Policy</a>
   </footer>
 </body>
 </html>`;
