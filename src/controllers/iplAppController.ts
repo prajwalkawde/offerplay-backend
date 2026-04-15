@@ -331,6 +331,53 @@ export async function joinContest(req: Request, res: Response): Promise<void> {
       error(res, 'Contest is full!', 400); return;
     }
 
+    // ── Contest unlock gate (daily per-match, resets at IST midnight) ──────────
+    // Contest 1 for a match = free entry, no check needed.
+    // Contest 2 = must have completed ≥1 Super Offer today.
+    // Contest 3+ = must have completed ≥1 API offer (offerwall) today.
+    // "Today" is measured in IST. Offer completions are global (not per-match).
+    {
+      const istOffsetMs = 5.5 * 60 * 60 * 1000;
+      const nowIst = new Date(Date.now() + istOffsetMs);
+      nowIst.setHours(0, 0, 0, 0);
+      const todayUtc = new Date(nowIst.getTime() - istOffsetMs);
+
+      // How many contests has this user already joined for THIS match today?
+      const contestsJoinedTodayForMatch = await prisma.iplContestEntry.count({
+        where: { userId, matchId: contest.matchId, joinedAt: { gte: todayUtc } },
+      });
+
+      if (contestsJoinedTodayForMatch === 1) {
+        // Attempting to join Contest 2 — requires ≥1 Super Offer completed today
+        const superOfferToday = await prisma.superOfferAttempt.count({
+          where: { uid: userId, status: 'completed', completedAt: { gte: todayUtc } },
+        });
+        if (superOfferToday === 0) {
+          // Include default tier coin reward so the app can show it in the bottom sheet
+          const settings = await prisma.superOfferSettings.findFirst({
+            include: { tiers: { where: { isDefault: true } } },
+          });
+          const coinReward = settings?.tiers[0]?.coinReward ?? 200;
+          error(res, 'Complete 1 Super Offer to unlock Contest 2', 403, {
+            lockType: 'SUPER_OFFER',
+            coinReward,
+          }); return;
+        }
+      } else if (contestsJoinedTodayForMatch >= 2) {
+        // Attempting to join Contest 3+ — requires ≥1 API offer completed today
+        const apiOfferToday = await prisma.transaction.count({
+          where: { userId, type: 'EARN_OFFERWALL', createdAt: { gte: todayUtc } },
+        });
+        if (apiOfferToday === 0) {
+          error(res, 'Complete 1 Offer to unlock Contest 3', 403, {
+            lockType: 'API_OFFER',
+          }); return;
+        }
+      }
+      // contestsJoinedTodayForMatch === 0 → Contest 1, always free
+    }
+    // ── End unlock gate ────────────────────────────────────────────────────────
+
     // Max entries per user per match + battle-type
     const userMatchEntries = await prisma.iplContestEntry.count({
       where: { userId, contest: { matchId: contest.matchId, battleType: contest.battleType } },
