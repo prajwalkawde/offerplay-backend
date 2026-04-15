@@ -85,12 +85,30 @@ export async function joinIPLContest(req: Request, res: Response): Promise<void>
 
 export async function getMatchContestsForUser(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
+  const userId = (req as any).userId as string | undefined;
 
   const contests = await prisma.iplContest.findMany({
     where: { matchId: id, status: { in: ['published', 'live'] } },
     include: { _count: { select: { entries: true } } },
     orderBy: { createdAt: 'asc' },
   });
+
+  const contestIds = contests.map(c => c.id);
+
+  const [userEntries, userPredictionCount] = await Promise.all([
+    userId && contestIds.length > 0
+      ? prisma.iplContestEntry.findMany({
+          where: { userId, contestId: { in: contestIds } },
+          select: { contestId: true },
+        })
+      : Promise.resolve([] as { contestId: string }[]),
+    userId
+      ? prisma.iplPrediction.count({ where: { userId, matchId: id } })
+      : Promise.resolve(0),
+  ]);
+
+  const joinedContestIds = new Set(userEntries.map(e => e.contestId));
+  const hasSubmitted = userPredictionCount > 0;
 
   const result = contests.map(c => {
     const parsedTiers = typeof c.prizeTiersConfig === 'string'
@@ -131,6 +149,8 @@ export async function getMatchContestsForUser(req: Request, res: Response): Prom
       botCount: c.botCount,
       questionCount: c.questionCount,
       status: c.status,
+      hasJoined: joinedContestIds.has(c.id),
+      hasSubmitted: joinedContestIds.has(c.id) && hasSubmitted,
     };
   });
 

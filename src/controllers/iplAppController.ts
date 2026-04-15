@@ -145,6 +145,18 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
       orderBy: { matchDate: 'asc' },
     });
 
+    // Fetch prediction counts per match for the logged-in user
+    const matchIds = matches.map(m => m.id);
+    const submittedMatchIds = new Set<string>();
+    if (userId && matchIds.length > 0) {
+      const predCounts = await prisma.iplPrediction.groupBy({
+        by: ['matchId'],
+        where: { userId, matchId: { in: matchIds } },
+        _count: { id: true },
+      });
+      predCounts.forEach(p => { if (p._count.id > 0) submittedMatchIds.add(p.matchId); });
+    }
+
     const result = matches.map(match => ({
       ...enrichMatch(match, logoUrls),
       isToday: Math.floor((match.matchDate.getTime() + istOffsetMs) / 86400000) === Math.floor((Date.now() + istOffsetMs) / 86400000),
@@ -168,6 +180,7 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
             rankFrom: w.rankFrom, rankTo: w.rankTo, rank: w.rankFrom,
             type: 'COINS', coins: w.coins, label: w.label,
           }));
+          const hasJoined = c.entries.length > 0;
           return {
             id: c.id,
             name: c.name,
@@ -196,7 +209,8 @@ export async function getMatchesForApp(req: Request, res: Response): Promise<voi
             sponsorName: c.sponsorName,
             sponsorLogo: c.sponsorLogo,
             maxEntriesPerUser: c.maxEntriesPerUser,
-            hasJoined: c.entries.length > 0,
+            hasJoined,
+            hasSubmitted: hasJoined && submittedMatchIds.has(match.id),
             displayStatus: getContestDisplayStatus(c.status, c.regCloseTime, match.status),
           };
         })
