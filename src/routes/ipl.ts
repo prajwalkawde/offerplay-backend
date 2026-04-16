@@ -55,14 +55,20 @@ router.get('/global-leaderboard', optionalAuthMiddleware, getGlobalLeaderboard);
 router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res) => {
   const { matchId } = req.params as { matchId: string };
   const userId = (req as any).userId as string | undefined;
-  const contests = await prisma.iplContest.findMany({
-    where: { matchId, status: 'published' },
-    include: {
-      _count: { select: { entries: true } },
-      entries: userId ? { where: { userId }, take: 1 } : { take: 0 },
-    },
-    orderBy: [{ battleType: 'asc' }],
-  });
+  const [contests, predCount] = await Promise.all([
+    prisma.iplContest.findMany({
+      where: { matchId, status: 'published' },
+      include: {
+        _count: { select: { entries: true } },
+        entries: userId ? { where: { userId }, take: 1 } : { take: 0 },
+      },
+      orderBy: [{ battleType: 'asc' }],
+    }),
+    userId
+      ? prisma.iplPrediction.count({ where: { userId, matchId } })
+      : Promise.resolve(0),
+  ]);
+  const userHasSubmitted = predCount > 0;
 
   const result = contests
     .map(c => {
@@ -105,6 +111,7 @@ router.get('/matches/:matchId/contests', optionalAuthMiddleware, async (req, res
         sponsorName: c.sponsorName,
         sponsorLogo: c.sponsorLogo,
         hasJoined: userId ? c.entries.length > 0 : false,
+        hasSubmitted: userId ? c.entries.length > 0 && userHasSubmitted : false,
         displayStatus: (() => {
           const rc = (c as any).regCloseTime as Date | null;
           if (c.status === 'completed') return 'COMPLETED';
