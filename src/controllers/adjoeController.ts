@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { createHash } from 'crypto';
+import { TransactionType } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
-import { creditTickets } from '../services/ticketService';
+import { creditCoins } from '../services/coinService';
 import { updateQuestProgress } from './questController';
 
 const S2S_TOKEN = 'unucagmxxbpiwtwifyjhvwzudmqxcwkz';
@@ -81,36 +82,37 @@ export const handleAdjoePostback = async (req: Request, res: Response) => {
       return res.status(404).send('User not found');
     }
 
-    const ticketsToCredit = parseInt(coin_amount, 10);
-    if (isNaN(ticketsToCredit) || ticketsToCredit <= 0) {
+    const coinsToCredit = parseInt(coin_amount, 10);
+    if (isNaN(coinsToCredit) || coinsToCredit <= 0) {
       return res.status(400).send('Invalid coin_amount');
     }
 
-    // ── Credit tickets ────────────────────────────────────────────────────────
-    await creditTickets(
+    // ── Credit coins ──────────────────────────────────────────────────────────
+    await creditCoins(
       user_uuid,
-      ticketsToCredit,
-      `Adjoe reward: ${app_name || reward_type || 'game'} (${currency})`,
+      coinsToCredit,
+      TransactionType.ADJOE_BONUS,
       `adjoe_${trans_uuid}`,
+      `Adjoe reward: ${app_name || reward_type || 'game'} (${currency})`,
     );
 
     // ── Record session ────────────────────────────────────────────────────────
     await prisma.adjoeSession.upsert({
       where:  { sessionId: trans_uuid },
-      update: { ticketsEarned: ticketsToCredit, status: 'credited', endedAt: new Date() },
+      update: { coinsEarned: coinsToCredit, status: 'credited', endedAt: new Date() },
       create: {
         userId:        user_uuid,
         sessionId:     trans_uuid,
         gameId:        resolvedAppId || '',
         gameName:      app_name      || reward_type || '',
         minutesPlayed: 0,
-        ticketsEarned: ticketsToCredit,
-        coinsEarned:   0,
+        ticketsEarned: 0,
+        coinsEarned:   coinsToCredit,
         status:        'credited',
       },
     });
 
-    logger.info(`[Adjoe] credited ${ticketsToCredit} tickets → user ${user_uuid} (trans: ${trans_uuid})`);
+    logger.info(`[Adjoe] credited ${coinsToCredit} coins → user ${user_uuid} (trans: ${trans_uuid})`);
     updateQuestProgress(user_uuid, 'PLAY_GAMES', 1).catch(() => {});
     return res.status(200).send('OK');
 

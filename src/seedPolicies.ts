@@ -56,55 +56,120 @@ support@offerplay.in`;
 
 const PRIVACY_CONTENT = `# Privacy Policy
 
-OfferPlay is committed to protecting your privacy. This policy explains what data we collect, how we use it, and your rights.
+Last updated: June 2025
+
+OfferPlay is committed to protecting your privacy. This policy explains what data we collect, how we use it, your rights, and the third-party SDKs and services integrated into our app.
 
 ## 1. Information We Collect
 - **Account data:** Phone number, email address, and name provided during registration.
-- **Device data:** Device model, OS version, unique device identifiers, and IP address.
-- **Usage data:** Tasks completed, surveys taken, contests joined, coins earned and redeemed.
+- **Device data:** Device model, OS version, unique device identifiers (Android Advertising ID, device fingerprint), and IP address.
+- **Usage data:** Tasks completed, surveys taken, offers clicked, games played, contests joined, coins earned and redeemed.
 - **Referral data:** Referral codes used and friends invited.
+- **App usage data:** Time spent in-app, features used, and session information for fraud prevention.
 
 ## 2. How We Use Your Information
 - To create and manage your OfferPlay account.
 - To credit and process coin rewards accurately.
 - To process gift card and voucher redemptions.
 - To detect and prevent fraud, abuse, and cheating.
-- To send important account notifications and updates.
+- To send important account notifications and promotional updates.
+- To serve relevant advertisements through our ad partners.
 - To improve app features and user experience.
 
 ## 3. What We Do NOT Do
 - We never sell your personal data to third parties.
-- We never share your data with advertisers without your consent.
 - We never store payment card details — redemptions are handled by verified third-party processors.
+- We do not collect data from users under 18 years of age.
 
-## 4. Third-Party Services
-We work with trusted partners to deliver our services:
-- **PubScale & CPX Research** — for surveys and offer walls.
-- **Xoxoday** — for gift card fulfilment and rewards processing.
-- **Firebase / Google Analytics** — for app analytics and crash reporting.
+## 4. Third-Party SDKs & Services
 
-These services operate under their own privacy policies.
+Our app integrates the following third-party SDKs and services, each of which may collect data independently under their own privacy policies:
 
-## 5. Data Security
-We implement industry-standard security measures including encrypted data transmission (HTTPS), secure cloud servers, and access controls to protect your information.
+### Advertising
 
-## 6. Data Retention
-We retain your account data for as long as your account is active. You may request deletion of your data at any time by contacting us.
+**Google AdMob** (Google LLC)
+We use Google AdMob to display ads within the app. AdMob may collect your Advertising ID, device identifiers, IP address, and usage data to serve personalised ads.
+Privacy Policy: https://policies.google.com/privacy
 
-## 7. Children's Privacy
-OfferPlay is strictly for users aged 18 and above. We do not knowingly collect data from anyone under 18.
+### Offer Walls & Surveys
 
-## 8. Your Rights
-- Request access to the data we hold about you.
+**PubScale**
+We use PubScale to show third-party offers and tasks. PubScale may collect your user ID, device information, and task completion data to credit rewards.
+Privacy Policy: https://pubscale.com/privacy-policy
+
+**AyeT Studios**
+We use AyeT Studios to provide survey and offer wall experiences. AyeT Studios may collect your device identifiers, IP address, and survey response data.
+Privacy Policy: https://www.ayetstudios.com/privacy_policy
+
+**Torox**
+We use Torox to provide additional offer wall content. Torox may collect your user ID, device data, and offer completion data.
+Privacy Policy: https://torox.io/privacy-policy
+
+**CPX Research**
+We use CPX Research to provide survey opportunities. CPX Research may collect demographic data, survey responses, and device information.
+Privacy Policy: https://cpx-research.com/privacy
+
+### Gaming & Playtime
+
+**Adjoe (Playtime SDK)**
+We use the Adjoe Playtime SDK to reward you for playing games. Adjoe may collect your device identifiers (Android Advertising ID, Android ID), installed app data, app usage statistics, and IP address to calculate playtime rewards.
+Privacy Policy: https://adjoe.io/privacy-policy
+
+### Authentication & Analytics
+
+**Firebase (Google LLC)**
+We use Firebase for user authentication (phone/OTP login), push notifications (FCM), and crash reporting. Firebase may collect device identifiers, IP address, and app usage data.
+Privacy Policy: https://firebase.google.com/support/privacy
+
+**Google Sign-In (Google LLC)**
+We offer Google Sign-In as an authentication option. If used, Google may collect your name, email address, and profile picture.
+Privacy Policy: https://policies.google.com/privacy
+
+### Push Notifications
+
+**OneSignal**
+We use OneSignal to send push notifications about rewards, contests, and app updates. OneSignal may collect your device token, device identifiers, and notification engagement data.
+Privacy Policy: https://onesignal.com/privacy_policy
+
+### Rewards Fulfilment
+
+**Xoxoday**
+We use Xoxoday to process and fulfil gift card and voucher redemptions. Xoxoday may collect your name, email address, and redemption details to deliver rewards.
+Privacy Policy: https://www.xoxoday.com/privacy-policy
+
+**Cashfree Payments**
+We use Cashfree for payment processing related to reward fulfilment. Cashfree may collect your name, bank/UPI details, and transaction information.
+Privacy Policy: https://www.cashfree.com/privacy-policy
+
+### App Tracking Transparency (iOS)
+On iOS devices, we request permission via Apple's App Tracking Transparency framework before accessing your device's Advertising Identifier (IDFA) for personalised ad serving.
+
+## 5. Advertising ID & Tracking
+We and our advertising partners (including Google AdMob and Adjoe) may use your Android Advertising ID (GAID) or Apple IDFA to deliver personalised ads and measure ad performance. You can reset or opt out of personalised ads at any time in your device settings:
+- **Android:** Settings → Google → Ads → Reset Advertising ID / Opt out of Ads Personalisation
+- **iOS:** Settings → Privacy → Tracking → disable Allow Apps to Request to Track
+
+## 6. Data Security
+We implement industry-standard security measures including encrypted data transmission (HTTPS/TLS), secure cloud servers on Cloudways, and access controls to protect your information.
+
+## 7. Data Retention
+We retain your account data for as long as your account is active. You may request deletion of your data at any time by contacting us. Anonymised and aggregated analytics data may be retained for longer periods.
+
+## 8. Children's Privacy
+OfferPlay is strictly for users aged 18 and above. We do not knowingly collect data from anyone under 18. If we become aware that a user is under 18, their account will be terminated immediately.
+
+## 9. Your Rights
+- Request access to the personal data we hold about you.
 - Request correction of inaccurate data.
-- Request deletion of your account and associated data.
-- Opt out of non-essential communications.
+- Request deletion of your account and associated personal data.
+- Opt out of personalised advertising via device settings.
+- Withdraw consent for non-essential communications at any time.
 
-## 9. Changes to This Policy
-We may update this Privacy Policy periodically. We will notify you of significant changes via the app.
+## 10. Changes to This Policy
+We may update this Privacy Policy periodically. We will notify you of significant changes via in-app notification. Continued use of the app after changes constitutes acceptance of the updated policy.
 
-## 10. Contact Us
-For privacy concerns or data requests:
+## 11. Contact Us
+For privacy concerns, data access requests, or deletion requests:
 support@offerplay.in`;
 
 const PAYMENT_CONTENT = `# Rewards & Payout Policy
