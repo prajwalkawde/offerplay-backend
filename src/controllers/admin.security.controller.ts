@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import { getRedisClient, rk } from '../config/redis';
 import { success, error, paginated } from '../utils/response';
@@ -40,6 +41,146 @@ export async function updateSecuritySettings(req: Request, res: Response): Promi
   } catch (err) {
     logger.error('[AdminSecurity] updateSecuritySettings error:', err);
     error(res, 'Failed to update security settings');
+  }
+}
+
+// ─── Flagged Users ────────────────────────────────────────────────────────────
+
+// Returns users who would have been auto-banned if autoBanEnabled were on, OR
+// users who have triggered fraud signals recently. Lets admin review and act
+// manually rather than the system auto-banning.
+export async function getFlaggedUsers(req: Request, res: Response): Promise<void> {
+  try {
+    const {
+      severity,        // 'critical' (trust<=20) | 'high' (trust<=50) | 'all' (any flag)
+      onlyActive,      // 'true' to exclude already-banned
+      sortBy,          // 'trust' | 'events' | 'recent'
+      search,          // user name/phone/email
+      page = '1',
+      limit = '25',
+    } = req.query as Record<string, string>;
+
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const settings = await prisma.securitySettings.findUnique({ where: { id: 1 } });
+    const autobanThreshold = settings?.autobanTrustScore ?? 20;
+    const restrictThreshold = settings?.autoRestrictTrustScore ?? 50;
+
+    const where: Prisma.UserTrustScoreWhereInput = {};
+    if (severity === 'critical') where.trustScore = { lte: autobanThreshold };
+    else if (severity === 'high') where.trustScore = { lte: restrictThreshold };
+    else where.OR = [
+      { trustScore: { lte: restrictThreshold } },
+      { totalFraudEvents: { gt: 0 } },
+    ];
+    if (onlyActive === 'true') {
+      where.isBanned = false;
+    }
+
+    let orderBy: Prisma.UserTrustScoreOrderByWithRelationInput = { trustScore: 'asc' };
+    if (sortBy === 'events') orderBy = { totalFraudEvents: 'desc' };
+    else if (sortBy === 'recent') orderBy = { lastFraudEventAt: 'desc' };
+
+    const [trustRecords, total] = await Promise.all([
+      prisma.userTrustScore.findMany({ where, orderBy, skip, take: limitNum }),
+      prisma.userTrustScore.count({ where }),
+    ]);
+
+    // Hydrate user info — search across the hydrated set if requested
+    const uids = trustRecords.map(r => r.uid);
+    let users = await prisma.user.findMany({
+      where: { id: { in: uids } },
+      select: {
+        id: true, name: true, phone: true, email: true, status: true,
+        coinBalance: true, ticketBalance: true, createdAt: true, lastLoginAt: true,
+      },
+    });
+    if (search) {
+      const s = search.toLowerCase();
+      users = users.filter(u =>
+        u.name?.toLowerCase().includes(s) ||
+        u.phone?.includes(search) ||
+        u.email?.toLowerCase().includes(s),
+      );
+    }
+    const usersById = new Map(users.map(u => [u.id, u]));
+
+    // Recent fraud-event counts per user (last 7 days) for severity context
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentEvents = await prisma.fraudLog.groupBy({
+      by: ['uid'],
+      where: { uid: { in: uids }, createdAt: { gte: sevenDaysAgo } },
+      _count: true,
+    });
+    const recentByUid = new Map(recentEvents.map(e => [e.uid, e._count]));
+
+    const data = trustRecords
+      .map(t => {
+        const user = usersById.get(t.uid);
+        if (!user && search) return null; // filtered out by search
+        return {
+          uid: t.uid,
+          user: user ?? null,
+          trustScore: t.trustScore,
+          isBanned: t.isBanned,
+          isRestricted: t.isRestricted,
+          banReason: t.banReason,
+          totalFraudEvents: t.totalFraudEvents,
+          recentFraudEvents7d: recentByUid.get(t.uid) ?? 0,
+          lastFraudEventAt: t.lastFraudEventAt,
+          updatedAt: t.updatedAt,
+          // Severity tier for UI badge
+          severity:
+            t.trustScore <= autobanThreshold ? 'critical' :
+            t.trustScore <= restrictThreshold ? 'high' :
+            t.totalFraudEvents > 0 ? 'medium' : 'low',
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    paginated(res, data, total, pageNum, limitNum);
+  } catch (err) {
+    logger.error('[AdminSecurity] getFlaggedUsers error:', err);
+    error(res, 'Failed to fetch flagged users');
+  }
+}
+
+// Drill-in for one user: trust record + recent fraud events + IP/device shared accounts
+export async function getFlaggedUserDetail(req: Request, res: Response): Promise<void> {
+  try {
+    const uid = req.params.uid as string;
+
+    const [user, trust, events] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: uid },
+        select: {
+          id: true, name: true, phone: true, email: true, status: true,
+          coinBalance: true, ticketBalance: true, createdAt: true, lastLoginAt: true,
+        },
+      }),
+      prisma.userTrustScore.findUnique({ where: { uid } }),
+      prisma.fraudLog.findMany({
+        where: { uid },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    if (!user) { error(res, 'User not found', 404); return; }
+
+    // Find sibling accounts on shared IPs / devices (top 5 each)
+    const siblingIps = await prisma.ipRecord.findMany({
+      where: { uids: { has: uid } },
+      select: { ipAddress: true, uids: true, isVpn: true, isFlagged: true },
+      take: 5,
+    });
+
+    return success(res, { user, trust, events, siblingIps }) as unknown as void;
+  } catch (err) {
+    logger.error('[AdminSecurity] getFlaggedUserDetail error:', err);
+    error(res, 'Failed to fetch user detail');
   }
 }
 
