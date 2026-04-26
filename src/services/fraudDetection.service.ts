@@ -4,6 +4,7 @@ import { SecuritySettings, Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import { getRedisClient, rk } from '../config/redis';
 import { logger } from '../utils/logger';
+import { isBypassUser } from './securityBypass.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,12 @@ export async function deductTrustScore(
   reason: string,
 ): Promise<void> {
   try {
+    // Bypass allowlist (Google Play review accounts) — never deduct trust.
+    if (await isBypassUser(uid)) {
+      logger.debug('[FRAUD] skipping deduction — bypass user', { uid, reason });
+      return;
+    }
+
     // Phase C: dedup the same (uid, reason) within 24h
     if (await shouldDedupDeduction(uid, reason)) {
       logger.debug('[FRAUD] dedup hit — skipping deduction', { uid, reason });
@@ -471,6 +478,11 @@ export async function checkRequest(params: CheckRequestParams): Promise<CheckReq
   const { uid, ip, fingerprint } = params;
 
   try {
+    // Bypass allowlist (Google Play review) — pass everything.
+    if (await isBypassUser(uid)) {
+      return { allowed: true, trustScore: 100 };
+    }
+
     const settings = await loadSettings();
     const trustRecord = await getOrCreateTrustScore(uid);
 

@@ -9,6 +9,7 @@ import { prisma } from '../config/database';
 import { getRedisClient, rk } from '../config/redis';
 import { logger } from '../utils/logger';
 import { loadSettings } from './fraudDetection.service';
+import { isBypassUser } from './securityBypass.service';
 
 export interface VpnInfo {
   isVpn: boolean;
@@ -172,6 +173,16 @@ export async function checkSecurity(params: {
   ip: string;
   fingerprint?: string;
 }): Promise<SecurityCheckResult> {
+  // Bypass allowlist (Google Play review accounts) — return clean state so
+  // mobile shows no VPN block / multi-account warning regardless of conditions.
+  if (await isBypassUser(params.uid)) {
+    return {
+      vpn: { isVpn: false },
+      multiAccount: { deviceAccountCount: 0, ipAccountCount: 0, otherUids: [], oldestAccount: null },
+      blockedReason: null,
+    };
+  }
+
   const settings = await loadSettings();
 
   const [vpn, multiAccount] = await Promise.all([

@@ -13,6 +13,7 @@ import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 import { loadSettings } from './fraudDetection.service';
 import { isUsableFingerprint } from './securityCheck.service';
+import { isBypassPhone } from './securityBypass.service';
 
 export interface ExistingAccountMasked {
   name: string;        // e.g. "P****l"
@@ -71,9 +72,16 @@ function maskAccount(a: {
 
 export async function checkSignupDeviceLimit(
   fingerprint: string | undefined,
+  candidatePhone?: string | null,
 ): Promise<SignupDeviceLimitResult> {
   const settings = await loadSettings();
   const max = Math.max(1, settings.maxAccountsPerDevice);
+
+  // Bypass allowlist (Google Play review accounts) — always allowed regardless
+  // of fingerprint or device count.
+  if (isBypassPhone(candidatePhone)) {
+    return { allowed: true, totalAccounts: 0, maxAllowed: max };
+  }
 
   // No reliable fingerprint → cannot enforce. Allow signup; the broader
   // fraud system will catch abuse via other signals.

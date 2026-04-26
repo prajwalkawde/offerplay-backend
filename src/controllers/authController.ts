@@ -188,7 +188,7 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
     // Pre-signup device-account-limit check
     const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
     if (isNew) {
-      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      const limit = await checkSignupDeviceLimit(deviceFingerprint, phone);
       if (!limit.allowed) {
         logger.warn('[Auth] device limit blocked signup', { phone, totalAccounts: limit.totalAccounts });
         respondDeviceLimitBlocked(res, limit);
@@ -267,7 +267,7 @@ export async function phoneFirebaseVerify(req: Request, res: Response): Promise<
     // Pre-signup device-account-limit check
     const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
     if (isNew) {
-      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      const limit = await checkSignupDeviceLimit(deviceFingerprint, phone);
       if (!limit.allowed) {
         logger.warn('[Auth] device limit blocked firebase phone signup', { phone, totalAccounts: limit.totalAccounts });
         respondDeviceLimitBlocked(res, limit);
@@ -412,10 +412,10 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     });
     const isNew = !existing;
 
-    // Pre-signup device-account-limit check
+    // Pre-signup device-account-limit check (Google flow — no phone bypass applies)
     const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
     if (isNew) {
-      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      const limit = await checkSignupDeviceLimit(deviceFingerprint, null);
       if (!limit.allowed) {
         logger.warn('[Auth] device limit blocked google signup', { googleId, totalAccounts: limit.totalAccounts });
         respondDeviceLimitBlocked(res, limit);
@@ -495,10 +495,10 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
     });
     const isNew = !existing;
 
-    // Pre-signup device-account-limit check
+    // Pre-signup device-account-limit check (Google flow — no phone bypass applies)
     const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
     if (isNew) {
-      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      const limit = await checkSignupDeviceLimit(deviceFingerprint, null);
       if (!limit.allowed) {
         logger.warn('[Auth] device limit blocked google signup', { googleId, totalAccounts: limit.totalAccounts });
         respondDeviceLimitBlocked(res, limit);
