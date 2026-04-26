@@ -11,6 +11,27 @@ import { env } from '../config/env';
 import { TransactionType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { updateQuestProgress } from './questController';
+import { checkSignupDeviceLimit, recordDeviceForUser } from '../services/accountLimit.service';
+
+// ─── helper: structured response when device-account-limit blocks signup ────
+function respondDeviceLimitBlocked(
+  res: Response,
+  result: { totalAccounts: number; maxAllowed: number; existingAccount?: unknown },
+): void {
+  res.status(403).json({
+    success: false,
+    code: 'DEVICE_ACCOUNT_LIMIT',
+    message:
+      result.maxAllowed === 1
+        ? 'This device already has an account. Please log in with your existing account, or delete it first.'
+        : `This device has reached the maximum allowed accounts (${result.maxAllowed}). Please log in with one of your existing accounts.`,
+    data: {
+      existingAccount: result.existingAccount,
+      totalAccounts: result.totalAccounts,
+      maxAllowed: result.maxAllowed,
+    },
+  });
+}
 
 const twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
 
@@ -164,6 +185,17 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
     const existing = await prisma.user.findUnique({ where: { phone } });
     const isNew = !existing;
 
+    // Pre-signup device-account-limit check
+    const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
+    if (isNew) {
+      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      if (!limit.allowed) {
+        logger.warn('[Auth] device limit blocked signup', { phone, totalAccounts: limit.totalAccounts });
+        respondDeviceLimitBlocked(res, limit);
+        return;
+      }
+    }
+
     const user = await prisma.user.upsert({
       where: { phone },
       create: {
@@ -191,6 +223,8 @@ export async function verifyPhone(req: Request, res: Response): Promise<void> {
     if (isNew) {
       await creditCoins(user.id, 100, TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
       if (referralCode) await processReferral(user.id, referralCode);
+      // Track this device→user link so the next signup attempt sees the count
+      recordDeviceForUser(user.id, deviceFingerprint).catch(() => {});
     }
 
     const token = generateJwt(user.id);
@@ -230,6 +264,17 @@ export async function phoneFirebaseVerify(req: Request, res: Response): Promise<
     const existing = await prisma.user.findUnique({ where: { phone } });
     const isNew = !existing;
 
+    // Pre-signup device-account-limit check
+    const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
+    if (isNew) {
+      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      if (!limit.allowed) {
+        logger.warn('[Auth] device limit blocked firebase phone signup', { phone, totalAccounts: limit.totalAccounts });
+        respondDeviceLimitBlocked(res, limit);
+        return;
+      }
+    }
+
     const user = await prisma.user.upsert({
       where: { phone },
       create: {
@@ -257,6 +302,7 @@ export async function phoneFirebaseVerify(req: Request, res: Response): Promise<
     if (isNew) {
       await creditCoins(user.id, 100, TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
       if (referralCode) await processReferral(user.id, referralCode);
+      recordDeviceForUser(user.id, deviceFingerprint).catch(() => {});
     }
 
     const token = generateJwt(user.id);
@@ -366,6 +412,17 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     });
     const isNew = !existing;
 
+    // Pre-signup device-account-limit check
+    const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
+    if (isNew) {
+      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      if (!limit.allowed) {
+        logger.warn('[Auth] device limit blocked google signup', { googleId, totalAccounts: limit.totalAccounts });
+        respondDeviceLimitBlocked(res, limit);
+        return;
+      }
+    }
+
     const user = existing
       ? await prisma.user.update({
           where: { id: existing.id },
@@ -398,6 +455,7 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     if (isNew) {
       await creditCoins(user.id, 100, TransactionType.EARN_BONUS, undefined, 'Welcome bonus');
       if (referralCode) await processReferral(user.id, referralCode).catch(() => {});
+      recordDeviceForUser(user.id, deviceFingerprint).catch(() => {});
     }
 
     const token = generateJwt(user.id);
@@ -436,6 +494,17 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
       where: { OR: [{ googleId }, ...(email ? [{ email }] : [])] },
     });
     const isNew = !existing;
+
+    // Pre-signup device-account-limit check
+    const deviceFingerprint = req.headers['x-device-fingerprint'] as string | undefined;
+    if (isNew) {
+      const limit = await checkSignupDeviceLimit(deviceFingerprint);
+      if (!limit.allowed) {
+        logger.warn('[Auth] device limit blocked google signup', { googleId, totalAccounts: limit.totalAccounts });
+        respondDeviceLimitBlocked(res, limit);
+        return;
+      }
+    }
 
     const user = existing
       ? await prisma.user.update({
