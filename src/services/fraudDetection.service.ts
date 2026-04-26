@@ -411,12 +411,26 @@ async function checkVpnProxy(
 
 // ─── checkDeviceMultiAccount ──────────────────────────────────────────────────
 
+// Reject fingerprints that are sentinel/fallback values from the mobile side.
+// Without this, every client whose Web Crypto fails (and falls back to the
+// literal string "unavailable") would collapse into a single shared record.
+const _FP_SENTINELS = new Set(['unavailable', 'unknown', 'null', 'undefined']);
+function _isUsableFingerprint(fp: string | undefined | null): boolean {
+  if (!fp) return false;
+  const t = fp.trim().toLowerCase();
+  return t.length >= 8 && !_FP_SENTINELS.has(t);
+}
+
 async function checkDeviceMultiAccount(
   uid: string,
   fingerprint: string,
   settings: SecuritySettings,
 ): Promise<{ suspicious: boolean }> {
   try {
+    if (!_isUsableFingerprint(fingerprint)) {
+      logger.debug('[FRAUD] skipping device check — sentinel fingerprint:', fingerprint);
+      return { suspicious: false };
+    }
     const hashedFp = crypto.createHash('sha256').update(fingerprint).digest('hex');
 
     const existing = await prisma.deviceFingerprint.findUnique({ where: { fingerprint: hashedFp } });
