@@ -74,9 +74,63 @@ export async function updateUserStatus(req: Request, res: Response): Promise<voi
   try {
     const { userId } = req.params as { userId: string };
     const { status } = req.body as { status: 'ACTIVE' | 'SUSPENDED' | 'BANNED' };
-    const user = await prisma.user.update({ where: { id: userId }, data: { status } });
+    const adminId = req.userId ?? 'admin';
+
+    const ops: Promise<unknown>[] = [
+      prisma.user.update({ where: { id: userId }, data: { status } }),
+    ];
+
+    // ACTIVE → admin is unbanning. The fraud middleware checks UserTrustScore.isBanned
+    // (NOT User.status), so updating just User.status leaves auto-banned users still
+    // blocked. Reset the trust record too. Use updateMany so it no-ops if the user
+    // never had a trust record.
+    if (status === 'ACTIVE') {
+      ops.push(
+        prisma.userTrustScore.updateMany({
+          where: { uid: userId },
+          data: {
+            isBanned: false,
+            isRestricted: false,
+            trustScore: 100,
+            totalFraudEvents: 0,
+            banReason: null,
+            bannedAt: null,
+            bannedBy: null,
+          },
+        }),
+      );
+    }
+
+    // SUSPENDED / BANNED → admin is manually banning. Mirror to UserTrustScore so
+    // the fraud middleware also blocks them (otherwise admin ban here, fraud check
+    // still passes because trust record says isBanned=false).
+    if (status === 'BANNED' || status === 'SUSPENDED') {
+      ops.push(
+        prisma.userTrustScore.upsert({
+          where: { uid: userId },
+          update: {
+            isBanned: true,
+            isRestricted: true,
+            banReason: `Manual ${status.toLowerCase()} by admin`,
+            bannedAt: new Date(),
+            bannedBy: adminId,
+          },
+          create: {
+            uid: userId,
+            isBanned: true,
+            isRestricted: true,
+            banReason: `Manual ${status.toLowerCase()} by admin`,
+            bannedAt: new Date(),
+            bannedBy: adminId,
+          },
+        }),
+      );
+    }
+
+    const [user] = await Promise.all(ops) as [Awaited<ReturnType<typeof prisma.user.update>>, ...unknown[]];
     success(res, user, `User ${status}!`);
   } catch (err) {
+    logger.error('updateUserStatus error:', err);
     error(res, 'Failed', 500);
   }
 }

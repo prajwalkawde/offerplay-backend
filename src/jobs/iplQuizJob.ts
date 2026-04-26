@@ -74,17 +74,44 @@ export async function generateQuestionsForTodayMatches(): Promise<number> {
     });
 
     if (!dbMatch) {
-      dbMatch = await prisma.iplMatch.create({
-        data: {
-          matchNumber: 0,
-          team1: match.team1,
-          team2: match.team2,
-          matchDate: match.startTime ? new Date(parseInt(match.startTime)) : new Date(),
-          venue: match.venue || match.city || 'TBD',
-          status: 'upcoming',
-          cricApiId: match.id?.toString(),
-        },
-      });
+      // Try to find our seeded match by short team names (DB uses abbreviations like GT/KKR)
+      // Cricbuzz returns both full name (team1) and short name (team1Short)
+      const t1Short = (match.team1Short || '').toUpperCase();
+      const t2Short = (match.team2Short || '').toUpperCase();
+      const matchDate = match.startTime ? new Date(parseInt(match.startTime)) : new Date();
+      const startOfDay = new Date(matchDate); startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay   = new Date(matchDate); endOfDay.setHours(23, 59, 59, 999);
+
+      if (t1Short && t2Short) {
+        dbMatch = await prisma.iplMatch.findFirst({
+          where: {
+            team1: { equals: t1Short, mode: 'insensitive' },
+            team2: { equals: t2Short, mode: 'insensitive' },
+            matchDate: { gte: startOfDay, lte: endOfDay },
+          },
+        });
+      }
+
+      if (dbMatch) {
+        // Back-fill cricApiId so future cron lookups are instant
+        await prisma.iplMatch.update({
+          where: { id: dbMatch.id },
+          data: { cricApiId: match.id?.toString() },
+        });
+        logger.info(`[QuizJob] Linked cricApiId ${match.id} to seeded match ${dbMatch.matchNumber} (${dbMatch.team1} vs ${dbMatch.team2})`);
+      } else {
+        dbMatch = await prisma.iplMatch.create({
+          data: {
+            matchNumber: 0,
+            team1: match.team1,
+            team2: match.team2,
+            matchDate: matchDate,
+            venue: match.venue || match.city || 'TBD',
+            status: 'upcoming',
+            cricApiId: match.id?.toString(),
+          },
+        });
+      }
     }
 
     // Generate questions with Claude AI

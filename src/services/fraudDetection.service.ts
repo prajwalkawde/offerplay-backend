@@ -132,9 +132,13 @@ export async function deductTrustScore(
       },
     });
 
-    if (newScore <= settings.autobanTrustScore && !current.isBanned) {
+    // Auto-ban / auto-restrict are now opt-in via SecuritySettings toggles.
+    // When off, fraud events are still logged + trust score still deducted (so the
+    // admin "Flagged Users" page can show who would have been banned), but no
+    // ban/restrict action is taken. Admin must review and ban/restrict manually.
+    if (settings.autoBanEnabled && newScore <= settings.autobanTrustScore && !current.isBanned) {
       await autoBan(uid, `Auto-banned: trust score ${newScore} (reason: ${reason})`);
-    } else if (newScore <= settings.autoRestrictTrustScore && !current.isRestricted && !current.isBanned) {
+    } else if (settings.autoRestrictEnabled && newScore <= settings.autoRestrictTrustScore && !current.isRestricted && !current.isBanned) {
       await autoRestrict(uid, `Auto-restricted: trust score ${newScore} (reason: ${reason})`);
     }
   } catch (err) {
