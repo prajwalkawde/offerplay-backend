@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { writeAudit } from '../services/auditLog.service';
 import { generateQuestionsForTodayMatches, verifyMatchResults as verifyMatchResultsJob } from '../jobs/iplQuizJob';
 import { sendFCMToUsers } from '../services/fcmService';
 
@@ -128,6 +129,12 @@ export async function updateUserStatus(req: Request, res: Response): Promise<voi
     }
 
     const [user] = await Promise.all(ops) as [Awaited<ReturnType<typeof prisma.user.update>>, ...unknown[]];
+    await writeAudit({
+      uid: userId,
+      action: status === 'ACTIVE' ? 'ADMIN_UNBAN' : 'ADMIN_BAN',
+      actor: `admin:${adminId}`,
+      reason: `Admin set User.status to ${status}`,
+    });
     success(res, user, `User ${status}!`);
   } catch (err) {
     logger.error('updateUserStatus error:', err);
