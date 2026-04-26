@@ -5,6 +5,7 @@ import { getRedisClient, rk } from '../config/redis';
 import { prisma } from '../config/database';
 import { error } from '../utils/response';
 import { logger } from '../utils/logger';
+import { isBypassPhone } from '../services/securityBypass.service';
 
 export interface JwtPayload {
   userId: string;
@@ -107,8 +108,13 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     }
 
     if ((user.status as string) !== 'ACTIVE') {
-      error(res, 'Account suspended or banned', 403);
-      return;
+      // Bypass allowlist (Google Play review accounts) — let them in even if
+      // their account got accidentally banned, so Play review never breaks.
+      if (!isBypassPhone(user.phone)) {
+        error(res, 'Account suspended or banned', 403);
+        return;
+      }
+      logger.warn('[Auth] bypass user with non-ACTIVE status allowed:', { uid: user.id, status: user.status });
     }
 
     req.userId = user.id;

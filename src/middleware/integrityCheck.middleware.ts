@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyIntegrityToken } from '../services/playIntegrity.service';
 import { loadSecuritySettings } from '../services/securitySettings.service';
+import { isBypassUser } from '../services/securityBypass.service';
 import { logger } from '../utils/logger';
 import { error } from '../utils/response';
 
@@ -10,6 +11,13 @@ export async function integrityCheck(
   next: NextFunction,
 ): Promise<void> {
   try {
+    // Bypass allowlist (Google Play review accounts) — Play Console may run
+    // the review build on emulators / test devices that don't pass Integrity.
+    if (await isBypassUser(req.userId)) {
+      next();
+      return;
+    }
+
     const settings = await loadSecuritySettings();
     if (!settings.enablePlayIntegrity) {
       next();
