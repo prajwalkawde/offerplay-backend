@@ -42,6 +42,8 @@ import quizRoutes from './routes/quiz.routes';
 import adminQuizRoutes from './routes/admin.quiz.routes';
 import { startQuizAIJob } from './jobs/quizAI.job';
 import adminSecurityRoutes from './routes/admin.security.routes';
+import supportRoutes from './routes/support.routes';
+import adminSupportRoutes from './routes/admin.support.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -129,6 +131,8 @@ app.use('/api/admin', adminSuperOfferRoutes);
 app.use('/api/quiz', quizRoutes);
 app.use('/api/admin/quiz', adminQuizRoutes);
 app.use('/api/admin/security', adminSecurityRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/admin/support', adminSupportRoutes);
 
 // ─── Public policy pages (offerplay.in/privacy, /terms, /payment-policy) ──────
 

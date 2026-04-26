@@ -1164,6 +1164,45 @@ model SecuritySettings {
   updatedAt                   DateTime @updatedAt
 }
 
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketType {
+  ACCOUNT_SUSPENDED
+  PAYMENT_ISSUE
+  GAMEPLAY_ISSUE
+  REWARD_NOT_RECEIVED
+  OTHER
+}
+
+model SupportTicket {
+  id            Int                  @id @default(autoincrement())
+  uid           String
+  type          SupportTicketType    @default(OTHER)
+  subject       String
+  message       String               @db.Text
+  contactEmail  String?
+  contactPhone  String?
+  status        SupportTicketStatus  @default(OPEN)
+  adminNote     String?              @db.Text
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  // Snapshot of user fraud context at ticket creation time
+  // (trustScore, isBanned, isRestricted, banReason, lastFraudEventAt)
+  context       Json?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([uid])
+  @@index([status])
+  @@index([type, status])
+  @@index([createdAt])
+}
+
 model IpRecord {
   id           Int       @id @default(autoincrement())
   ipAddress    String    @unique
