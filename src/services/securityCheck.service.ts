@@ -39,6 +39,20 @@ interface IpApiResponse {
   hosting?: boolean;
 }
 
+// ─── isUsableFingerprint ──────────────────────────────────────────────────────
+
+// Known mobile-side sentinel values that should NEVER be used as a fingerprint
+// (otherwise hundreds of unrelated users collide into a single record).
+const FINGERPRINT_SENTINELS = new Set(['unavailable', 'unknown', 'null', 'undefined']);
+
+export function isUsableFingerprint(fp: string | undefined | null): fp is string {
+  if (!fp) return false;
+  const trimmed = fp.trim().toLowerCase();
+  if (trimmed.length < 8) return false;          // too short to be a real ID
+  if (FINGERPRINT_SENTINELS.has(trimmed)) return false;
+  return true;
+}
+
 // ─── checkVpnReadOnly ─────────────────────────────────────────────────────────
 
 export async function checkVpnReadOnly(ip: string): Promise<VpnInfo> {
@@ -99,10 +113,14 @@ export async function checkMultiAccountReadOnly(
     oldestAccount: null,
   };
 
-  // Device fingerprint — only counts accounts seen on the same physical device
-  if (fingerprint) {
+  // Device fingerprint — only counts accounts seen on the same physical device.
+  // Reject sentinel/unreliable fingerprints to prevent the "all-fallback users
+  // collide into one record" bug (incident 2026-04-26 where 469 mobile clients
+  // whose Web Crypto failed all fell back to the literal string "unavailable",
+  // which hashed to a single record).
+  if (isUsableFingerprint(fingerprint)) {
     try {
-      const hashedFp = crypto.createHash('sha256').update(fingerprint).digest('hex');
+      const hashedFp = crypto.createHash('sha256').update(fingerprint!).digest('hex');
       const record = await prisma.deviceFingerprint.findUnique({ where: { fingerprint: hashedFp } });
       if (record) {
         out.deviceAccountCount = record.uids.length;
