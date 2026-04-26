@@ -5,6 +5,35 @@ import { prisma } from '../config/database';
 import { getRedisClient, rk } from '../config/redis';
 import { logger } from '../utils/logger';
 import { isBypassUser } from './securityBypass.service';
+import { writeAudit } from './auditLog.service';
+
+// ─── Combined-signal scoring (Phase C) ────────────────────────────────────────
+// Count distinct fraud event types triggered for this user in the last 7 days.
+// Best practice: a single noisy signal is just a flag. Two distinct signals →
+// restrict (lose withdraw). Three+ → ban candidate (still requires admin's
+// autoBanEnabled toggle to actually ban). Replaces the previous "any single
+// signal can cross the threshold and ban" model.
+const COMBINED_SIGNAL_WINDOW_DAYS = 7;
+
+async function countDistinctRecentSignals(uid: string, includeReason: string): Promise<number> {
+  const cutoff = new Date(Date.now() - COMBINED_SIGNAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  try {
+    const rows = await prisma.fraudLog.findMany({
+      where: { uid, createdAt: { gte: cutoff } },
+      select: { eventType: true },
+      distinct: ['eventType'],
+    });
+    const types = new Set<string>(rows.map(r => r.eventType));
+    if (includeReason) types.add(includeReason); // include current event even if not yet in DB
+    // Don't count system actions as "signals"
+    types.delete('auto_ban');
+    types.delete('auto_restrict');
+    return types.size;
+  } catch (err) {
+    logger.warn('[FRAUD] countDistinctRecentSignals failed', { err });
+    return 0;
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,15 +194,44 @@ export async function deductTrustScore(
       },
     });
 
-    // Auto-ban / auto-restrict are now opt-in via SecuritySettings toggles.
-    // When off, fraud events are still logged + trust score still deducted (so the
-    // admin "Flagged Users" page can show who would have been banned), but no
-    // ban/restrict action is taken. Admin must review and ban/restrict manually.
-    if (settings.autoBanEnabled && newScore <= settings.autobanTrustScore && !current.isBanned) {
-      await autoBan(uid, `Auto-banned: trust score ${newScore} (reason: ${reason})`);
-    } else if (settings.autoRestrictEnabled && newScore <= settings.autoRestrictTrustScore && !current.isRestricted && !current.isBanned) {
-      await autoRestrict(uid, `Auto-restricted: trust score ${newScore} (reason: ${reason})`);
+    // Phase C: combined-signal scoring. Count distinct fraud event types in
+    // the last 7 days. Tier:
+    //   1 signal  → flag only (admin sees it in Flagged Users; no action)
+    //   2 signals → auto-restrict (if autoRestrictEnabled)
+    //   3+ signals → auto-ban (if autoBanEnabled)
+    // Trust-score thresholds are still respected as a secondary guard, but
+    // the signal-count tier is the primary decision now.
+    const distinctSignals = await countDistinctRecentSignals(uid, reason);
+    const trustBelowBan = newScore <= settings.autobanTrustScore;
+    const trustBelowRestrict = newScore <= settings.autoRestrictTrustScore;
+
+    if (
+      settings.autoBanEnabled &&
+      distinctSignals >= 3 &&
+      trustBelowBan &&
+      !current.isBanned
+    ) {
+      await autoBan(
+        uid,
+        `Auto-banned: ${distinctSignals} distinct signals in 7d (latest: ${reason})`,
+        { trustScore: current.trustScore, isBanned: current.isBanned, isRestricted: current.isRestricted },
+        { trustScore: newScore, isBanned: true, isRestricted: true },
+      );
+    } else if (
+      settings.autoRestrictEnabled &&
+      distinctSignals >= 2 &&
+      trustBelowRestrict &&
+      !current.isRestricted &&
+      !current.isBanned
+    ) {
+      await autoRestrict(
+        uid,
+        `Auto-restricted: ${distinctSignals} distinct signals in 7d (latest: ${reason})`,
+        { trustScore: current.trustScore, isBanned: current.isBanned, isRestricted: current.isRestricted },
+        { trustScore: newScore, isBanned: false, isRestricted: true },
+      );
     }
+    // 1 signal → log only (already done by caller via logFraudEvent), no action
   } catch (err) {
     logger.error('[FRAUD] deductTrustScore error:', err);
   }
@@ -181,7 +239,12 @@ export async function deductTrustScore(
 
 // ─── autoBan ─────────────────────────────────────────────────────────────────
 
-async function autoBan(uid: string, reason: string): Promise<void> {
+async function autoBan(
+  uid: string,
+  reason: string,
+  before?: { trustScore: number; isBanned: boolean; isRestricted: boolean },
+  after?: { trustScore: number; isBanned: boolean; isRestricted: boolean },
+): Promise<void> {
   try {
     await prisma.userTrustScore.update({
       where: { uid },
@@ -199,6 +262,14 @@ async function autoBan(uid: string, reason: string): Promise<void> {
       severity: 'critical',
       description: reason,
     });
+    await writeAudit({
+      uid,
+      action: 'AUTO_BAN',
+      actor: 'system',
+      before,
+      after,
+      reason,
+    });
     logger.warn('[FRAUD] Auto-banned uid:', uid, reason);
   } catch (err) {
     logger.error('[FRAUD] autoBan error:', err);
@@ -207,7 +278,12 @@ async function autoBan(uid: string, reason: string): Promise<void> {
 
 // ─── autoRestrict ─────────────────────────────────────────────────────────────
 
-async function autoRestrict(uid: string, reason: string): Promise<void> {
+async function autoRestrict(
+  uid: string,
+  reason: string,
+  before?: { trustScore: number; isBanned: boolean; isRestricted: boolean },
+  after?: { trustScore: number; isBanned: boolean; isRestricted: boolean },
+): Promise<void> {
   try {
     await prisma.userTrustScore.update({
       where: { uid },
@@ -218,6 +294,14 @@ async function autoRestrict(uid: string, reason: string): Promise<void> {
       eventType: 'auto_restrict',
       severity: 'high',
       description: reason,
+    });
+    await writeAudit({
+      uid,
+      action: 'AUTO_RESTRICT',
+      actor: 'system',
+      before,
+      after,
+      reason,
     });
     logger.warn('[FRAUD] Auto-restricted uid:', uid, reason);
   } catch (err) {

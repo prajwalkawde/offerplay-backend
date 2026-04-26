@@ -41,6 +41,7 @@ import { startSuperOfferNotificationJob } from './jobs/superOfferNotification.jo
 import quizRoutes from './routes/quiz.routes';
 import adminQuizRoutes from './routes/admin.quiz.routes';
 import { startQuizAIJob } from './jobs/quizAI.job';
+import { startTrustRegenJob } from './jobs/trustRegen.job';
 import adminSecurityRoutes from './routes/admin.security.routes';
 import supportRoutes from './routes/support.routes';
 import adminSupportRoutes from './routes/admin.support.routes';
@@ -758,6 +759,7 @@ async function bootstrap(): Promise<void> {
   schedulePostbackRetry();
   startSuperOfferNotificationJob();
   startQuizAIJob();
+  startTrustRegenJob();
   logger.info('Sports Quiz AI job scheduled');
 }
 

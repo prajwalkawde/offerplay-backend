@@ -4,6 +4,7 @@ import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import * as supportService from '../services/support.service';
+import { writeAudit } from '../services/auditLog.service';
 
 const VALID_STATUS: SupportTicketStatus[] = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 const VALID_TYPE: SupportTicketType[] = [
@@ -92,6 +93,10 @@ export async function ticketUserAction(req: Request, res: Response): Promise<voi
           },
         }),
       ]);
+      await writeAudit({
+        uid: ticket.uid, action: 'SUPPORT_UNBAN', actor: `admin:${adminId}`,
+        reason: `Unbanned via support ticket #${id}`,
+      });
       success(res, { uid: ticket.uid, action }, 'User unbanned');
     } else {
       await Promise.all([
@@ -110,6 +115,10 @@ export async function ticketUserAction(req: Request, res: Response): Promise<voi
           },
         }),
       ]);
+      await writeAudit({
+        uid: ticket.uid, action: 'SUPPORT_BAN', actor: `admin:${adminId}`,
+        reason: `Banned via support ticket #${id}`,
+      });
       success(res, { uid: ticket.uid, action }, 'User banned');
     }
   } catch (err) {

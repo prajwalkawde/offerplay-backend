@@ -1164,6 +1164,21 @@ model SecuritySettings {
   updatedAt                   DateTime @updatedAt
 }
 
+model SecurityAuditLog {
+  id         Int      @id @default(autoincrement())
+  uid        String   // affected user
+  action     String   // AUTO_BAN | AUTO_RESTRICT | ADMIN_BAN | ADMIN_UNBAN | ADMIN_RESTRICT | ADMIN_UNRESTRICT | ADMIN_TRUST_SET | SUPPORT_BAN | SUPPORT_UNBAN | TRUST_REGEN
+  actor      String   // 'system' | 'admin:{adminId}' | 'user:{uid}'
+  beforeJson Json?    // { isBanned, isRestricted, trustScore }
+  afterJson  Json?    // { isBanned, isRestricted, trustScore }
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([uid])
+  @@index([action])
+  @@index([createdAt])
+}
+
 enum SupportTicketStatus {
   OPEN
   IN_PROGRESS
