@@ -15,6 +15,8 @@ import {
   unrestrictUser,
   setUserTrustScore,
   getSecurityOverview,
+  getFlaggedUsers,
+  getFlaggedUserDetail,
 } from '../controllers/admin.security.controller';
 
 const router = Router();
@@ -43,5 +45,9 @@ router.put('/users/:uid/trust-score', setUserTrustScore);
 
 // Overview
 router.get('/overview', getSecurityOverview);
+
+// Flagged users (Phase C)
+router.get('/flagged-users', getFlaggedUsers);
+router.get('/flagged-users/:uid', getFlaggedUserDetail);
 
 export default router;

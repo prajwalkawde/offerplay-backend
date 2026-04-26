@@ -113,12 +113,38 @@ export async function logFraudEvent(data: FraudEventData): Promise<void> {
 
 // ─── deductTrustScore ─────────────────────────────────────────────────────────
 
+// Phase C: per-(uid, reason) 24h dedup. The original implementation deducted
+// trust + incremented totalFraudEvents on EVERY request, which caused the
+// 2026-04-26 mass-ban incident (one fingerprint with 5 accounts could cascade
+// 25 deductions per request). With dedup, the same uid+reason can only deduct
+// once per 24h regardless of how many requests trigger the same signal.
+// Set via Redis with TTL — fail open if Redis is down (resume old behavior).
+const DEDUP_TTL_SECONDS = 24 * 60 * 60;
+
+async function shouldDedupDeduction(uid: string, reason: string): Promise<boolean> {
+  try {
+    const redis = getRedisClient();
+    const key = rk(`fraud-dedup:${uid}:${reason}`);
+    // SET NX (set if not exists) returns 'OK' on first call, null thereafter
+    const result = await redis.set(key, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
+    return result === null; // null = key already existed = dedup HIT
+  } catch {
+    return false; // fail open — proceed with the deduction
+  }
+}
+
 export async function deductTrustScore(
   uid: string,
   amount: number,
   reason: string,
 ): Promise<void> {
   try {
+    // Phase C: dedup the same (uid, reason) within 24h
+    if (await shouldDedupDeduction(uid, reason)) {
+      logger.debug('[FRAUD] dedup hit — skipping deduction', { uid, reason });
+      return;
+    }
+
     const settings = await loadSettings();
     const current = await getOrCreateTrustScore(uid);
     const newScore = Math.max(0, current.trustScore - amount);
