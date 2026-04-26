@@ -1158,6 +1158,8 @@ model SecuritySettings {
   rapidWithdrawalMinutes      Int      @default(60)
   autobanTrustScore           Int      @default(20)
   autoRestrictTrustScore      Int      @default(50)
+  autoBanEnabled              Boolean  @default(false)
+  autoRestrictEnabled         Boolean  @default(false)
 
   updatedAt                   DateTime @updatedAt
 }
