@@ -2,6 +2,19 @@ import { TransactionType } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
 
+// Earn types that count toward the referral signup-bonus settlement threshold.
+// Excludes EARN_REFERRAL (would create a feedback loop) and EARN_BONUS (welcome
+// bonus / signup gift — not "real" earned activity).
+const REFERRAL_THRESHOLD_TYPES: TransactionType[] = [
+  TransactionType.EARN_TASK,
+  TransactionType.EARN_SURVEY,
+  TransactionType.EARN_OFFERWALL,
+  TransactionType.EARN_DAILY,
+  TransactionType.EARN_STREAK,
+  TransactionType.EARN_CONTEST_WIN,
+  TransactionType.EARN_IPL_WIN,
+];
+
 export async function creditCoins(
   userId: string,
   amount: number,
@@ -22,6 +35,16 @@ export async function creditCoins(
   ]);
 
   logger.debug('Coins credited', { userId, amount, type });
+
+  // Anti-fraud: if this user was referred and bonuses are still pending,
+  // settle them now if their total eligible earnings have crossed the
+  // configured threshold. Fire-and-forget — settlement bugs must NOT block
+  // the credit that just succeeded. Lazy-imported to avoid circular deps.
+  if (REFERRAL_THRESHOLD_TYPES.includes(type)) {
+    import('./referralBonus.service')
+      .then(m => m.settlePendingReferralBonuses(userId))
+      .catch(err => logger.warn('[coinService] referral settlement check failed', { err }));
+  }
 }
 
 export async function debitCoins(

@@ -220,17 +220,24 @@ model PrizeClaim {
 }
 
 model Referral {
-  id           String               @id @default(cuid())
-  referrerId   String
-  referredId   String               @unique
-  coinsEarned  Int                  @default(0)
-  totalEarned  Int                  @default(0)
-  status       String               @default("active")
-  lastActiveAt DateTime?
-  createdAt    DateTime             @default(now())
-  referrer     User                 @relation("referrer", fields: [referrerId], references: [id])
-  referred     User                 @relation("referred", fields: [referredId], references: [id])
-  commissions  ReferralCommission[]
+  id                   String               @id @default(cuid())
+  referrerId           String
+  referredId           String               @unique
+  coinsEarned          Int                  @default(0)
+  totalEarned          Int                  @default(0)
+  // Anti-fraud: when ReferralSettings.minWithdrawForBonus > 0, the signup
+  // bonuses are HELD as pending and only paid out after the referee has
+  // earned at least that many coins from real activity (excluding the
+  // welcome / referral bonuses themselves). status='pending' until then.
+  signupBonusPending   Int                  @default(0)
+  referrerBonusPending Int                  @default(0)
+  bonusesSettledAt     DateTime?
+  status               String               @default("active")
+  lastActiveAt         DateTime?
+  createdAt            DateTime             @default(now())
+  referrer             User                 @relation("referrer", fields: [referrerId], references: [id])
+  referred             User                 @relation("referred", fields: [referredId], references: [id])
+  commissions          ReferralCommission[]
 }
 
 model ReferralCommission {
