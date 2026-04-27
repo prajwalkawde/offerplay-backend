@@ -1171,6 +1171,47 @@ model SecuritySettings {
   updatedAt                   DateTime @updatedAt
 }
 
+model AdSettings {
+  id                              Int      @id @default(1)
+
+  // ── App Open Ad ──
+  // AdMob policy: don't show on first launch; respect min-interval; brief loader to avoid flash
+  enableAppOpenAd                 Boolean  @default(false)
+  appOpenAdMinIntervalSeconds     Int      @default(14400)  // 4 hours between shows
+  appOpenAdSkipFirstLaunch        Boolean  @default(true)
+
+  // ── Banner placements ──
+  enableHomeBanner                Boolean  @default(true)
+  enableEarnBanner                Boolean  @default(true)
+  enableWalletBanner              Boolean  @default(true)
+  enableSuperOfferBanner          Boolean  @default(true)
+  enableQuizBanner                Boolean  @default(true)
+
+  // ── Interstitial placements ──
+  // AdMob policy: interstitials at natural transitions only; respect frequency cap
+  enablePostOfferInterstitial     Boolean  @default(true)
+  enableQuizInterstitial          Boolean  @default(true)
+  interstitialMinIntervalSeconds  Int      @default(120)    // 2 min global cap
+
+  // ── Rewarded placements ──
+  // AdMob policy: opt-in, clear reward, server-validated
+  enableSuperOfferRewarded        Boolean  @default(true)
+  enableDailyBonusRewarded        Boolean  @default(true)
+  enableQuizHintRewarded          Boolean  @default(true)
+  enableQuizBonusRewarded         Boolean  @default(true)
+  enableCoinDoubler               Boolean  @default(true)
+  coinDoublerMaxBonus             Int      @default(50)     // cap doubled bonus to keep economy bounded
+  coinDoublerMaxPerDay            Int      @default(3)      // user can only double up to N times per UTC day
+
+  // ── Ad unit ID overrides (null = use env / hardcoded defaults) ──
+  appOpenAdUnitId                 String?
+  bannerAdUnitId                  String?
+  interstitialAdUnitId            String?
+  rewardedAdUnitId                String?
+
+  updatedAt                       DateTime @updatedAt
+}
+
 model SecurityAuditLog {
   id         Int      @id @default(autoincrement())
   uid        String   // affected user

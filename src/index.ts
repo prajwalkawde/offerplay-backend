@@ -46,6 +46,7 @@ import adminSecurityRoutes from './routes/admin.security.routes';
 import supportRoutes from './routes/support.routes';
 import adminSupportRoutes from './routes/admin.support.routes';
 import securityRoutes from './routes/security.routes';
+import { adSettingsMobileRouter, adSettingsAdminRouter } from './routes/adSettings.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -136,6 +137,8 @@ app.use('/api/admin/security', adminSecurityRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/admin/support', adminSupportRoutes);
 app.use('/api/security', securityRoutes);
+app.use('/api/app', adSettingsMobileRouter);
+app.use('/api/admin', adSettingsAdminRouter);
 
 // ─── Public policy pages (offerplay.in/privacy, /terms, /payment-policy) ──────
 
