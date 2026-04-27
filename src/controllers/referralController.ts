@@ -124,12 +124,22 @@ export const applyReferralCode = async (req: Request, res: Response): Promise<vo
     if (existing) { error(res, 'You have already used a referral code', 400); return; }
 
     const settings = await prisma.referralSettings.findFirst().catch(() => null);
-    const signupBonus  = settings?.signupBonus ?? 100;
+    const signupBonus   = settings?.signupBonus ?? 100;
     const referrerBonus = settings?.referrerSignupBonus ?? 50;
+    const threshold     = settings?.minWithdrawForBonus ?? 0;
+    // Anti-fraud: when threshold > 0, hold both bonuses as pending until the
+    // referee earns enough from real activity to prove they aren't a bot.
+    const delayPayout = threshold > 0;
 
     await prisma.$transaction(async (tx) => {
       const referral = await tx.referral.create({
-        data: { referrerId: referrer.id, referredId: userId, status: 'active' },
+        data: {
+          referrerId: referrer.id,
+          referredId: userId,
+          status: delayPayout ? 'pending' : 'active',
+          signupBonusPending:   delayPayout ? signupBonus   : 0,
+          referrerBonusPending: delayPayout ? referrerBonus : 0,
+        },
       });
 
       await tx.user.update({
@@ -141,42 +151,55 @@ export const applyReferralCode = async (req: Request, res: Response): Promise<vo
         data: { referredBy: referrer.id },
       });
 
-      if (signupBonus > 0) {
-        await tx.user.update({ where: { id: userId }, data: { coinBalance: { increment: signupBonus } } });
-        await tx.transaction.create({
-          data: { userId, type: 'EARN_REFERRAL', amount: signupBonus, description: 'Welcome bonus from referral', status: 'completed' },
-        });
-      }
+      if (!delayPayout) {
+        // Legacy immediate-credit path (when admin sets minWithdrawForBonus=0)
+        if (signupBonus > 0) {
+          await tx.user.update({ where: { id: userId }, data: { coinBalance: { increment: signupBonus } } });
+          await tx.transaction.create({
+            data: { userId, type: 'EARN_REFERRAL', amount: signupBonus, description: 'Welcome bonus from referral', status: 'completed' },
+          });
+        }
 
-      if (referrerBonus > 0) {
-        await tx.user.update({ where: { id: referrer.id }, data: { coinBalance: { increment: referrerBonus } } });
-        await tx.transaction.create({
-          data: { userId: referrer.id, type: 'EARN_REFERRAL', amount: referrerBonus, description: 'Friend joined using your referral code', status: 'completed', refId: referral.id },
-        });
-        await tx.referralCommission.create({
-          data: {
-            referralId:   referral.id,
-            referrerId:   referrer.id,
-            referredId:   userId,
-            type:         'SIGNUP',
-            amount:       referrerBonus,
-            percentage:   100,
-            sourceAmount: referrerBonus,
-            description:  'Friend signup bonus',
-            status:       'credited',
-            creditedAt:   new Date(),
-          },
-        });
-        await tx.referral.update({
-          where: { id: referral.id },
-          data: { totalEarned: { increment: referrerBonus }, coinsEarned: { increment: referrerBonus } },
-        });
+        if (referrerBonus > 0) {
+          await tx.user.update({ where: { id: referrer.id }, data: { coinBalance: { increment: referrerBonus } } });
+          await tx.transaction.create({
+            data: { userId: referrer.id, type: 'EARN_REFERRAL', amount: referrerBonus, description: 'Friend joined using your referral code', status: 'completed', refId: referral.id },
+          });
+          await tx.referralCommission.create({
+            data: {
+              referralId:   referral.id,
+              referrerId:   referrer.id,
+              referredId:   userId,
+              type:         'SIGNUP',
+              amount:       referrerBonus,
+              percentage:   100,
+              sourceAmount: referrerBonus,
+              description:  'Friend signup bonus',
+              status:       'credited',
+              creditedAt:   new Date(),
+            },
+          });
+          await tx.referral.update({
+            where: { id: referral.id },
+            data: { totalEarned: { increment: referrerBonus }, coinsEarned: { increment: referrerBonus } },
+          });
+        }
       }
+      // delayPayout=true: bonuses sit as pending; settled by referralBonus.service
+      // when the referee crosses the earnings threshold.
     });
 
     updateQuestProgress(referrer.id, 'REFER_FRIEND', 1).catch(() => {});
-    success(res, { signupBonus, referrerName: referrer.name },
-      `Referral applied! You earned ${signupBonus} coins!`);
+
+    const message = delayPayout
+      ? `Referral applied! Earn ${threshold} coins from offers/surveys to unlock your ${signupBonus}-coin welcome bonus.`
+      : `Referral applied! You earned ${signupBonus} coins!`;
+    success(res, {
+      signupBonus,
+      referrerName: referrer.name,
+      bonusPending: delayPayout,
+      threshold: delayPayout ? threshold : 0,
+    }, message);
   } catch (err) {
     logger.error('applyReferralCode error', { err });
     error(res, 'Failed to apply referral code', 500);
