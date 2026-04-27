@@ -89,6 +89,7 @@ model User {
   ticketBalance  Int            @default(0)
   gemBalance     Int            @default(0)
   referralCode   String         @unique
+  referralCodeChangedAt DateTime?  // last time user customized their referral code (rate-limit gate)
   referredBy     String?
   referralCount  Int            @default(0)
   streakCount    Int            @default(0)

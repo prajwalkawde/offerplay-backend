@@ -106,6 +106,67 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
   }
 };
 
+// ─── GET /api/referral/code/check?code=XXX ────────────────────────────────────
+// Real-time availability check for the vanity-code customizer. Lightweight —
+// only validates format + checks uniqueness, does NOT claim.
+
+export const checkVanityCode = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const raw = String(req.query.code || '');
+    const { normalizeCode, validateFormat, checkAvailability } = await import('../services/vanityCode.service');
+    const code = normalizeCode(raw);
+
+    const fmt = validateFormat(code);
+    if (!fmt.ok) {
+      res.json({ success: true, data: { available: false, ...fmt } });
+      return;
+    }
+    const available = await checkAvailability(code, userId);
+    if (!available) {
+      res.json({ success: true, data: { available: false, code: 'TAKEN', message: 'That code is already taken' } });
+      return;
+    }
+    res.json({ success: true, data: { available: true, code: 'OK', message: 'Available!', normalized: code } });
+  } catch (err) {
+    logger.error('checkVanityCode error', err);
+    res.status(500).json({ success: false, message: 'Failed to check code' });
+  }
+};
+
+// ─── POST /api/referral/code  { code: 'RAHUL26' } ─────────────────────────────
+// Claim/change the user's referral code. Server-validated end-to-end.
+
+export const claimVanityCode = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { code: rawCode } = req.body as { code: string };
+    if (!rawCode) { error(res, 'code is required', 400); return; }
+
+    const { claimVanityCode } = await import('../services/vanityCode.service');
+    const result = await claimVanityCode(userId, rawCode);
+
+    if (result.ok) {
+      success(res, {
+        ok: true,
+        code: rawCode.trim().toUpperCase(),
+      }, result.message);
+    } else {
+      // 400 for client validation errors (bad format / taken / rate-limited)
+      // so mobile catch blocks treat them like normal API errors.
+      res.status(400).json({
+        success: false,
+        code: result.code,
+        message: result.message,
+        ...(result.daysUntilNextChange !== undefined && { daysUntilNextChange: result.daysUntilNextChange }),
+      });
+    }
+  } catch (err) {
+    logger.error('claimVanityCode error', err);
+    error(res, 'Failed to update code', 500);
+  }
+};
+
 // ─── POST /api/referral/apply ──────────────────────────────────────────────────
 export const applyReferralCode = async (req: Request, res: Response): Promise<void> => {
   try {

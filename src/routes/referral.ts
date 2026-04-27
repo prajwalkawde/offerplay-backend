@@ -11,6 +11,8 @@ import {
   claimMilestone,
   getAdminMilestoneClaims,
   processAdminClaim,
+  checkVanityCode,
+  claimVanityCode,
 } from '../controllers/referralController';
 import {
   trackInstall,
@@ -23,6 +25,8 @@ const router = Router();
 router.get('/dashboard',              authMiddleware, getReferralDashboard);
 router.get('/link',                   authMiddleware, getUserReferralLink);
 router.post('/apply',                 authMiddleware, applyReferralCode);
+router.get('/code/check',             authMiddleware, checkVanityCode);
+router.post('/code',                  authMiddleware, claimVanityCode);
 router.post('/track-install',                         trackInstall);
 router.get('/milestones',             authMiddleware, getMilestones);
 router.post('/milestones/:id/claim',  authMiddleware, fraudCheck('referral_claim'), claimMilestone);
