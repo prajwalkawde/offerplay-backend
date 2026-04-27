@@ -26,6 +26,7 @@ import {
   claimDailyStreak,
 } from '../controllers/streakController';
 import { getSurveys, getSurveyWallUrl } from '../controllers/surveyController';
+import { getEligibility as coinDoublerEligibility, claimDoubler } from '../controllers/coinDoubler.controller';
 import {
   getUserNotifications,
   markAllRead,
@@ -45,6 +46,10 @@ const router = Router();
 
 // ─── New routes ───────────────────────────────────────────────────────────────
 router.get('/transactions', authMiddleware, getTransactions);
+
+// Coin Doubler — "Watch ad → 2× last reward (capped)"
+router.get('/coin-doubler/eligibility', authMiddleware, coinDoublerEligibility);
+router.post('/coin-doubler/claim',     authMiddleware, fraudCheck('coin_doubler'), claimDoubler);
 router.get('/daily-streak', authMiddleware, getStreakData);
 router.post('/daily-streak/claim', authMiddleware, fraudCheck('daily_streak_claim'), claimDailyStreak);
 // Aliases so both /daily-bonus and /daily-streak paths work
