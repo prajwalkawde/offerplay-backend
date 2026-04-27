@@ -49,6 +49,7 @@ export interface MobileAdSettings {
   appOpen: { enabled: boolean; minIntervalSeconds: number; skipFirstLaunch: boolean };
   banners: {
     home: boolean; earn: boolean; wallet: boolean; superOffer: boolean; quiz: boolean;
+    earnInline: boolean; earnInlineEvery: number;
   };
   interstitials: {
     postOffer: boolean; quiz: boolean; minIntervalSeconds: number;
@@ -80,6 +81,8 @@ export function toMobileShape(s: AdSettings): MobileAdSettings {
       wallet: s.enableWalletBanner,
       superOffer: s.enableSuperOfferBanner,
       quiz: s.enableQuizBanner,
+      earnInline: s.enableEarnInlineBanners,
+      earnInlineEvery: s.earnInlineBannerEvery,
     },
     interstitials: {
       postOffer: s.enablePostOfferInterstitial,

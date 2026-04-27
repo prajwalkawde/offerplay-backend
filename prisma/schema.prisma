@@ -1186,6 +1186,10 @@ model AdSettings {
   enableWalletBanner              Boolean  @default(true)
   enableSuperOfferBanner          Boolean  @default(true)
   enableQuizBanner                Boolean  @default(true)
+  // Inline banner injected between offer cards in the Earn list every N items.
+  // OFF by default — admin enables after validating the top-of-screen banner.
+  enableEarnInlineBanners         Boolean  @default(false)
+  earnInlineBannerEvery           Int      @default(6)
 
   // ── Interstitial placements ──
   // AdMob policy: interstitials at natural transitions only; respect frequency cap
