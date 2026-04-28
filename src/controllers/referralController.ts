@@ -288,7 +288,7 @@ export const applyReferralCode = async (req: Request, res: Response): Promise<vo
       });
       await tx.user.update({
         where: { id: userId },
-        data: { referredBy: referrer.id },
+        data: { referredBy: referrer.id, acquisitionSource: 'referral' },
       });
 
       if (!delayPayout) {
