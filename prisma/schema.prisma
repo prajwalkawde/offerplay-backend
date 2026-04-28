@@ -268,6 +268,25 @@ model ReferralSettings {
   isLifetimeCommission    Boolean  @default(true)
   maxReferrals            Int?
   minWithdrawForBonus     Int      @default(0)
+
+  // ── Step 6: Tier commission ladder ──
+  // When enabled, the referrer's tier (computed from active referral count)
+  // multiplies their base commission. Bronze gets 1×, Platinum gets ~4×.
+  // When disabled, falls back to flat taskCommissionPct etc above.
+  enableTierCommission    Boolean  @default(false)
+  tierBronzeMin           Int      @default(0)    // 0-9 active refs → Bronze
+  tierBronzePct           Float    @default(5)
+  tierSilverMin           Int      @default(10)   // 10-49 → Silver
+  tierSilverPct           Float    @default(10)
+  tierGoldMin             Int      @default(50)   // 50-99 → Gold
+  tierGoldPct             Float    @default(15)
+  tierPlatinumMin         Int      @default(100)  // 100+ → Platinum
+  tierPlatinumPct         Float    @default(20)
+
+  // ── Step 8: Push notification toggles ──
+  enableSignupPush        Boolean  @default(true)
+  enableCommissionPush    Boolean  @default(true)
+  enableMilestonePush     Boolean  @default(true)
   isActive                Boolean  @default(true)
   updatedAt               DateTime @updatedAt
   updatedBy               String?

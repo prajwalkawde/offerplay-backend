@@ -3,6 +3,7 @@ import { prisma } from '../config/database';
 import { success, error } from '../utils/response';
 import { logger } from '../utils/logger';
 import { updateQuestProgress } from './questController';
+import { sendFCMToUsers } from '../services/fcmService';
 
 // ─── GET /api/referral/dashboard ──────────────────────────────────────────────
 export const getReferralDashboard = async (req: Request, res: Response): Promise<void> => {
@@ -67,6 +68,10 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
     const legacyTotal = commissions.length === 0
       ? referrals.reduce((s, r) => s + (r.coinsEarned || 0), 0)
       : 0;
+
+    // ── Step 6: Current tier + next-tier progress ───────────────────────
+    const { getReferrerTier } = await import('../services/referralTier.service');
+    const tier = await getReferrerTier(userId);
 
     // ── Pipeline funnel: invited → signed up → active → earning ───────────
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
@@ -140,6 +145,7 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
         paid: totalEarned,
       },
       pipeline,
+      tier,
       topFriends,
       dailyLast30,
       nextMilestone: nextMilestoneInfo,
@@ -325,6 +331,22 @@ export const applyReferralCode = async (req: Request, res: Response): Promise<vo
 
     updateQuestProgress(referrer.id, 'REFER_FRIEND', 1).catch(() => {});
 
+    // Step 8: Push referrer the moment a friend signs up. Fire-and-forget.
+    if (settings?.enableSignupPush !== false) {
+      const refereeName = (await prisma.user.findUnique({
+        where: { id: userId }, select: { name: true },
+      }))?.name ?? 'A friend';
+      const pushTitle = '🎉 New referral!';
+      const pushBody = delayPayout
+        ? `${refereeName} just signed up using your code! Your bonus unlocks once they earn ${threshold} coins.`
+        : `${refereeName} just signed up using your code! +${referrerBonus} coins added.`;
+      sendFCMToUsers([referrer.id], pushTitle, pushBody, {
+        type: 'referral_signup',
+        referredName: refereeName,
+        bonus: String(referrerBonus),
+      }).catch(e => logger.warn('FCM referral_signup failed', e));
+    }
+
     const message = delayPayout
       ? `Referral applied! Earn ${threshold} coins from offers/surveys to unlock your ${signupBonus}-coin welcome bonus.`
       : `Referral applied! You earned ${signupBonus} coins!`;
@@ -352,14 +374,9 @@ export const creditReferralCommission = async (
     });
     if (!referral) return;
 
-    const settings = await prisma.referralSettings.findFirst().catch(() => null);
-    const pctMap = {
-      TASK:      settings?.taskCommissionPct       ?? 10,
-      SURVEY:    settings?.surveyCommissionPct      ?? 10,
-      OFFERWALL: settings?.offerwallCommissionPct   ?? 10,
-      CONTEST:   settings?.contestWinCommissionPct  ?? 5,
-    };
-    const pct = pctMap[type];
+    // Step 6: Tier system overrides flat % when admin enabled it
+    const { getEffectiveCommissionPct } = await import('../services/referralTier.service');
+    const pct = await getEffectiveCommissionPct(referral.referrerId, type);
     const commission = Math.floor(earnedAmount * (pct / 100));
     if (commission <= 0) return;
 
@@ -399,8 +416,125 @@ export const creditReferralCommission = async (
       });
     });
     logger.info(`Referral commission: ${commission} coins to ${referral.referrerId} for ${type}`);
+
+    // Step 8: Push referrer when a friend earns and they get commission. Throttled
+    // to once-per-friend-per-day so we don't spam — multiple offers in one day
+    // collapse into a single notification.
+    try {
+      const settings2 = await prisma.referralSettings.findFirst().catch(() => null);
+      if (settings2?.enableCommissionPush !== false) {
+        const dayBucket = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const dedupKey  = `referral_push_dedup:${referral.referrerId}:${userId}:${dayBucket}`;
+        const { getRedisClient } = await import('../config/redis');
+        const r = getRedisClient();
+        // SET NX EX 24h — only first call of the day for this referrer+friend pair fires
+        const setResult = await r.set(dedupKey, '1', 'EX', 24 * 60 * 60, 'NX').catch(() => null);
+        if (setResult === 'OK') {
+          const friendName = (await prisma.user.findUnique({
+            where: { id: userId }, select: { name: true },
+          }))?.name ?? 'Your friend';
+          sendFCMToUsers([referral.referrerId], '💰 Friend earned for you!',
+            `${friendName} just earned coins — you got +${commission} commission!`, {
+            type: 'referral_commission',
+            commission: String(commission),
+            friendName,
+          }).catch(e => logger.warn('FCM referral_commission failed', e));
+        }
+      }
+    } catch (e) {
+      logger.warn('commission push failed', e);
+    }
   } catch (err) {
     logger.error('creditReferralCommission error', { err });
+  }
+};
+
+// ─── GET /api/referral/leaderboard ────────────────────────────────────────────
+// Step 7: top referrers by commission earned in the current week (Mon-Sun UTC).
+// On-demand computation — no precomputed table or weekly cron in v1. When you
+// have many referrers and DB load matters, swap to a materialized view + cron.
+
+export const getLeaderboard = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+
+    // "This week" = Monday 00:00 UTC of the current week
+    const now = new Date();
+    const day = now.getUTCDay() || 7; // 1=Mon..7=Sun
+    const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (day - 1)));
+    weekStart.setUTCHours(0, 0, 0, 0);
+
+    // Aggregate this-week credited commissions per referrer
+    const grouped = await prisma.referralCommission.groupBy({
+      by: ['referrerId'],
+      where: { status: 'credited', createdAt: { gte: weekStart } },
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: 'desc' } },
+      take: 50,
+    });
+
+    if (grouped.length === 0) {
+      success(res, { weekStart, weekEnd: new Date(weekStart.getTime() + 7 * 86400000), entries: [], you: null });
+      return;
+    }
+
+    // Hydrate user names
+    const uids = grouped.map(g => g.referrerId);
+    const users = await prisma.user.findMany({
+      where: { id: { in: uids } },
+      select: { id: true, name: true, referralCode: true },
+    });
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const entries = grouped.map((g, i) => {
+      const user = userMap.get(g.referrerId);
+      return {
+        rank:     i + 1,
+        uid:      g.referrerId,
+        name:     maskName(user?.name || 'User'),
+        avatar:   (user?.name?.charAt(0) || 'U').toUpperCase(),
+        code:     user?.referralCode ?? null,
+        weeklyCommission: g._sum.amount ?? 0,
+        isYou:    g.referrerId === userId,
+      };
+    });
+
+    // Caller's own rank/total even if outside top 50
+    let you = entries.find(e => e.isYou) ?? null;
+    if (!you) {
+      const yourTotal = await prisma.referralCommission.aggregate({
+        where: { referrerId: userId, status: 'credited', createdAt: { gte: weekStart } },
+        _sum: { amount: true },
+      });
+      const yourSum = yourTotal._sum.amount ?? 0;
+      if (yourSum > 0) {
+        const ahead = await prisma.referralCommission.groupBy({
+          by: ['referrerId'],
+          where: { status: 'credited', createdAt: { gte: weekStart } },
+          _sum: { amount: true },
+          having: { amount: { _sum: { gt: yourSum } } },
+        });
+        you = {
+          rank: ahead.length + 1,
+          uid: userId,
+          name: 'You',
+          avatar: 'Y',
+          code: null,
+          weeklyCommission: yourSum,
+          isYou: true,
+        };
+      }
+    }
+
+    success(res, {
+      weekStart,
+      weekEnd: new Date(weekStart.getTime() + 7 * 86400000),
+      entries,
+      you,
+    });
+  } catch (err) {
+    logger.error('getLeaderboard error', { err });
+    error(res, 'Failed to load leaderboard', 500);
   }
 };
 
