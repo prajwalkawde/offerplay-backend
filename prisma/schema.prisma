@@ -92,6 +92,11 @@ model User {
   referralCodeChangedAt DateTime?  // last time user customized their referral code (rate-limit gate)
   referredBy     String?
   referralCount  Int            @default(0)
+  // Step 10: acquisition source for LTV/CAC tracking
+  // Values: 'organic' (default) | 'referral' (used a code) | 'paid_fb' | 'paid_google' | 'paid_other'
+  // Auto-set to 'referral' when applyReferralCode runs; 'organic' otherwise.
+  // Future: paid_* sources will be set via UTM/Branch attribution.
+  acquisitionSource String?
   streakCount    Int            @default(0)
   lastClaimDate  DateTime?
   fcmToken           String?
@@ -1189,6 +1194,37 @@ model SecuritySettings {
   autoRestrictEnabled         Boolean  @default(false)
 
   updatedAt                   DateTime @updatedAt
+}
+
+// Step 10: daily marketing spend log — admin enters total spent per day
+// per source. Used by /api/admin/analytics/ltv-cac to compute CAC.
+// Until you integrate AppsFlyer / Branch / Adjust, this is a manual input.
+model MarketingSpendDaily {
+  id        Int      @id @default(autoincrement())
+  date      DateTime // truncated to UTC midnight
+  source    String   // 'paid_fb' | 'paid_google' | 'paid_tiktok' | etc.
+  amountInr Float
+  notes     String?
+  createdBy String?  // admin uid
+  createdAt DateTime @default(now())
+
+  @@unique([date, source])
+  @@index([date])
+}
+
+// Step 10: daily ad revenue log — admin enters AdMob earnings per day.
+// Until AdMob API is integrated, this is a manual nightly entry.
+model AdRevenueDaily {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @unique // truncated to UTC midnight
+  amountInr   Float
+  impressions Int?
+  ecpm        Float?   // effective CPM = (revenue / impressions) * 1000
+  notes       String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([date])
 }
 
 model AdSettings {
