@@ -382,6 +382,63 @@ export async function getDashboardStats(_req: Request, res: Response): Promise<v
       include: { user: { select: { name: true, phone: true } } },
     }).catch(() => []);
 
+    // ── User Growth (last 30 days) ───────────────────────────────────────────
+    const thirtyAgo = new Date();
+    thirtyAgo.setDate(thirtyAgo.getDate() - 29);
+    thirtyAgo.setHours(0, 0, 0, 0);
+
+    const newUsersByDay = await prisma.$queryRaw<Array<{ d: Date; c: bigint }>>`
+      SELECT date_trunc('day', "createdAt") AS d, COUNT(*)::bigint AS c
+      FROM "User"
+      WHERE "createdAt" >= ${thirtyAgo}
+      GROUP BY 1 ORDER BY 1 ASC
+    `.catch(() => [] as Array<{ d: Date; c: bigint }>);
+
+    const dayMap = new Map<string, number>();
+    for (const row of newUsersByDay) {
+      const key = new Date(row.d).toISOString().slice(0, 10);
+      dayMap.set(key, Number(row.c));
+    }
+
+    const userGrowth: Array<{ date: string; users: number }> = [];
+    for (let i = 0; i < 30; i++) {
+      const dt = new Date(thirtyAgo);
+      dt.setDate(dt.getDate() + i);
+      const key = dt.toISOString().slice(0, 10);
+      userGrowth.push({
+        date: dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+        users: dayMap.get(key) || 0,
+      });
+    }
+
+    // ── Coin Distribution (earned vs spent vs redeemed, all-time) ────────────
+    const REDEEM_TYPES = [
+      TransactionType.REDEEM_UPI,
+      TransactionType.REDEEM_GIFT_CARD,
+      TransactionType.REDEEM_PAYTM,
+    ].filter(Boolean);
+
+    const [earnedAgg, spentAgg, redeemedAgg] = await Promise.all([
+      prisma.transaction.aggregate({
+        where: { type: { in: EARN_TYPES } },
+        _sum: { amount: true },
+      }).catch(() => ({ _sum: { amount: 0 } })),
+      prisma.transaction.aggregate({
+        where: { amount: { lt: 0 }, type: { notIn: REDEEM_TYPES as any } },
+        _sum: { amount: true },
+      }).catch(() => ({ _sum: { amount: 0 } })),
+      prisma.transaction.aggregate({
+        where: { type: { in: REDEEM_TYPES as any } },
+        _sum: { amount: true },
+      }).catch(() => ({ _sum: { amount: 0 } })),
+    ]);
+
+    const coinDistribution = {
+      earned:   Math.abs(earnedAgg._sum.amount || 0),
+      spent:    Math.abs(spentAgg._sum.amount || 0),
+      redeemed: Math.abs(redeemedAgg._sum.amount || 0),
+    };
+
     success(res, {
       users: {
         total: totalUsers,
@@ -398,6 +455,8 @@ export async function getDashboardStats(_req: Request, res: Response): Promise<v
       claims: { pending: pendingClaims },
       transactions: totalTransactions,
       recentTransactions,
+      userGrowth,
+      coinDistribution,
     });
   } catch (err) {
     logger.error('getDashboardStats error:', err);
