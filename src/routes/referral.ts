@@ -33,6 +33,10 @@ router.post('/track-install',                         trackInstall);
 router.get('/milestones',             authMiddleware, getMilestones);
 router.post('/milestones/:id/claim',  authMiddleware, fraudCheck('referral_claim'), claimMilestone);
 
+// ─── Admin: analytics ─────────────────────────────────────────────────────────
+import { getReferralAnalytics } from '../controllers/admin.referralAnalytics.controller';
+router.get('/admin/analytics', adminAuthMiddleware, getReferralAnalytics);
+
 // ─── Admin: settings ──────────────────────────────────────────────────────────
 router.get('/admin/settings', adminAuthMiddleware, async (_req: Request, res: Response) => {
   const s = await prisma.referralSettings.findFirst().catch(() => null);
