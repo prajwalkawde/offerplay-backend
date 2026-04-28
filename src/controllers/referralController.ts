@@ -22,7 +22,7 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
       await prisma.user.update({ where: { id: userId }, data: { referralCode } });
     }
 
-    const [settings, referrals, commissions] = await Promise.all([
+    const [settings, referrals, commissions, link, milestones] = await Promise.all([
       prisma.referralSettings.findFirst().catch(() => null),
       prisma.referral.findMany({
         where: { referrerId: userId },
@@ -32,8 +32,16 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
       prisma.referralCommission.findMany({
         where: { referrerId: userId },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 100,
       }),
+      prisma.referralLink.findFirst({
+        where: { userId },
+        select: { clicks: true, installs: true, conversions: true },
+      }).catch(() => null),
+      prisma.referralMilestone.findMany({
+        where: { isActive: true },
+        orderBy: { requiredReferrals: 'asc' },
+      }).catch(() => []),
     ]);
 
     const cfg = settings ?? {
@@ -60,16 +68,81 @@ export const getReferralDashboard = async (req: Request, res: Response): Promise
       ? referrals.reduce((s, r) => s + (r.coinsEarned || 0), 0)
       : 0;
 
+    // ── Pipeline funnel: invited → signed up → active → earning ───────────
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+    const activeCount = referrals.filter(r => r.status === 'active').length;
+    const earningRefereeIds = new Set(
+      creditedComms
+        .filter(c => new Date(c.createdAt) >= thirtyDaysAgo)
+        .map(c => c.referredId),
+    );
+    const pipeline = {
+      invited:  link?.clicks ?? 0,             // people who tapped your share link
+      signedUp: referrals.length,              // total accounts created via your code
+      active:   activeCount,                   // passed the 500-coin earning gate
+      earning:  earningRefereeIds.size,        // earned commission for you in last 30d
+    };
+
+    // ── Top 5 friends by lifetime commission contribution ────────────────
+    const friendCommission = new Map<string, number>();
+    for (const c of creditedComms) {
+      friendCommission.set(c.referredId, (friendCommission.get(c.referredId) ?? 0) + c.amount);
+    }
+    const topFriends = referrals
+      .map(r => ({
+        userId:     r.referredId,
+        name:       maskName(r.referred.name || 'User'),
+        avatar:     (r.referred.name?.charAt(0) || 'U').toUpperCase(),
+        commission: friendCommission.get(r.referredId) ?? 0,
+        joinedAt:   r.createdAt,
+      }))
+      .sort((a, b) => b.commission - a.commission)
+      .slice(0, 5);
+
+    // ── Last 30 days commission totals (per day) — sparkline data ─────────
+    const dailyMap = new Map<string, number>();
+    for (const c of creditedComms) {
+      const created = new Date(c.createdAt);
+      if (created < thirtyDaysAgo) continue;
+      const day = created.toISOString().slice(0, 10); // YYYY-MM-DD
+      dailyMap.set(day, (dailyMap.get(day) ?? 0) + c.amount);
+    }
+    const dailyLast30 = Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(Date.now() - (29 - i) * 86400000);
+      const key = d.toISOString().slice(0, 10);
+      return { date: key, amount: dailyMap.get(key) ?? 0 };
+    });
+
+    // ── Next milestone progress (what they're working toward) ─────────────
+    const nextMilestone = milestones.find(m => m.requiredReferrals > activeCount);
+    const nextMilestoneInfo = nextMilestone ? {
+      id:            nextMilestone.id,
+      title:         nextMilestone.title,
+      badgeEmoji:    nextMilestone.badgeEmoji,
+      rewardType:    nextMilestone.rewardType,
+      rewardCoins:   nextMilestone.rewardCoins,
+      rewardTickets: nextMilestone.rewardTickets,
+      itemName:      nextMilestone.itemName,
+      required:      nextMilestone.requiredReferrals,
+      currentCount:  activeCount,
+      remaining:     Math.max(0, nextMilestone.requiredReferrals - activeCount),
+      progress:      Math.min(1, activeCount / Math.max(1, nextMilestone.requiredReferrals)),
+    } : null;
+
     success(res, {
       referralCode,
       stats: {
         totalReferrals:  referrals.length,
-        activeReferrals: referrals.filter(r => r.status === 'active').length,
+        activeReferrals: activeCount,
         totalEarned:     totalEarned + legacyTotal,
         thisMonth,
         pending,
         paid: totalEarned,
       },
+      pipeline,
+      topFriends,
+      dailyLast30,
+      nextMilestone: nextMilestoneInfo,
       settings: {
         signupBonus:             cfg.signupBonus,
         referrerSignupBonus:     cfg.referrerSignupBonus,
